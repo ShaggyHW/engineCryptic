@@ -354,10 +354,14 @@ object Entitlements {
 
     // A store older than the game split ignores ?game= and sends the OSRS list, so an unlabelled answer
     // counts as no answer and nothing is gated.
+    //
+    // The store lists a script taken off sale only to an account that still owns it, so the request carries the
+    // player's token when signed in; without it an owner would lose the script the moment it stops being sold.
     private fun catalogueFor(game: String): String? = runCatching {
         val url = "${storeBase()}/api/v1/hub/plugins.json?game=$game"
-        val request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build()
-        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+        val builder = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15)).GET()
+        token()?.takeIf { it.isNotBlank() }?.let { builder.header("Authorization", "Bearer ${it.trim()}") }
+        val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() !in 200..299) return null
         val answered = response.headers().firstValue("X-ProjectX-Game").orElse(null)
         if (answered != game) {
