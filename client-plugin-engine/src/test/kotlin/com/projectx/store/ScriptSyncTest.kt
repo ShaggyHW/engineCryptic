@@ -27,6 +27,7 @@ class ScriptSyncTest {
 
     @BeforeTest
     fun setUp() {
+        EncryptedScripts.forgetAll()
         dir = Files.createTempDirectory("projectx-sync")
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/jar") { exchange ->
@@ -44,6 +45,14 @@ class ScriptSyncTest {
     fun tearDown() {
         server.stop(0)
         dir.toFile().deleteRecursively()
+        EncryptedScripts.forgetAll()
+    }
+
+    private fun hold(name: String, version: String) = EncryptedScripts.hold(PxeRecord(name, version, null), blob)
+
+    private fun saveEncrypted(version: String = "3.6.2") {
+        Files.write(dir.resolve("GatesOfElidinis-$version.pxe"), blob)
+        Files.writeString(dir.resolve("GatesOfElidinis-$version.pxe.json"), PxeRecord("GatesOfElidinis", version, null).encode())
     }
 
     private fun gates(sha: String? = null, version: String = "3.6.2", free: Boolean = false) = StoreJar(
@@ -98,10 +107,13 @@ class ScriptSyncTest {
         val current = StoreJar("Rasial", "2.4.0", "", null, null)
         val notOwned = StoreJar("Vault", "1.0.0", "", null, null)
 
+        hold("GatesOfElidinis", "3.6.1")
+        hold("Rasial", "2.4.0")
+
         val wanted = ScriptSync.missing(
             owned = setOf("GatesOfElidinis", "Rasial"),
             catalogue = listOf(owned, current, notOwned),
-            present = setOf("GatesOfElidinis-3.6.1.pxe", "GatesOfElidinis-3.6.1.pxe.json", "Rasial-2.4.0.pxe", "Rasial-2.4.0.pxe.json"),
+            present = emptySet(),
         )
 
         assertEquals(listOf(owned), wanted)
@@ -122,15 +134,17 @@ class ScriptSyncTest {
     }
 
     @Test
-    fun `an encrypted build without its record is not counted as installed`() {
-        val wanted = ScriptSync.missing(setOf("GatesOfElidinis"), listOf(gates()), setOf("GatesOfElidinis-3.6.2.pxe"))
+    fun `an encrypted build on disk no longer counts as installed until it is in memory`() {
+        val wanted = ScriptSync.missing(
+            setOf("GatesOfElidinis"), listOf(gates()), setOf("GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json"),
+        )
         assertEquals(listOf(gates()), wanted)
     }
 
     @Test
-    fun `every other build of a script goes once its encrypted build is in place`() {
+    fun `every build on disk of a script goes once its encrypted build is held`() {
+        hold("GatesOfElidinis", "3.6.2")
         val present = setOf(
-            "GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json",
             "GatesOfElidinis-3.6.2.jar", "GatesOfElidinis-3.6.1.pxe", "GatesOfElidinis-3.6.1.pxe.json",
             "gates-of-elidinis.jar", "Rasial-2.4.0.jar", "Rasial-2.3.0.jar",
         )
@@ -144,26 +158,27 @@ class ScriptSyncTest {
     }
 
     @Test
-    fun `a build the launcher installed while the game ran gets the list rescanned`() {
-        val onDisk = ScriptSync.ownedOnDisk(
-            owned = setOf("GatesOfElidinis"),
-            catalogue = listOf(gates()),
-            present = setOf("GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json"),
+    fun `a build that arrived while the game ran gets the list rescanned`() {
+        hold("GatesOfElidinis", "3.6.2")
+        val available = ScriptSync.ownedPresent(
+            owned = setOf("GatesOfElidinis", "Rasial"),
+            catalogue = listOf(gates(), StoreJar("Rasial", "2.4.0", "", null, null, free = true)),
+            present = setOf("Rasial-2.4.0.jar"),
         )
-        assertEquals(setOf("GatesOfElidinis"), onDisk)
-        assertTrue(ScriptSync.needsRescan(onDisk, registered = setOf("Rasial")))
-        assertFalse(ScriptSync.needsRescan(onDisk, registered = setOf("GatesOfElidinis", "Rasial")))
+        assertEquals(setOf("GatesOfElidinis", "Rasial"), available)
+        assertTrue(ScriptSync.needsRescan(available, registered = setOf("Rasial")))
+        assertFalse(ScriptSync.needsRescan(available, registered = setOf("GatesOfElidinis", "Rasial")))
     }
 
     @Test
     fun `a download that failed does not rescan every five minutes for nothing`() {
-        val onDisk = ScriptSync.ownedOnDisk(setOf("GatesOfElidinis"), listOf(gates()), present = emptySet())
-        assertTrue(onDisk.isEmpty())
-        assertFalse(ScriptSync.needsRescan(onDisk, registered = emptySet()))
+        val available = ScriptSync.ownedPresent(setOf("GatesOfElidinis"), listOf(gates()), present = emptySet())
+        assertTrue(available.isEmpty())
+        assertFalse(ScriptSync.needsRescan(available, registered = emptySet()))
     }
 
     @Test
-    fun `a bought script arrives encrypted with its record and every older build goes`() {
+    fun `a bought script is held in memory and every build of it on disk goes`() {
         serveEncrypted()
         Files.writeString(dir.resolve("GatesOfElidinis-3.6.1.jar"), "old plaintext")
         Files.writeString(dir.resolve("GatesOfElidinis-3.6.1.pxe"), "old encrypted")
@@ -173,48 +188,47 @@ class ScriptSyncTest {
         val installed = sync(gates(sha("the plaintext jar".toByteArray())))
 
         assertEquals(1, installed.size)
-        assertContentEquals(blob, Files.readAllBytes(dir.resolve("GatesOfElidinis-3.6.2.pxe")))
-        assertEquals(
-            PxeRecord("GatesOfElidinis", "3.6.2", sha("the plaintext jar".toByteArray())),
-            PxeRecord.decode(Files.readString(dir.resolve("GatesOfElidinis-3.6.2.pxe.json"))),
-        )
-        assertEquals(setOf("GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json"), files())
+        assertTrue(EncryptedScripts.holds("GatesOfElidinis", "3.6.2"))
+        assertEquals(PxeRecord("GatesOfElidinis", "3.6.2", sha("the plaintext jar".toByteArray())), EncryptedScripts.heldRecord("GatesOfElidinis"))
+        assertTrue(files().isEmpty(), files().toString())
         assertEquals("Bearer tok", lastAuth)
         assertEquals("game=rs3&format=pxe1", lastQuery)
     }
 
     @Test
-    fun `a plaintext jar of the current release is replaced by the encrypted build`() {
+    fun `a plaintext jar of the current release is replaced by the encrypted build in memory`() {
         serveEncrypted()
         Files.writeString(dir.resolve("GatesOfElidinis-3.6.2.jar"), "plaintext from an older launcher")
 
         sync(gates())
 
-        assertEquals(setOf("GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json"), files())
+        assertTrue(files().isEmpty(), files().toString())
+        assertTrue(EncryptedScripts.holds("GatesOfElidinis", "3.6.2"))
     }
 
     @Test
-    fun `a plaintext jar an older launcher wrote beside the encrypted build is removed without a download`() {
+    fun `an encrypted build and plaintext jar an older launcher saved are taken off the disk without a download`() {
         status = 500
-        Files.write(dir.resolve("GatesOfElidinis-3.6.2.pxe"), blob)
-        Files.writeString(dir.resolve("GatesOfElidinis-3.6.2.pxe.json"), PxeRecord("GatesOfElidinis", "3.6.2", null).encode())
+        saveEncrypted()
         Files.writeString(dir.resolve("GatesOfElidinis-3.6.2.jar"), "plaintext from an older launcher")
 
         assertTrue(sync(gates()).isEmpty())
 
         assertEquals(null, lastAuth)
-        assertEquals(setOf("GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json"), files())
+        assertTrue(files().isEmpty(), files().toString())
+        assertTrue(EncryptedScripts.holds("GatesOfElidinis", "3.6.2"))
     }
 
     @Test
     fun `a download labelled encrypted that is not is not installed`() {
         served = "PK\u0003\u0004 a plain jar".toByteArray()
         servedFormat = "pxe1"
-        Files.writeString(dir.resolve("GatesOfElidinis-3.6.1.pxe"), "old encrypted")
+        Files.writeString(dir.resolve("GatesOfElidinis-3.6.1.jar"), "old plaintext")
 
         assertTrue(sync(gates()).isEmpty())
 
-        assertEquals(setOf("GatesOfElidinis-3.6.1.pxe"), files())
+        assertEquals(setOf("GatesOfElidinis-3.6.1.jar"), files())
+        assertFalse(EncryptedScripts.holdsAny("GatesOfElidinis"))
     }
 
     @Test
@@ -264,9 +278,20 @@ class ScriptSyncTest {
     }
 
     @Test
-    fun `nothing is fetched when the current build is already there`() {
-        Files.write(dir.resolve("GatesOfElidinis-3.6.2.pxe"), blob)
-        Files.writeString(dir.resolve("GatesOfElidinis-3.6.2.pxe.json"), PxeRecord("GatesOfElidinis", "3.6.2", null).encode())
+    fun `a script whose access has ended is not kept in memory`() {
+        hold("GatesOfElidinis", "3.6.2")
+        hold("Rasial", "2.4.0")
+        status = 500
+
+        ScriptSync.sync(setOf("GatesOfElidinis"), listOf(gates()), "tok", HttpClient.newHttpClient(), dir)
+
+        assertTrue(EncryptedScripts.holds("GatesOfElidinis", "3.6.2"))
+        assertFalse(EncryptedScripts.holdsAny("Rasial"))
+    }
+
+    @Test
+    fun `nothing is fetched when the current build is already held`() {
+        hold("GatesOfElidinis", "3.6.2")
         status = 500
 
         val installed = sync(gates())

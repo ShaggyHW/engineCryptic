@@ -918,6 +918,8 @@
     const busy = isBusy(state.busyStore, s.internal_name);
     const installed = s.install_state === "current";
     const outdated = s.install_state === "outdated";
+    // Paid scripts the engine downloads into the game at every start; nothing of them is saved on the PC.
+    const inGame = s.install_state === "in_game";
     const row = el("div", "plugin");
 
     const title = el("div", "row-title");
@@ -929,6 +931,7 @@
     if (s.sale_percent && !s.free) title.appendChild(badge(s.sale_percent + "% off", "ok"));
     if (s.installable && installed) title.appendChild(badge("Installed", "ok"));
     if (s.installable && outdated) title.appendChild(badge("Update available", "warn"));
+    if (s.installable && inGame && s.owned) title.appendChild(badge("Loads in game", "ok"));
     row.appendChild(title);
 
     const metaLine = el("div", "plugin-meta");
@@ -958,13 +961,20 @@
         el(
           "p",
           "plugin-desc",
-          "Your trial hour starts when you launch the game with Project X loaded, not now. Install it first."
+          inGame
+            ? "Your trial hour starts when you launch the game with Project X loaded, not now."
+            : "Your trial hour starts when you launch the game with Project X loaded, not now. Install it first."
         )
       );
     }
 
     const actions = el("div", "row-actions");
-    if (s.owned && s.installable) {
+    if (s.owned && s.installable && inGame) {
+      row.appendChild(
+        el("p", "plugin-desc", "Downloads into the game each time you start it with Project X. Nothing is saved on your PC.")
+      );
+    }
+    if (s.owned && s.installable && !inGame) {
       const label = busy ? "…" : outdated ? "Update" : installed ? "Reinstall" : "Install";
       actions.appendChild(
         button(label, "btn-accent", busy, () => {

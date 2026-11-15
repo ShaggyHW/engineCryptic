@@ -24,8 +24,9 @@ internal data class StoreJar(
 )
 
 /**
- * Puts the current build of every store script the account owns into the scripts folder. Paid scripts arrive
- * encrypted, as `<name>-<version>.pxe` beside a `.pxe.json` record; free ones stay plain jars.
+ * Brings in the current build of every store script the account owns. Paid scripts arrive encrypted and are held in
+ * memory only ([EncryptedScripts]), so nothing of them is saved on the PC and they download again at every start; free
+ * ones are plain jars in the scripts folder.
  */
 internal object ScriptSync {
 
@@ -52,14 +53,11 @@ internal object ScriptSync {
         return rest != file && rest.firstOrNull()?.isDigit() == true
     }
 
-    private fun hasEncrypted(jar: StoreJar, present: Set<String>): Boolean {
-        val pxe = pxeName(jar.internalName, jar.version)
-        return pxe in present && PxeRecord.fileFor(pxe) in present
-    }
+    private fun hasEncrypted(jar: StoreJar): Boolean = EncryptedScripts.holds(jar.internalName, jar.version)
 
     // A paid script's plain jar from an older launcher or engine is replaced by its encrypted build.
     fun isCurrent(jar: StoreJar, present: Set<String>): Boolean =
-        hasEncrypted(jar, present) ||
+        hasEncrypted(jar) ||
             jarName(jar.internalName, jar.version) in present && (jar.free || plainKey(jar) in servedPlain)
 
     private fun plainKey(jar: StoreJar) = "${jar.internalName}|${jar.version}"
@@ -67,12 +65,9 @@ internal object ScriptSync {
     fun missing(owned: Set<String>, catalogue: List<StoreJar>, present: Set<String>): List<StoreJar> =
         catalogue.filter { it.internalName in owned && !isCurrent(it, present) }
 
-    /** Every other build of a script whose current encrypted build is in place, plaintext jars included. */
+    /** Every build on disk of a script whose current encrypted build is held in memory, plaintext jars included. */
     fun superseded(catalogue: List<StoreJar>, present: Set<String>): Set<String> =
-        catalogue.filter { hasEncrypted(it, present) }.flatMapTo(HashSet()) { jar ->
-            val pxe = pxeName(jar.internalName, jar.version)
-            present.filter { it != pxe && it != PxeRecord.fileFor(pxe) && isBuildOf(it, jar) }
-        }
+        catalogue.filter { hasEncrypted(it) }.flatMapTo(HashSet()) { jar -> present.filter { isBuildOf(it, jar) } }
 
     fun sync(
         owned: Set<String>,
@@ -82,31 +77,35 @@ internal object ScriptSync {
         dir: Path,
     ): List<StoreJar> {
         Files.createDirectories(dir)
+        // Builds an older engine or launcher saved go into memory first, so they are not downloaded again.
+        EncryptedScripts.adopt(dir.toFile())
+        EncryptedScripts.retainOwned(owned)
         val present = listed(dir)
         val installed = missing(owned, catalogue, present).filter { install(it, token, http, dir, present) }
         val communityInstalled = needsCommunityJar(owned, catalogue, present) && installCommunityJar(http, dir)
         superseded(catalogue, listed(dir)).forEach { runCatching { Files.deleteIfExists(dir.resolve(it)) } }
 
-        // Also catches a build the launcher installed: on disk, owned, but not yet in the script list.
-        val onDisk = ownedOnDisk(owned, catalogue, listed(dir))
+        // Also catches a build the launcher installed: present, owned, but not yet in the script list.
+        val available = ownedPresent(owned, catalogue, listed(dir))
         GameThread.post {
             val registered = ScriptExecutor.scripts.values.mapTo(HashSet()) { it.scriptClass.simpleName }
             // A rescan only rebuilds the list of available scripts; running ones are untouched.
-            if (communityInstalled || needsRescan(onDisk, registered)) ScriptExecutor.loadScripts()
+            if (communityInstalled || needsRescan(available, registered)) ScriptExecutor.loadScripts()
             ScriptLibrary.addOwned(owned)
         }
         return installed
     }
 
-    fun ownedOnDisk(owned: Set<String>, catalogue: List<StoreJar>, present: Set<String>): Set<String> =
+    /** Owned scripts whose current build is here: held in memory, or a plain jar in the folder. */
+    fun ownedPresent(owned: Set<String>, catalogue: List<StoreJar>, present: Set<String>): Set<String> =
         catalogue
             .filter {
                 it.internalName in owned &&
-                    (hasEncrypted(it, present) || jarName(it.internalName, it.version) in present)
+                    (hasEncrypted(it) || jarName(it.internalName, it.version) in present)
             }
             .mapTo(HashSet()) { it.internalName }
 
-    fun needsRescan(ownedOnDisk: Set<String>, registered: Set<String>): Boolean = !registered.containsAll(ownedOnDisk)
+    fun needsRescan(ownedPresent: Set<String>, registered: Set<String>): Boolean = !registered.containsAll(ownedPresent)
 
     private fun listed(dir: Path): Set<String> =
         Files.list(dir).use { files -> files.map { it.fileName.toString() }.toList().toSet() }
@@ -132,7 +131,9 @@ internal object ScriptSync {
             }
 
             val kept = if (encrypted) {
-                writeEncrypted(jar, bytes, dir)
+                // Memory only; every build of it on disk goes below.
+                EncryptedScripts.hold(PxeRecord(jar.internalName, jar.version, jar.sha256), bytes)
+                emptySet()
             } else {
                 if (jar.sha256 != null && !jar.sha256.equals(hex(bytes), ignoreCase = true)) {
                     println("[store] ${jar.internalName} ${jar.version} did not match its published checksum; not installed.")
@@ -148,21 +149,12 @@ internal object ScriptSync {
             present.filter { it !in kept && isBuildOf(it, jar) }.forEach { stale ->
                 runCatching { Files.deleteIfExists(dir.resolve(stale)) }
             }
-            println("[store] installed ${jar.internalName} ${jar.version}; it is in your Scripts tab.")
+            println("[store] ${if (encrypted) "loaded" else "installed"} ${jar.internalName} ${jar.version}; it is in your Scripts tab.")
             true
         }.getOrElse {
             println("[store] could not install ${jar.internalName} ${jar.version}: ${it.message}")
             false
         }
-
-    // The record goes first, so a `.pxe` is never on disk without the names its key and AAD need.
-    private fun writeEncrypted(jar: StoreJar, blob: ByteArray, dir: Path): Set<String> {
-        val pxe = pxeName(jar.internalName, jar.version)
-        val record = PxeRecord.fileFor(pxe)
-        writeAtomically(dir, record, PxeRecord(jar.internalName, jar.version, jar.sha256).encode().toByteArray())
-        writeAtomically(dir, pxe, blob)
-        return setOf(pxe, record)
-    }
 
     private fun writeAtomically(dir: Path, name: String, bytes: ByteArray) {
         val temp = dir.resolve(".$name.engine.part")

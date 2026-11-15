@@ -247,10 +247,15 @@ pub fn installed_engine_jar(dir: &Path) -> Option<PathBuf> {
 
 /// The resource an engine jar carries once it can load `.pxe` scripts.
 const ENCRYPTED_SCRIPTS_MARKER: &[u8] = b"projectx/capabilities/script-format-pxe1";
+/// The resource an engine jar carries once it downloads paid scripts into memory itself. Not a substring of the
+/// marker above, because [`jar_lists_entry`] matches by substring.
+const MEMORY_SCRIPTS_MARKER: &[u8] = b"projectx/capabilities/script-memory-only";
 
 type EncryptedScriptsProbe = (PathBuf, u64, Option<std::time::SystemTime>, bool);
 
 static ENCRYPTED_SCRIPTS_PROBE: std::sync::Mutex<Option<EncryptedScriptsProbe>> =
+    std::sync::Mutex::new(None);
+static MEMORY_SCRIPTS_PROBE: std::sync::Mutex<Option<EncryptedScriptsProbe>> =
     std::sync::Mutex::new(None);
 
 /// Whether the engine an injection would use can load encrypted paid scripts.
@@ -259,6 +264,18 @@ static ENCRYPTED_SCRIPTS_PROBE: std::sync::Mutex<Option<EncryptedScriptsProbe>> 
 /// would vanish. With no engine installed yet the answer is yes: the one
 /// [`ensure`] installs is the current release.
 pub fn engine_reads_encrypted_scripts() -> bool {
+    engine_has_marker(&ENCRYPTED_SCRIPTS_PROBE, ENCRYPTED_SCRIPTS_MARKER)
+}
+
+/// Whether the engine an injection would use fetches paid scripts into memory itself, so the launcher must not save
+/// them. An older engine needs the launcher to put them on disk, or they would vanish. With no engine installed yet
+/// the answer is yes: the one [`ensure`] installs is the current release.
+pub fn engine_keeps_scripts_in_memory() -> bool {
+    engine_has_marker(&MEMORY_SCRIPTS_PROBE, MEMORY_SCRIPTS_MARKER)
+}
+
+// Cached per jar, by path, size and modified time: the engine jar is large and this is asked per catalogue row.
+fn engine_has_marker(cache: &std::sync::Mutex<Option<EncryptedScriptsProbe>>, marker: &[u8]) -> bool {
     let Some(jar) = resolved_home().and_then(|home| installed_engine_jar(&home)) else {
         return true;
     };
@@ -266,13 +283,13 @@ pub fn engine_reads_encrypted_scripts() -> bool {
     let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let modified = meta.and_then(|m| m.modified().ok());
 
-    let mut probe = ENCRYPTED_SCRIPTS_PROBE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut probe = cache.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((path, l, m, answer)) = probe.as_ref() {
         if *path == jar && *l == len && *m == modified {
             return *answer;
         }
     }
-    let answer = jar_lists_entry(&jar, ENCRYPTED_SCRIPTS_MARKER);
+    let answer = jar_lists_entry(&jar, marker);
     *probe = Some((jar, len, modified, answer));
     answer
 }

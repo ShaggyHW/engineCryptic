@@ -48,6 +48,7 @@ class EncryptedScriptsTest {
 
     @BeforeTest
     fun setUp() {
+        EncryptedScripts.forgetAll()
         dir = Files.createTempDirectory("projectx-pxe").toFile()
         servedKey = key
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -67,6 +68,7 @@ class EncryptedScriptsTest {
     fun tearDown() {
         server.stop(0)
         dir.deleteRecursively()
+        EncryptedScripts.forgetAll()
     }
 
     private val storeBase get() = "http://127.0.0.1:${server.address.port}"
@@ -99,15 +101,21 @@ class EncryptedScriptsTest {
     private fun sha(bytes: ByteArray) =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-    private fun installed(plain: ByteArray = fixtureJar(), sha256: String? = sha(plain)): File {
+    private fun held(plain: ByteArray = fixtureJar(), sha256: String? = sha(plain)): HeldBuild =
+        EncryptedScripts.hold(PxeRecord("GatesOfElidinis", "3.6.2", sha256), encrypt(plain, key, Pxe1.aad("GatesOfElidinis", "3.6.2")))
+
+    // What an engine before memory-only loading, or an older launcher, left in the scripts folder.
+    private fun savedByAnOlderBuild(plain: ByteArray = fixtureJar()): File {
         val pxe = File(dir, ScriptSync.pxeName("GatesOfElidinis", "3.6.2"))
         pxe.writeBytes(encrypt(plain, key, Pxe1.aad("GatesOfElidinis", "3.6.2")))
-        File(dir, PxeRecord.fileFor(pxe.name)).writeText(PxeRecord("GatesOfElidinis", "3.6.2", sha256).encode())
+        File(dir, PxeRecord.fileFor(pxe.name)).writeText(PxeRecord("GatesOfElidinis", "3.6.2", sha(plain)).encode())
         return pxe
     }
 
-    private fun load(pxe: File) =
-        EncryptedScripts.load(pxe, "tok", HttpClient.newHttpClient(), storeBase, ClassLoader.getPlatformClassLoader())
+    private fun load(build: HeldBuild) =
+        EncryptedScripts.load(build, dir, "tok", HttpClient.newHttpClient(), storeBase, ClassLoader.getPlatformClassLoader())
+
+    private fun holdsGates() = EncryptedScripts.holds("GatesOfElidinis", "3.6.2")
 
     @Test
     fun `decrypts the shared test vector`() {
@@ -150,6 +158,11 @@ class EncryptedScriptsTest {
     }
 
     @Test
+    fun `the engine jar says it keeps paid scripts in memory, so the launcher leaves them to it`() {
+        assertNotNull(javaClass.classLoader.getResource("projectx/capabilities/script-memory-only"))
+    }
+
+    @Test
     fun `the in-memory loader serves classes and resources from the jar`() {
         val jar = InMemoryJar.read(fixtureJar())
         val loader = InMemoryJarClassLoader(jar, ClassLoader.getPlatformClassLoader(), null)
@@ -171,69 +184,96 @@ class EncryptedScriptsTest {
     }
 
     @Test
-    fun `an owned encrypted script loads with a key fetched for it`() {
-        val pxe = installed()
+    fun `an owned encrypted script loads from memory with a key fetched for it`() {
+        val build = held()
 
-        val outcome = assertIs<EncryptedScripts.Outcome.Ready>(load(pxe))
+        val outcome = assertIs<EncryptedScripts.Outcome.Ready>(load(build))
 
         assertEquals(listOf("com.projectx.store.EncryptedFixture"), outcome.loaded.classNames)
         val type = Class.forName(outcome.loaded.classNames.single(), false, outcome.loaded.loader)
         assertSame(outcome.loaded.loader, type.classLoader)
+        // The script library reads the origin from this name; the file itself is never written.
+        assertEquals("GatesOfElidinis-3.6.2.pxe", File(type.protectionDomain.codeSource.location.toURI()).name)
         assertEquals("/api/v1/hub/jar-keys/GatesOfElidinis/3.6.2", lastKeyPath)
         assertEquals("game=rs3", lastKeyQuery)
         assertEquals("Bearer tok", lastAuth)
-        assertTrue(pxe.isFile)
+        assertTrue(holdsGates())
+        assertTrue(dir.list()!!.isEmpty())
     }
 
     @Test
-    fun `a refused key skips the script and keeps the file`() {
+    fun `a refused key skips the script and keeps the build`() {
         keyStatus = 403
-        val pxe = installed()
+        val build = held()
 
-        val outcome = assertIs<EncryptedScripts.Outcome.Skipped>(load(pxe))
+        val outcome = assertIs<EncryptedScripts.Outcome.Skipped>(load(build))
 
         assertTrue("refused its key (403)" in outcome.message, outcome.message)
-        assertTrue(pxe.isFile)
+        assertTrue(holdsGates())
     }
 
     @Test
-    fun `a key that does not open the build deletes it so the next sync downloads it again`() {
+    fun `a key that does not open the build drops it so the next sync downloads it again`() {
         servedKey = ByteArray(32) { 7 }
-        val pxe = installed()
+        val build = held()
 
-        assertIs<EncryptedScripts.Outcome.Discarded>(load(pxe))
+        assertIs<EncryptedScripts.Outcome.Discarded>(load(build))
 
-        assertFalse(pxe.exists())
-        assertFalse(File(dir, PxeRecord.fileFor(pxe.name)).exists())
+        assertFalse(holdsGates())
     }
 
     @Test
-    fun `a store that cannot be reached skips the script this time and keeps the file`() {
-        val pxe = installed()
+    fun `a store that cannot be reached skips the script this time and keeps the build`() {
+        val build = held()
         server.stop(0)
 
-        assertIs<EncryptedScripts.Outcome.Skipped>(load(pxe))
+        assertIs<EncryptedScripts.Outcome.Skipped>(load(build))
 
-        assertTrue(pxe.isFile)
+        assertTrue(holdsGates())
     }
 
     @Test
     fun `a decrypted build that does not match its published checksum is not loaded`() {
-        val pxe = installed(sha256 = sha("another build".toByteArray()))
+        val build = held(sha256 = sha("another build".toByteArray()))
 
-        assertIs<EncryptedScripts.Outcome.Discarded>(load(pxe))
+        assertIs<EncryptedScripts.Outcome.Discarded>(load(build))
 
-        assertFalse(pxe.exists())
+        assertFalse(holdsGates())
     }
 
     @Test
-    fun `a build without its record is discarded rather than guessed at`() {
-        val pxe = installed()
+    fun `dropping a bad build leaves a newer download of the script alone`() {
+        servedKey = ByteArray(32) { 7 }
+        val bad = held()
+        val newer = held()
+
+        assertIs<EncryptedScripts.Outcome.Discarded>(load(bad))
+
+        assertTrue(holdsGates())
+        assertSame(newer.record, EncryptedScripts.heldRecord("GatesOfElidinis"))
+    }
+
+    @Test
+    fun `a build an older launcher saved moves into memory and off the disk`() {
+        savedByAnOlderBuild()
+
+        EncryptedScripts.adopt(dir)
+
+        assertTrue(dir.list()!!.isEmpty())
+        assertTrue(holdsGates())
+        assertIs<EncryptedScripts.Outcome.Ready>(load(assertNotNull(EncryptedScripts.heldBuild("GatesOfElidinis"))))
+    }
+
+    @Test
+    fun `a saved build without its record is deleted rather than guessed at`() {
+        val pxe = savedByAnOlderBuild()
         File(dir, PxeRecord.fileFor(pxe.name)).delete()
+        File(dir, "Rasial-2.4.0.pxe.json").writeText(PxeRecord("Rasial", "2.4.0", null).encode())
 
-        assertIs<EncryptedScripts.Outcome.Discarded>(load(pxe))
+        EncryptedScripts.adopt(dir)
 
-        assertFalse(pxe.exists())
+        assertTrue(dir.list()!!.isEmpty())
+        assertFalse(holdsGates())
         assertEquals(null, lastAuth)
     }
 

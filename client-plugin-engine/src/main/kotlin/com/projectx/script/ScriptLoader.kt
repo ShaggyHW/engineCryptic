@@ -41,21 +41,21 @@ class JarDirectoryScanner(
 ) : AbstractClassScanner.PathClassScanner(directoryPath) {
 
     override fun scan(): List<Class<*>> {
+        val dir = File(directoryPath)
+        // A `.pxe` an older launcher saved goes into memory, and off the disk, before anything is listed.
+        runCatching { EncryptedScripts.adopt(dir) }
         val plain = runCatching { scanJarFiles(getAbsolutePaths(findJarFiles())) }.getOrDefault(emptyList())
         val encrypted = runCatching {
-            EncryptedScripts.loaded(File(directoryPath)).flatMap { scriptClassesIn(it.classNames, it.loader) }
+            EncryptedScripts.loaded(dir).flatMap { scriptClassesIn(it.classNames, it.loader) }
         }.getOrDefault(emptyList())
         return plain + encrypted
     }
 
-    // A plaintext jar beside the encrypted build of the same release is a leftover, not a second copy to load.
+    // A plaintext jar of a release whose encrypted build is held is a leftover, not a second copy to load.
     private fun findJarFiles(): Array<String>? {
         val names = File(directoryPath).list() ?: return null
-        val encrypted = names.filter { it.endsWith(EncryptedScripts.EXTENSION) }.toSet()
-        return names.filter { name ->
-            name.lowercase().endsWith(FileExtensions.JAR) &&
-                name.dropLast(FileExtensions.JAR.length) + EncryptedScripts.EXTENSION !in encrypted
-        }.toTypedArray()
+        val held = EncryptedScripts.heldJarNames()
+        return names.filter { name -> name.lowercase().endsWith(FileExtensions.JAR) && name !in held }.toTypedArray()
     }
 
     // Enumerate class NAMES from the jars (bytecode only, no loading), then load each through a

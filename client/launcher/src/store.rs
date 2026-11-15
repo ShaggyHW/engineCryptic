@@ -366,7 +366,27 @@ pub async fn entitlements(client: &reqwest::Client) -> Result<Vec<Entitlement>> 
 }
 
 pub async fn install(client: &reqwest::Client, plugin: &StorePlugin) -> Result<PathBuf> {
+    if loads_in_game(plugin) {
+        bail!("{} is not saved on this PC: it loads in game", plugin.internal_name);
+    }
     install_with(client, plugin, crate::engine::engine_reads_encrypted_scripts()).await
+}
+
+/// Whether the engine fetches this script into memory each time the game starts, so the launcher saves nothing of it.
+/// Paid scripts only: free-claim scripts stay plain jars on disk.
+pub fn loads_in_game(plugin: &StorePlugin) -> bool {
+    loads_in_game_with(plugin, crate::engine::engine_keeps_scripts_in_memory())
+}
+
+fn loads_in_game_with(plugin: &StorePlugin, memory: bool) -> bool {
+    memory && plugin.paid && !plugin.free
+}
+
+/// Takes every build of a script that loads in game off the disk: a `.pxe` or plain jar an older launcher saved.
+pub fn remove_saved_builds(plugin: &StorePlugin) {
+    if let Ok(dir) = crate::plugins::scripts_dir() {
+        remove_stale(&dir, plugin, &[]);
+    }
 }
 
 /// `encrypted` is whether the engine can load a `.pxe`; without it a paid script installs as a plain jar.
@@ -456,9 +476,14 @@ pub enum InstallState {
     Missing,
     Current,
     Outdated,
+    /// Never saved: the engine downloads it into memory each time the game starts.
+    InGame,
 }
 
 pub fn install_state(plugin: &StorePlugin) -> InstallState {
+    if loads_in_game(plugin) {
+        return InstallState::InGame;
+    }
     install_state_for(plugin, crate::engine::engine_reads_encrypted_scripts())
 }
 
@@ -537,12 +562,29 @@ fn stale_builds(dir: &Path, plugin: &StorePlugin, keep: &[String]) -> Vec<String
 
 // Everything the account owns, at its current build; scripts whose access has lapsed are left alone.
 pub async fn sync_owned(client: &reqwest::Client) -> Result<Vec<(String, Result<String>)>> {
-    sync_owned_with(client, crate::engine::engine_reads_encrypted_scripts()).await
+    sync_owned_for(
+        client,
+        crate::engine::engine_reads_encrypted_scripts(),
+        crate::engine::engine_keeps_scripts_in_memory(),
+    )
+    .await
 }
 
+/// As an engine from before memory-only loading sees it: paid scripts are saved on disk.
+#[cfg(test)]
 async fn sync_owned_with(
     client: &reqwest::Client,
     encrypted: bool,
+) -> Result<Vec<(String, Result<String>)>> {
+    sync_owned_for(client, encrypted, false).await
+}
+
+/// `memory`: the engine fetches paid scripts into memory itself, so they are not downloaded here and any build of
+/// them left on disk is removed.
+async fn sync_owned_for(
+    client: &reqwest::Client,
+    encrypted: bool,
+    memory: bool,
 ) -> Result<Vec<(String, Result<String>)>> {
     if read_token().is_none() {
         return Ok(Vec::new());
@@ -556,7 +598,16 @@ async fn sync_owned_with(
     let dir = crate::plugins::scripts_dir()?;
 
     let mut moved = Vec::new();
-    for plugin in catalogue.iter().filter(|p| p.paid && owned.contains(&p.internal_name)) {
+    if memory {
+        // Owned or not: nothing of a paid script stays on the PC.
+        for plugin in catalogue.iter().filter(|p| loads_in_game_with(p, true)) {
+            remove_stale(&dir, plugin, &[]);
+        }
+    }
+    for plugin in catalogue
+        .iter()
+        .filter(|p| p.paid && owned.contains(&p.internal_name) && !loads_in_game_with(p, memory))
+    {
         let verb = match install_state_for(plugin, encrypted) {
             InstallState::Current => {
                 // A plaintext jar an older launcher left beside the encrypted build would load twice.
@@ -565,6 +616,8 @@ async fn sync_owned_with(
                 }
                 continue;
             }
+            // install_state_for never says this; the filter above already left these to the engine.
+            InstallState::InGame => continue,
             InstallState::Missing => "Installed",
             InstallState::Outdated => "Updated",
         };
@@ -1200,6 +1253,45 @@ mod tests {
         assert_eq!(files_in(&dir), vec!["GatesOfElidinis-3.6.2.pxe", "GatesOfElidinis-3.6.2.pxe.json"]);
         assert_eq!(server.requests().len(), 2);
         let _ = fs::remove_dir_all(home);
+    }
+
+    /// An engine that keeps paid scripts in memory fetches them itself: the launcher downloads nothing and takes any
+    /// build an older launcher saved off the disk, owned or not.
+    #[tokio::test]
+    async fn an_engine_that_keeps_scripts_in_memory_gets_nothing_saved_and_old_builds_go() {
+        let catalogue = r#"[{"internalName":"GatesOfElidinis","version":"3.6.2","paid":true},
+            {"internalName":"Rasial","version":"2.4.0","paid":true}]"#;
+        let server = FakeStore::start(vec![
+            Reply { status: "200 OK", game_header: Some("rs3"), format: None, body: catalogue.as_bytes().to_vec() },
+            json("200 OK", r#"{"entitlements":[{"internalName":"GatesOfElidinis","trial":false}]}"#),
+        ]);
+        let (_g, home) = scratch("memory-engine", server.port);
+        write_token(&StoredToken { token: "tok".into(), name: None, store: None }).unwrap();
+        let dir = crate::plugins::scripts_dir().unwrap();
+        fs::write(dir.join("GatesOfElidinis-3.6.2.pxe"), blob()).unwrap();
+        fs::write(dir.join("GatesOfElidinis-3.6.2.pxe.json"), b"{}").unwrap();
+        fs::write(dir.join("GatesOfElidinis-3.6.1.jar"), b"plaintext").unwrap();
+        fs::write(dir.join("Rasial-2.3.0.jar"), b"lapsed").unwrap();
+        fs::write(dir.join("MyOwnScript-1.0.0.jar"), b"the player's own").unwrap();
+
+        assert!(sync_owned_for(&client(), true, true).await.unwrap().is_empty());
+
+        assert_eq!(files_in(&dir), vec!["MyOwnScript-1.0.0.jar"]);
+        assert_eq!(server.requests().len(), 2);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn only_priced_scripts_load_in_game() {
+        let plugin = |paid: bool, free: bool| StorePlugin {
+            paid,
+            free,
+            ..serde_json::from_str(r#"{"internalName":"A","version":"1.0.0"}"#).unwrap()
+        };
+        assert!(loads_in_game_with(&plugin(true, false), true));
+        assert!(!loads_in_game_with(&plugin(true, true), true));
+        assert!(!loads_in_game_with(&plugin(false, false), true));
+        assert!(!loads_in_game_with(&plugin(true, false), false));
     }
 
     /// A script the account does not own never appears, listed or not.

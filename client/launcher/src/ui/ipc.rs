@@ -1748,6 +1748,13 @@ impl IpcState {
                     .into_iter()
                     .find(|p| p.internal_name == internal_name)
                 {
+                    Some(plugin) if store::loads_in_game(&plugin) => {
+                        store::remove_saved_builds(&plugin);
+                        Ok(format!(
+                            "{} downloads into the game each time you start it with Project X. Nothing is saved on your PC.",
+                            plugin.name.clone().unwrap_or_else(|| plugin.internal_name.clone())
+                        ))
+                    }
                     Some(plugin) => store::install(&client, &plugin)
                         .await
                         .map(|path| format!("Installed {}", path.display())),

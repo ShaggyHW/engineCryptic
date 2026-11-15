@@ -96,7 +96,10 @@ internal object Pxe1 {
     }
 }
 
-/** Which script and release a `.pxe` holds, beside it as `<name>.pxe.json`: the AAD and key URL need the real names. */
+/**
+ * Which script and release an encrypted build holds: the AAD and key URL need the real names. A `.pxe` saved by an
+ * older engine or launcher has it beside it as `<name>.pxe.json`.
+ */
 internal data class PxeRecord(val internalName: String, val version: String, val sha256: String?) {
 
     fun encode(): String = JsonObject().apply {
@@ -120,10 +123,15 @@ internal data class PxeRecord(val internalName: String, val version: String, val
     }
 }
 
+/** A paid script's encrypted build, held in memory only: it is never written to disk. */
+internal class HeldBuild(val record: PxeRecord, val blob: ByteArray)
+
 /**
- * Loads the encrypted paid scripts in the scripts folder. The key is fetched afresh for each load and lives only in
- * memory, as does the decrypted jar. Fetching runs off the game thread: a `.pxe` joins the script list on the rescan
- * its load posts, so a scan never waits on the network.
+ * Holds the encrypted paid scripts in memory and loads them. Nothing of a paid script is kept on disk: [ScriptSync]
+ * downloads each build straight into memory at every start, and a `.pxe` an older engine or launcher saved in the
+ * scripts folder is moved into memory and deleted ([adopt]). The key is fetched afresh for each load and lives only in
+ * memory, as does the decrypted jar. Fetching runs off the game thread: a build joins the script list on the rescan its
+ * load posts, so a scan never waits on the network.
  */
 internal object EncryptedScripts {
     const val EXTENSION = ".pxe"
@@ -137,6 +145,8 @@ internal object EncryptedScripts {
         data class Discarded(val message: String) : Outcome
     }
 
+    // By internal name: one build of a script at a time.
+    private val held = ConcurrentHashMap<String, HeldBuild>()
     private val ready = ConcurrentHashMap<String, Loaded>()
     private val loading = ConcurrentHashMap.newKeySet<String>()
     private val failedAt = ConcurrentHashMap<String, Long>()
@@ -154,29 +164,81 @@ internal object EncryptedScripts {
         }.apply { allowCoreThreadTimeOut(true) }
     }
 
-    /** The scripts already decrypted; any others are queued and arrive with a later rescan. */
+    fun hold(record: PxeRecord, blob: ByteArray): HeldBuild = HeldBuild(record, blob).also { held[record.internalName] = it }
+
+    internal fun heldBuild(internalName: String): HeldBuild? = held[internalName]
+
+    internal fun heldRecord(internalName: String): PxeRecord? = held[internalName]?.record
+
+    fun holds(internalName: String, version: String): Boolean = held[internalName]?.record?.version == version
+
+    fun holdsAny(internalName: String): Boolean = held.containsKey(internalName)
+
+    /** Forgets the builds of scripts the account no longer owns: not even an encrypted copy of them stays. */
+    fun retainOwned(owned: Set<String>) {
+        held.keys.retainAll(owned)
+    }
+
+    /** The plain jar names of the builds held, so a leftover plain jar of the same release is not loaded beside one. */
+    fun heldJarNames(): Set<String> = held.values.mapTo(HashSet()) { ScriptSync.jarName(it.record.internalName, it.record.version) }
+
+    /** Drops every held build, as a hot reload does. For tests. */
+    internal fun forgetAll() {
+        held.clear()
+        ready.clear()
+        failedAt.clear()
+        reported.clear()
+    }
+
+    /**
+     * Moves the `.pxe` builds in [dir] into memory and deletes them, with their records. They come from engines before
+     * memory-only loading, or from a launcher that still saves them; either way they are this account's encrypted
+     * builds, so nothing is downloaded again. One without a usable record is deleted and fetched by the next sync.
+     */
+    fun adopt(dir: File) {
+        val pxes = dir.listFiles { f -> f.isFile && f.name.endsWith(EXTENSION) }.orEmpty()
+        for (pxe in pxes) {
+            val recordFile = File(dir, PxeRecord.fileFor(pxe.name))
+            val record = recordFile.takeIf { it.isFile }?.let { runCatching { PxeRecord.decode(it.readText()) }.getOrNull() }
+            val blob = runCatching { pxe.readBytes() }.getOrNull()
+            if (record != null && blob != null && Pxe1.isBlob(blob)) {
+                held.putIfAbsent(record.internalName, HeldBuild(record, blob))
+            }
+            pxe.delete()
+            recordFile.delete()
+        }
+        // A record whose build is gone says nothing.
+        dir.listFiles { f -> f.isFile && f.name.endsWith(PxeRecord.fileFor(EXTENSION)) }.orEmpty()
+            .filter { !File(dir, it.name.removeSuffix(PxeRecord.fileFor(""))).exists() }
+            .forEach { it.delete() }
+    }
+
+    /** The held scripts already decrypted; any others are queued and arrive with a later rescan. */
     fun loaded(dir: File): List<Loaded> {
-        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(EXTENSION) }.orEmpty().associateBy(::identity)
-        ready.keys.retainAll(files.keys)
+        val builds = held.values.associateBy(::identity)
+        ready.keys.retainAll(builds.keys)
         val now = System.nanoTime()
-        files.forEach { (key, file) ->
+        builds.forEach { (key, build) ->
             if (ready.containsKey(key)) return@forEach
             val lastFailure = failedAt[key]
             if (lastFailure != null && now - lastFailure < RETRY_NANOS) return@forEach
-            if (loading.add(key)) worker.execute { loadInBackground(key, file) }
+            if (loading.add(key)) worker.execute { loadInBackground(key, build, dir) }
         }
-        return files.keys.mapNotNull { ready[it] }
+        return builds.keys.mapNotNull { ready[it] }
     }
 
-    private fun identity(file: File) = "${file.absolutePath}|${file.length()}|${file.lastModified()}"
+    // A new download of the same release is a new array, so it is decrypted and checked again.
+    private fun identity(build: HeldBuild) =
+        "${build.record.internalName}|${build.record.version}|${build.record.sha256}|${System.identityHashCode(build.blob)}"
 
-    private fun loadInBackground(key: String, file: File) {
+    private fun loadInBackground(key: String, build: HeldBuild, dir: File) {
+        val label = "${build.record.internalName} ${build.record.version}"
         try {
             val token = Entitlements.token()
             val outcome = if (token == null) {
-                Outcome.Skipped("[store] ${file.name} was not loaded: sign in on the launcher's Store tab to run your store scripts.")
+                Outcome.Skipped("[store] $label was not loaded: sign in on the launcher's Store tab to run your store scripts.")
             } else {
-                load(file, token, http, Entitlements.storeBase(), Script::class.java.classLoader)
+                load(build, dir, token, http, Entitlements.storeBase(), Script::class.java.classLoader)
             }
             when (outcome) {
                 is Outcome.Ready -> {
@@ -192,7 +254,7 @@ internal object EncryptedScripts {
             }
         } catch (e: Throwable) {
             failedAt[key] = System.nanoTime()
-            println("[store] ${file.name} was not loaded: ${e.message}")
+            println("[store] $label was not loaded: ${e.message}")
         } finally {
             loading.remove(key)
             // One rescan once the queue drains, not one per script: each scan takes seconds.
@@ -200,13 +262,14 @@ internal object EncryptedScripts {
         }
     }
 
-    fun load(file: File, token: String, http: HttpClient, storeBase: String, parent: ClassLoader): Outcome {
-        val record = File(file.parentFile, PxeRecord.fileFor(file.name)).takeIf { it.isFile }
-            ?.let { PxeRecord.decode(it.readText()) }
-            ?: return discard(file, "[store] ${file.name} has no record of which script it holds; it will download again.")
+    /**
+     * Decrypts a held build into a class loader. [dir] only names its code source, `<dir>/<name>-<version>.pxe`, which
+     * does not exist: the script library reads a script's origin from that file name.
+     */
+    fun load(build: HeldBuild, dir: File, token: String, http: HttpClient, storeBase: String, parent: ClassLoader): Outcome {
+        val record = build.record
         val label = "${record.internalName} ${record.version}"
-        val blob = file.readBytes()
-        if (!Pxe1.isBlob(blob)) return discard(file, "[store] $label is not an encrypted build; it will download again.")
+        if (!Pxe1.isBlob(build.blob)) return discard(build, "[store] $label is not an encrypted build; it will download again.")
 
         val key = when (val answer = Pxe1.fetchKey(http, storeBase, token, record.internalName, record.version)) {
             is Pxe1.KeyAnswer.Key -> answer.bytes
@@ -217,27 +280,28 @@ internal object EncryptedScripts {
             is Pxe1.KeyAnswer.Failed -> return Outcome.Skipped("[store] $label was not loaded this time: could not fetch its key (${answer.reason}).")
         }
         val plain = try {
-            Pxe1.decrypt(blob, key, Pxe1.aad(record.internalName, record.version))
+            Pxe1.decrypt(build.blob, key, Pxe1.aad(record.internalName, record.version))
         } catch (e: AEADBadTagException) {
-            return discard(file, "[store] $label could not be decrypted for this account; it will download again.")
+            return discard(build, "[store] $label could not be decrypted for this account; it will download again.")
         } finally {
             key.fill(0)
         }
         try {
             if (record.sha256 != null && !record.sha256.equals(sha256(plain), ignoreCase = true)) {
-                return discard(file, "[store] $label did not match its published checksum; it will download again.")
+                return discard(build, "[store] $label did not match its published checksum; it will download again.")
             }
             val jar = InMemoryJar.read(plain)
-            val codeSource = CodeSource(file.toURI().toURL(), null as Array<Certificate>?)
+            val location = File(dir, ScriptSync.pxeName(record.internalName, record.version)).toURI().toURL()
+            val codeSource = CodeSource(location, null as Array<Certificate>?)
             return Outcome.Ready(Loaded(InMemoryJarClassLoader(jar, parent, codeSource), jar.classNames))
         } finally {
             plain.fill(0)
         }
     }
 
-    private fun discard(file: File, message: String): Outcome {
-        file.delete()
-        File(file.parentFile, PxeRecord.fileFor(file.name)).delete()
+    // Only this build: a newer download that replaced it meanwhile stays.
+    private fun discard(build: HeldBuild, message: String): Outcome {
+        held.remove(build.record.internalName, build)
         return Outcome.Discarded(message)
     }
 
