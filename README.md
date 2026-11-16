@@ -47,7 +47,7 @@ is populated before it will produce a jar.
   - [What a pipeline produces](#what-a-pipeline-produces)
   - [Cutting a release](#cutting-a-release)
   - [Public download links](#public-download-links)
-  - [The launcher's Plugins tab](#the-launchers-plugins-tab)
+  - [Retired script channels](#retired-script-channels)
 - [11. Developer tooling](#11-developer-tooling)
   - [Cache and content](#cache-and-content)
   - [Clientscripts (CS2)](#clientscripts-cs2)
@@ -367,17 +367,14 @@ RSA keys, and cannot reach a local server.
 > makes each overwrite the other's cached reference tables, so expect re-downloads after a switch.
 
 **Engine scripts.** Scripts are Kotlin or Java classes (annotated `@ScriptDescription`) packaged as JARs in
-`~/.projectx/scripts/`, auto-discovered at runtime. They are not built in this repository: see
-`iEasyScript/official-scripts`, `iEasyScript/community-scripts` and the `iEasyScript/script-template`
-starter.
+`~/.projectx/scripts/`, auto-discovered at runtime. They are not built in this repository: they ship
+through the RS3 store, either from the private `iEasyScript/paid-scripts` repository or uploaded by other
+developers, who start from the `iEasyScript/script-template` starter. The engine's store sync brings in
+every script the signed-in account owns.
 
 > After **any** engine code change, rebuild the real artifact with `./gradlew :client-plugin-engine:shadowJar` —
 > `compileKotlin` alone leaves a stale injected jar. Never rebuild the shadow jar while injected;
 > uninject first.
-
-Building them yourself is the default and stays the default. If you would rather not keep a JDK and a
-Gradle build in the loop, the launcher's **Plugins** tab installs the same jars from the newest GitLab
-release — see [The launcher's Plugins tab](#the-launchers-plugins-tab).
 
 ---
 
@@ -464,8 +461,6 @@ first, then connect. Point the Logs tab at `~/.projectx/` to see `println` outpu
 
 | Job | Artifact | Runner |
 |-----|----------|--------|
-| `plugins:official` | `official-scripts-<version>.jar` | any Linux (JDK 25 image) |
-| `plugins:community` | `community-scripts-<version>.jar` | any Linux (JDK 25 image) |
 | `engine:jar` | `projectx-engine-<version>.jar` (the engine shadow jar) + the supervisor jar | any Linux (JDK 25 image) |
 | `engine:bootstrap:linux` | `libprojectxbootstrap.so` | any Linux (cmake + clang) |
 | `engine:bootstrap:windows` | `projectxbootstrap.dll` | any Linux, cross-compiled with mingw-w64 |
@@ -516,9 +511,9 @@ git tag v1.2.3 && git push origin v1.2.3
 
 `publish:packages` then uploads every artifact to
 `packages/generic/projectx/<version>/`, generates `plugins-manifest.json` (each artifact's version,
-size, sha256 and download URL — the plugin jars, the engine jar, and every launcher bundle), and
-`publish:release` creates the Release with version-free asset links — `official-scripts.jar`,
-`community-scripts.jar`, `projectx-engine.jar`, `plugins-manifest.json`, one per launcher platform.
+size, sha256 and download URL — the engine jar and every launcher bundle), and `publish:release`
+creates the Release with version-free asset links — `projectx-engine.jar`, `plugins-manifest.json`, one
+per launcher platform.
 
 Those stable link names are the contract the launcher reads: it looks a link up by name on whatever
 release is current, so nothing in the client has to parse a version out of a filename.
@@ -538,30 +533,17 @@ reissuing when a version ships, so they are the ones to hand out:
 
 The macOS link only resolves on releases built with `PROJECTX_ENABLE_MACOS_BUILD`.
 
-### The launcher's Plugins tab
+### Retired script channels
 
-The puzzle-piece button in the launcher's banner opens **Plugins**, which manages the script jars in
-`~/.projectx/scripts/`.
+The launcher no longer installs script jars. Its Official and Community Scripts channels are retired:
+their scripts are on the store, so on every start the launcher deletes any jar it recorded installing for
+either channel, and the engine's store sync deletes any `community-scripts-<version>.jar` in
+`~/.projectx/scripts/`. A jar still open in a running client stays and goes on the next start or sync. Jars
+you built yourself under any other name are never touched.
 
-**Every channel starts opted out.** The launcher downloads nothing until you ask it to — building the
-modules yourself remains the default. Each row offers a one-shot **Install**/**Update**, a **Remove**
-that only deletes what the launcher itself installed, and a **Keep updated** toggle that brings that
-channel to the newest release on every launcher start.
-
-Installing a channel makes its jar the only one for that channel in the scripts folder, including one
-you built: two jars for one channel put every script class on the engine's scan path twice. A jar the
-launcher did not install is labelled *Your build* and called out before anything replaces it.
-
-Downloads are checksum-verified against the manifest. To point the tab at a fork, set `plugins.gitlab_host`
-and `plugins.project_path` in the launcher's `config.json`.
-
-Below the plugin rows, **Launcher downloads** lists the launcher builds the same release published, one
-row per platform with *Copy link* and *Download* — the links to hand to someone who does not have the
-launcher yet. The section only appears once a release exists.
-
-> A branch pipeline builds every artifact but publishes nothing: `publish:packages` and
-> `publish:release` are tag-only. Until a `v*` tag is pushed the tab correctly reports
-> *no releases published yet*, however many green pipelines `dev` has.
+The launcher still reads `plugins-manifest.json` from the newest release for the engine home and to offer
+a newer launcher build. To point it at a fork, set `plugins.api_host` and `plugins.project_path` in the
+launcher's `config.json`.
 
 ## 11. Developer tooling
 

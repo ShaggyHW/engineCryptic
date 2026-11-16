@@ -111,9 +111,10 @@ options were lost and `LoadLibraryW` will fail on the target machine.
 C++20 library producing `libprojectxbootstrap.so`. Uses funchook for function interception, ImGui + SDL2 + EGL for overlay rendering. CMake build system.
 
 ### Scripts
-No scripts live in this module. They are in the public `iEasyScript/official-scripts` and
-`iEasyScript/community-scripts` repositories, built against the `iEasyScript/script-api` jars; each
-release jar lands in `~/.projectx/scripts/` for auto-discovery by `ScriptExecutor`.
+No scripts live in this module. They ship through the RS3 store (the private `iEasyScript/paid-scripts`
+repository and developer uploads), built against the `iEasyScript/script-api` jars. The store sync
+(`com.projectx.store.ScriptSync`) holds paid scripts in memory and puts free ones in `~/.projectx/scripts/`;
+`ScriptExecutor` discovers both.
 
 ### Key Patterns
 - **Memory access:** Project Panama (`java.lang.foreign`) — `MemorySegment`, `Arena`, `Linker`, `FunctionDescriptor`

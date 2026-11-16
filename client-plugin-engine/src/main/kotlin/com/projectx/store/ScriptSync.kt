@@ -82,7 +82,7 @@ internal object ScriptSync {
         EncryptedScripts.retainOwned(owned)
         val present = listed(dir)
         val installed = missing(owned, catalogue, present).filter { install(it, token, http, dir, present) }
-        val communityInstalled = needsCommunityJar(owned, catalogue, present) && installCommunityJar(http, dir)
+        val communityRemoved = removeCommunityJars(dir).isNotEmpty()
         superseded(catalogue, listed(dir)).forEach { runCatching { Files.deleteIfExists(dir.resolve(it)) } }
 
         // Also catches a build the launcher installed: present, owned, but not yet in the script list.
@@ -90,7 +90,7 @@ internal object ScriptSync {
         GameThread.post {
             val registered = ScriptExecutor.scripts.values.mapTo(HashSet()) { it.scriptClass.simpleName }
             // A rescan only rebuilds the list of available scripts; running ones are untouched.
-            if (communityInstalled || needsRescan(available, registered)) ScriptExecutor.loadScripts()
+            if (communityRemoved || needsRescan(available, registered)) ScriptExecutor.loadScripts()
             ScriptLibrary.addOwned(owned)
         }
         return installed
@@ -165,51 +165,20 @@ internal object ScriptSync {
     private fun hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
+    internal fun isCommunityJar(file: String): Boolean =
+        file.endsWith(".jar") && file.removePrefix("$COMMUNITY_PREFIX-").let { it != file && it.firstOrNull()?.isDigit() == true }
+
     /**
-     * Community scripts come in one jar the launcher only installs for players who opt into it, so owning one on the
-     * store would otherwise put nothing on disk. True when an owned script has no jar of its own and none is there.
+     * The community-scripts jar the launcher and older engines installed. Its scripts are on the store now, so it would
+     * run a second copy of them. A jar still in use stays and is tried again at the next sync.
      */
-    internal fun needsCommunityJar(owned: Set<String>, catalogue: List<StoreJar>, present: Set<String>): Boolean {
-        val ownJars = catalogue.mapTo(HashSet()) { it.internalName }
-        return owned.any { it !in ownJars } && present.none { isCommunityJar(it) }
-    }
-
-    internal fun isCommunityJar(file: String) = file.startsWith("$COMMUNITY_PREFIX-") && file.endsWith(".jar")
-
-    /** The latest community-scripts release, checked against its published sha256, written as the launcher names it. */
-    private fun installCommunityJar(http: HttpClient, dir: Path): Boolean = runCatching {
-        val latest = http.send(
-            HttpRequest.newBuilder(URI.create("$COMMUNITY_RELEASES/latest")).timeout(Duration.ofSeconds(30)).GET().build(),
-            HttpResponse.BodyHandlers.discarding(),
-        )
-        val tag = latest.headers().firstValue("location").orElse(null)?.substringAfterLast("/tag/") ?: return false
-        val name = "$COMMUNITY_PREFIX-${tag.removePrefix("v")}.jar"
-        val base = "$COMMUNITY_RELEASES/download/$tag/$name"
-        val bytes = fetch(base) ?: return false
-        val expected = fetch("$base.sha256")?.decodeToString()?.trim()?.substringBefore(' ')
-        if (expected == null || !expected.equals(hex(bytes), ignoreCase = true)) {
-            println("[store] the community scripts download did not match its published checksum; not installed.")
-            return false
-        }
-        writeAtomically(dir, name, bytes)
-        println("[store] installed community scripts ${tag.removePrefix("v")} for the community scripts you own.")
-        true
-    }.getOrElse {
-        println("[store] could not install the community scripts: ${it.message}")
-        false
-    }
-
-    // Release downloads redirect to GitHub's file storage; the store's own client deliberately doesn't follow redirects.
-    private val downloads: HttpClient by lazy {
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build()
-    }
-
-    private fun fetch(url: String): ByteArray? {
-        val request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(2)).GET().build()
-        val response = downloads.send(request, HttpResponse.BodyHandlers.ofByteArray())
-        return response.body().takeIf { response.statusCode() in 200..299 }
+    internal fun removeCommunityJars(dir: Path): List<String> {
+        val removed = listed(dir)
+            .filter(::isCommunityJar)
+            .filter { runCatching { Files.deleteIfExists(dir.resolve(it)) }.getOrDefault(false) }
+        if (removed.isNotEmpty()) println("[store] removed ${removed.joinToString()}: community scripts come from the store now.")
+        return removed
     }
 
     private const val COMMUNITY_PREFIX = "community-scripts"
-    private const val COMMUNITY_RELEASES = "https://github.com/iEasyScript/community-scripts/releases"
 }

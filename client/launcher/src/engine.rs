@@ -6,7 +6,7 @@
 //! three files in one writable directory: the native bootstrap, the supervisor
 //! jar and the engine shadow jar.
 //!
-//! All three are tracked against the same GitLab release the Plugins tab reads,
+//! All three are tracked against the same release the launcher update check reads,
 //! and all three move together. That is the point: a script jar built against a
 //! new engine API needs the engine jar that defines it, and an engine jar with a
 //! new native entry point needs the bootstrap that exports it. Updating only

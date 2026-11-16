@@ -140,9 +140,9 @@ project-x/
 **Build:** unified Gradle build, **Kotlin 2.3.20 / JDK 25**. `./gradlew projects` shows
 `:core :tools :packetlog :client-plugin-engine :client-plugin-engine-supervisor`. The engine keeps its
 native CMake tasks (`:client-plugin-engine:buildNativeBootstrap` → `libprojectxbootstrap.so`). No
-scripts are built here: they live in the public `iEasyScript/official-scripts` and
-`iEasyScript/community-scripts` repositories, compile against the `iEasyScript/script-api` jars, and
-reach users through those repositories' own releases.
+scripts are built here. They reach players through the RS3 store, either from the private
+`iEasyScript/paid-scripts` repository or uploaded by other developers, all built against the
+`iEasyScript/script-api` jars, and the engine's store sync delivers them.
 
 **Cache source tree (unpack / repack any cache):** `world.gregs.voidps.cache.store` (containers,
 reference tables, groups, the sector and SQLite stores, the converter) + `world.gregs.voidps.cache.source`

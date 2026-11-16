@@ -1,5 +1,5 @@
 #!/bin/sh
-# Emits the plugins manifest the launcher's Plugins tab reads.
+# Emits the release manifest the launcher reads.
 #
 # The Release's asset links alone would tell the launcher where a jar lives, but
 # not what it should hash to — so the manifest is what makes an install
@@ -26,8 +26,7 @@ package_url() {
     echo "https://github.com/${ASSET_REPO}/releases/download/${RELEASE_TAG}/$1"
 }
 
-# Scripts are published by their own repositories, which the launcher reads
-# directly, so this release offers no plugins and the list stays empty.
+# Scripts ship through the store, so this release offers no plugins and the list stays empty.
 plugins='[]'
 launchers='[]'
 # The three engine-home artifacts are not plugins — the launcher installs them

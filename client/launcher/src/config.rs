@@ -77,29 +77,18 @@ pub struct Config {
     /// `"Vulkan"` or `"OpenGl"` to force one while diagnosing a renderer problem.
     #[serde(default)]
     pub renderer: RendererPref,
-    /// Managed script-jar channels. Every channel starts opted out: building the
-    /// scripts yourself is the default workflow, and the launcher must never put
-    /// a jar the user did not ask for into the engine's scan path.
     #[serde(default)]
     pub plugins: PluginsConfig,
 }
 
-/// Which script channels the launcher keeps current, and where it fetches them
-/// from. The host/project overrides exist so a fork can point the same launcher
-/// at its own GitLab project without a rebuild.
+/// Where the launcher reads the engine release from; overridable so a fork can point it at its own repository.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PluginsConfig {
-    #[serde(default)]
-    pub community_auto_update: bool,
     /// Alias kept so a config written before the move to GitHub still loads.
     #[serde(default, alias = "gitlab_host")]
     pub api_host: Option<String>,
     #[serde(default)]
     pub project_path: Option<String>,
-    /// Per-channel overrides. Each channel's jar comes from its own public
-    /// repository, so these are what point the launcher somewhere else.
-    #[serde(default)]
-    pub community_repo: Option<String>,
 }
 
 impl Default for Config {
@@ -362,4 +351,22 @@ pub fn load_credentials(path: &Path) -> Credentials {
 pub fn save_credentials(path: &Path, creds: &Credentials) -> Result<()> {
     let json = serde_json::to_string_pretty(creds)?;
     atomic_write(path, json.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_config_from_before_the_script_channels_were_retired_still_loads() {
+        let config: Config = serde_json::from_str(
+            r#"{"close_after_launch":true,"plugins":{"official_auto_update":true,"community_auto_update":true,
+                "official_repo":"iEasyScript/official-scripts","community_repo":"iEasyScript/community-scripts",
+                "api_host":"https://api.example","project_path":"acme/launcher"}}"#,
+        )
+        .expect("config");
+        assert!(config.close_after_launch);
+        assert_eq!(config.plugins.api_host.as_deref(), Some("https://api.example"));
+        assert_eq!(config.plugins.project_path.as_deref(), Some("acme/launcher"));
+    }
 }

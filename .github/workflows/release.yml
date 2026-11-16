@@ -1,6 +1,6 @@
 # Builds everything installable and, on a v* tag, attaches it to a GitHub Release.
 #
-# The Release is the contract: the launcher's Plugins tab reads
+# The Release is the contract: the launcher reads
 # plugins-manifest.json from the newest release, and every jar, bootstrap and
 # bundle it offers is an asset on that same release. A branch push builds the
 # same artifacts and uploads them as workflow artifacts, so a break surfaces
@@ -361,8 +361,7 @@ jobs:
             Launcher bundles and the Project X engine for ${{ needs.version.outputs.version }}.
 
             The launcher installs the engine from this release itself, verified
-            against plugins-manifest.json. Scripts ship from the official-scripts
-            and community-scripts repositories.
+            against plugins-manifest.json. Scripts ship through the RS3 store.
           files: |
             dist/*
             plugins-manifest.json

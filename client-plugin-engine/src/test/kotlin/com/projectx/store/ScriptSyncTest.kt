@@ -301,24 +301,34 @@ class ScriptSyncTest {
     }
 
     @Test
-    fun aCommunityScriptOwnedWithoutTheCommunityJarNeedsIt() {
-        assertTrue(ScriptSync.needsCommunityJar(setOf("AIOWoodcutting"), listOf(gates()), emptySet()))
-    }
-
-    @Test
-    fun theCommunityJarIsNotFetchedWhenOneIsAlreadyInstalled() {
-        assertFalse(ScriptSync.needsCommunityJar(setOf("AIOWoodcutting"), listOf(gates()), setOf("community-scripts-1.8.12.jar")))
-    }
-
-    @Test
-    fun ownedScriptsWithTheirOwnJarsNeverFetchTheCommunityJar() {
-        assertFalse(ScriptSync.needsCommunityJar(setOf("GatesOfElidinis"), listOf(gates()), emptySet()))
-    }
-
-    @Test
-    fun onlyCommunityScriptJarsCountAsTheCommunityJar() {
+    fun `only community-scripts release jars count as the community jar`() {
         assertTrue(ScriptSync.isCommunityJar("community-scripts-1.9.0.jar"))
         assertFalse(ScriptSync.isCommunityJar("community-scripts.jar.part"))
+        assertFalse(ScriptSync.isCommunityJar(".community-scripts-1.9.0.jar.part"))
+        assertFalse(ScriptSync.isCommunityJar("community-scripts-helper.jar"))
         assertFalse(ScriptSync.isCommunityJar("GatesOfElidinis-3.7.2.jar"))
+    }
+
+    @Test
+    fun `the community jar is removed and nothing else is`() {
+        Files.writeString(dir.resolve("community-scripts-1.8.12.jar"), "community")
+        Files.writeString(dir.resolve("GatesOfElidinis-3.6.2.jar"), "store")
+        Files.writeString(dir.resolve("my-own-scripts-1.0.0.jar"), "built by hand")
+
+        assertEquals(listOf("community-scripts-1.8.12.jar"), ScriptSync.removeCommunityJars(dir))
+        assertEquals(setOf("GatesOfElidinis-3.6.2.jar", "my-own-scripts-1.0.0.jar"), files())
+        assertTrue(ScriptSync.removeCommunityJars(dir).isEmpty())
+    }
+
+    @Test
+    fun `a sync takes the community jar away`() {
+        hold("GatesOfElidinis", "3.6.2")
+        status = 500
+        Files.writeString(dir.resolve("community-scripts-1.8.12.jar"), "community")
+
+        sync(gates())
+
+        assertTrue(files().isEmpty(), files().toString())
+        assertEquals(null, lastAuth)
     }
 }

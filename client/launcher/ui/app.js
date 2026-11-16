@@ -33,8 +33,7 @@
     clientsRequestAt: 0,
     busyPids: {}, // pid -> timestamp of the action in flight
     renderedClients: null,
-    pluginsSnapshot: null,
-    busyPlugins: {}, // channel id -> timestamp of the action in flight
+    launcherStatus: null,
     store: null, // last store_status event
     storeScripts: null, // null until the first listing answers
     storeError: null,
@@ -49,7 +48,6 @@
     accounts: $("#accounts-view"),
     clients: $("#clients-view"),
     scheduler: $("#scheduler-view"),
-    plugins: $("#plugins-view"),
     store: $("#store-view"),
     logs: $("#logs-view"),
     settings: $("#settings-view"),
@@ -71,15 +69,6 @@
   const navClientsCount = $("#nav-clients-count");
   const btnRefreshClients = $("#btn-refresh-clients");
 
-  const pluginsList = $("#plugins-list");
-  const pluginsDir = $("#plugins-dir");
-  const pluginsOrigin = $("#plugins-origin");
-  const pluginsError = $("#plugins-error");
-  const btnRefreshPlugins = $("#btn-refresh-plugins");
-  const btnOpenScripts = $("#btn-open-scripts");
-  const downloadsSection = $("#downloads-section");
-  const downloadsList = $("#downloads-list");
-  const btnReleasePage = $("#btn-release-page");
   const launcherUpdate = $("#launcher-update");
   const launcherUpdateDetail = $("#launcher-update-detail");
   const btnLauncherUpdate = $("#btn-launcher-update");
@@ -129,9 +118,7 @@
         restoreConfigToUI();
         renderAccounts();
         logStatus("Launcher ready");
-        // The header shows the launcher version and the update strip must not
-        // depend on the Plugins view having been opened.
-        requestPlugins(false);
+        send({ type: "launcher_status" });
         requestClients(true);
         startClientsPolling();
         break;
@@ -200,16 +187,10 @@
         startClientsPolling();
         break;
 
-      case "plugins_status":
-        state.pluginsSnapshot = event.snapshot;
-        renderPlugins();
+      case "launcher_status":
+        state.launcherStatus = event.status;
         renderVersion();
-        break;
-
-      case "plugin_result":
-        delete state.busyPlugins[event.id];
-        logStatus(event.message, event.ok ? "success" : "error");
-        renderPlugins();
+        renderLauncherUpdate();
         break;
 
       case "store_status":
@@ -426,7 +407,6 @@
 
     if (name === "scheduler") renderScheduler();
     if (name === "clients") requestClients(true);
-    if (name === "plugins") requestPlugins(false);
     if (name === "store") requestStore();
     if (name === "settings") restoreConfigToUI();
     if (name === "logs") statusLog.scrollTop = statusLog.scrollHeight;
@@ -447,7 +427,7 @@
   }
 
   function renderVersion() {
-    const version = state.pluginsSnapshot && state.pluginsSnapshot.launcher_version;
+    const version = state.launcherStatus && state.launcherStatus.launcher_version;
     if (!version) return;
     topbarVersion.textContent = "Launcher v" + version;
     sidebarVersion.textContent = "v" + version;
@@ -706,177 +686,24 @@
     send({ type: type, pid: pid });
   }
 
-  // ---- Plugins (managed script jars) ----
-
-  function requestPlugins(force) {
-    send({ type: "plugins_status", force: !!force });
-  }
-
-  function pluginAction(id, type) {
-    state.busyPlugins[id] = Date.now();
-    renderPlugins();
-    send({ type: type, id: id });
-  }
-
-  function pluginStateMeta(p) {
-    if (p.installed_version && p.update_available) return { label: "Update ready", cls: "update" };
-    if (p.installed_version) return { label: "Installed", cls: "managed" };
-    if (p.local_jar) return { label: "Your build", cls: "local" };
-    return { label: "Not installed", cls: "" };
-  }
-
   function metaItem(label, value) {
     const span = el("span", "", label + " ");
     span.appendChild(el("b", "", value));
     return span;
   }
 
-  function renderPluginRow(p) {
-    const meta = pluginStateMeta(p);
-    const busy = isBusy(state.busyPlugins, p.id);
-
-    const row = el("div", "plugin");
-    const title = el("div", "row-title");
-    title.appendChild(el("span", "row-name", p.name));
-    title.appendChild(badge(meta.label, meta.cls));
-    row.appendChild(title);
-    if (p.description) row.appendChild(el("p", "plugin-desc", p.description));
-
-    const metaLine = el("div", "plugin-meta");
-    if (p.installed_version) metaLine.appendChild(metaItem("installed", "v" + p.installed_version));
-    metaLine.appendChild(metaItem("latest", p.available_version ? "v" + p.available_version : "unknown"));
-    const size = formatSize(p.available_size);
-    if (size) metaLine.appendChild(metaItem("size", size));
-    row.appendChild(metaLine);
-
-    // A jar the launcher did not put there is the user's own build. Two jars for
-    // one channel put every script class on the engine's scan path twice.
-    if (p.local_jar) {
-      row.appendChild(
-        el(
-          "div",
-          "notice notice-warn",
-          p.installed_version
-            ? "Also in the folder: " + p.local_jar + " — remove it, or the engine loads every script in this channel twice."
-            : "Currently using your own build: " + p.local_jar + ". Installing replaces it."
-        )
-      );
-    }
-
-    const foot = el("div", "plugin-foot");
-    const auto = el("label", "inline-check");
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.className = "switch";
-    toggle.checked = !!p.auto_update;
-    toggle.disabled = busy;
-    toggle.addEventListener("change", () => {
-      if (toggle.checked) state.busyPlugins[p.id] = Date.now();
-      send({ type: "plugin_set_auto", id: p.id, enabled: toggle.checked });
-    });
-    auto.appendChild(toggle);
-    auto.appendChild(el("span", "", "Keep updated"));
-    foot.appendChild(auto);
-
-    const actions = el("div", "row-actions");
-    const canInstall = !!p.available_version;
-    if (p.update_available || !p.installed_version) {
-      actions.appendChild(
-        button(busy ? "…" : p.update_available ? "Update" : "Install", "btn-accent", busy || !canInstall, () =>
-          pluginAction(p.id, "plugin_install")
-        )
-      );
-    }
-    if (p.installed_version) {
-      actions.appendChild(button("Remove", "btn-danger", busy, () => pluginAction(p.id, "plugin_remove")));
-    }
-    foot.appendChild(actions);
-    row.appendChild(foot);
-    return row;
-  }
-
-  // Clipboard access in the webview is not guaranteed, so fall back to the
-  // selection-based copy rather than leaving the button silently dead.
-  function copyText(text) {
-    const done = () => logStatus("Link copied", "success");
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, () => legacyCopy(text, done));
-    } else {
-      legacyCopy(text, done);
-    }
-  }
-
-  function legacyCopy(text, done) {
-    const field = document.createElement("textarea");
-    field.value = text;
-    field.setAttribute("readonly", "");
-    field.style.position = "fixed";
-    field.style.opacity = "0";
-    document.body.appendChild(field);
-    field.select();
-    const copied = document.execCommand && document.execCommand("copy");
-    document.body.removeChild(field);
-    if (copied) done();
-    else logStatus("Could not copy — the link is " + text, "error");
-  }
-
-  function renderDownload(d) {
-    const row = el("div", "row");
-    const main = el("div", "row-main");
-    main.appendChild(el("span", "row-name", d.label || d.platform));
-    const size = formatSize(d.size);
-    main.appendChild(el("span", "row-sub", size ? d.file + " · " + size : d.file));
-    row.appendChild(main);
-
-    const actions = el("div", "row-actions");
-    actions.appendChild(button("Copy link", "", false, () => copyText(d.url)));
-    actions.appendChild(button("Download", "btn-accent", false, () => send({ type: "open_url", url: d.url })));
-    row.appendChild(actions);
-    return row;
-  }
-
   // The launcher cannot replace itself while it is running, so this is a prompt
   // and a link rather than an install.
-  function renderLauncherUpdate(snap) {
-    const update = snap.launcher_update;
+  function renderLauncherUpdate() {
+    const status = state.launcherStatus;
+    const update = status && status.launcher_update;
     launcherUpdate.hidden = !update;
     if (!update) return;
     const size = formatSize(update.size);
     launcherUpdateDetail.textContent =
-      "You have " + snap.launcher_version + " · " +
-      (snap.release_tag || update.version || "latest") +
+      "You have " + status.launcher_version + " · " +
+      (status.release_tag || "latest") +
       (size ? " · " + size : "");
-  }
-
-  function renderPlugins() {
-    const snap = state.pluginsSnapshot;
-    if (!snap) return;
-
-    pluginsDir.textContent = snap.scripts_dir;
-
-    pluginsOrigin.textContent = "";
-    pluginsOrigin.appendChild(el("b", "", snap.source_url.replace(/^https?:\/\//, "")));
-    const details = [];
-    if (snap.release_tag) details.push(snap.release_tag);
-    // With an error in hand the notice says what went wrong; claiming a check is
-    // still running would contradict it.
-    if (snap.checked_at) details.push("checked " + formatClock(new Date(snap.checked_at * 1000)));
-    else if (!snap.error) details.push("checking…");
-    if (details.length) pluginsOrigin.appendChild(document.createTextNode(" · " + details.join(" · ")));
-
-    pluginsError.hidden = !snap.error;
-    if (snap.error) pluginsError.textContent = snap.error;
-
-    pluginsList.textContent = "";
-    (snap.plugins || []).forEach((p) => pluginsList.appendChild(renderPluginRow(p)));
-
-    // Nothing is published until a release exists; an empty section would just
-    // read as broken.
-    downloadsSection.hidden = !snap.release_url;
-    downloadsList.textContent = "";
-    (snap.launcher || []).forEach((d) => downloadsList.appendChild(renderDownload(d)));
-
-    renderLauncherUpdate(snap);
   }
 
   // ---- Store ----
@@ -941,19 +768,6 @@
       metaLine.appendChild(metaItem(s.trial ? "trial ends" : "until", formatClock(new Date(s.expires_at))));
     }
     row.appendChild(metaLine);
-
-    // Free community scripts arrive with the Community Scripts channel; what the store adds is the claim.
-    if (!s.installable) {
-      row.appendChild(
-        el(
-          "p",
-          "plugin-desc",
-          s.owned
-            ? "Comes with Community Scripts. Renew it free on the store before it runs out."
-            : "Comes with Community Scripts, but only runs once you get it free on the store. It lasts 30 days and renews for free."
-        )
-      );
-    }
 
     // The point of installing before the game: the hour has not started yet.
     if (s.pending) {
@@ -1098,14 +912,8 @@
     if (storePairingLink.dataset.url) send({ type: "open_url", url: storePairingLink.dataset.url });
   });
 
-  btnRefreshPlugins.addEventListener("click", () => requestPlugins(true));
-  btnOpenScripts.addEventListener("click", () => send({ type: "plugins_open_dir" }));
-  btnReleasePage.addEventListener("click", () => {
-    const url = state.pluginsSnapshot && state.pluginsSnapshot.release_url;
-    if (url) send({ type: "open_url", url: url });
-  });
   btnLauncherUpdate.addEventListener("click", () => {
-    const update = state.pluginsSnapshot && state.pluginsSnapshot.launcher_update;
+    const update = state.launcherStatus && state.launcherStatus.launcher_update;
     if (update) send({ type: "open_url", url: update.url });
   });
   btnDonate.addEventListener("click", () => send({ type: "open_url", url: DONATE_URL }));

@@ -16,7 +16,7 @@ use crate::game::control::ClientStatus;
 use crate::game::process::{host_os_dir, launcher_binary_name, LaunchParams, PatchEnv};
 use crate::game::renderer::{note_vulkan_launch_crash, Renderer, RendererPref};
 use crate::game::rs3::{with_host_binary_type, JS5_RSA_PARAM, LOGIN_RSA_PARAM};
-use crate::plugins::{self, Catalog, PluginChannel, PluginsSnapshot, CHANNELS};
+use crate::plugins::{self, Catalog, LauncherStatus};
 use crate::store;
 use url::Url;
 
@@ -72,27 +72,9 @@ pub enum IpcMessage {
     /// Persist the character last selected under a Jagex account (no response).
     #[serde(rename = "select_character")]
     SelectCharacter { user_id: String, account_id: String },
-    /// Render the Plugins tab. `force` re-fetches the release catalog instead of
-    /// reusing the cached one.
-    #[serde(rename = "plugins_status")]
-    PluginsStatus {
-        #[serde(default)]
-        force: bool,
-    },
-    /// Download the newest published jar for a channel into the scripts folder.
-    #[serde(rename = "plugin_install")]
-    PluginInstall { id: String },
-    /// Delete the launcher-installed jar for a channel.
-    #[serde(rename = "plugin_remove")]
-    PluginRemove { id: String },
-    /// Turn managed updates for a channel on or off. Turning one on installs
-    /// straight away, since that is what the user just asked for.
-    #[serde(rename = "plugin_set_auto")]
-    PluginSetAuto { id: String, enabled: bool },
-    /// Reveal the scripts folder in the desktop file manager.
-    #[serde(rename = "plugins_open_dir")]
-    PluginsOpenDir,
-    /// Open a release or download link from the Plugins tab in the browser.
+    /// The launcher's version and whether a newer build is published.
+    #[serde(rename = "launcher_status")]
+    LauncherStatus,
     #[serde(rename = "open_url")]
     OpenUrl { url: String },
     /// Who, if anyone, this launcher is signed in to the store as.
@@ -175,17 +157,8 @@ pub enum IpcEvent {
         ok: bool,
         message: String,
     },
-    /// Everything the Plugins tab renders: the scripts folder, the release it is
-    /// tracking, and one row per channel.
-    #[serde(rename = "plugins_status")]
-    PluginsStatus { snapshot: PluginsSnapshot },
-    /// Outcome of an install/remove for one channel.
-    #[serde(rename = "plugin_result")]
-    PluginResult {
-        id: String,
-        ok: bool,
-        message: String,
-    },
+    #[serde(rename = "launcher_status")]
+    LauncherStatus { status: LauncherStatus },
     /// The store's paid catalogue for this account.
     #[serde(rename = "store_scripts")]
     StoreScripts {
@@ -233,7 +206,6 @@ pub struct StoreScriptRow {
     pub store_url: Option<String>,
     pub install_state: store::InstallState,
     pub free: bool,
-    /// Downloaded from the store; a free community script arrives with the Community Scripts channel instead.
     pub installable: bool,
     pub prices: Option<store::StorePrices>,
     pub sale_percent: Option<u32>,
@@ -699,7 +671,7 @@ impl Drop for LaunchGuard {
     }
 }
 
-/// Holds a channel's action slot for the lifetime of an install or removal.
+/// Holds a store script's install slot until the install finishes.
 struct PluginGuard {
     state: Arc<IpcState>,
     id: String,
@@ -730,11 +702,9 @@ pub struct IpcState {
     /// Raised to abort the consent callback server's wait when the login window
     /// is closed, so it stops holding port 80.
     consent_cancel: Arc<AtomicBool>,
-    /// Last successfully fetched release catalog, reused until it goes stale so
-    /// opening the Plugins tab costs nothing.
-    plugin_catalog: Mutex<Option<Catalog>>,
-    /// Channel ids with an install or removal in flight, so a double-click
-    /// cannot run two downloads over the same jar.
+    /// Last successfully fetched release catalog, reused until it goes stale.
+    release_catalog: Mutex<Option<Catalog>>,
+    /// Store scripts with an install in flight, so a double-click cannot run two downloads over the same jar.
     plugin_busy: Mutex<Vec<String>>,
     /// True while a scheduler run is working through its accounts. Cleared to stop it.
     scheduler_running: Arc<AtomicBool>,
@@ -766,7 +736,7 @@ impl IpcState {
             launching: Arc::new(AtomicBool::new(false)),
             startup_refresh_started: AtomicBool::new(false),
             consent_cancel: Arc::new(AtomicBool::new(false)),
-            plugin_catalog: Mutex::new(None),
+            release_catalog: Mutex::new(None),
             plugin_busy: Mutex::new(Vec::new()),
             scheduler_running: Arc::new(AtomicBool::new(false)),
             store_pairing: Arc::new(AtomicBool::new(false)),
@@ -874,22 +844,8 @@ impl IpcState {
             } => {
                 self.persist_last_account(user_id, account_id);
             }
-            IpcMessage::PluginsStatus { force } => {
-                self.handle_plugins_status(force);
-            }
-            IpcMessage::PluginInstall { id } => {
-                self.handle_plugin_install(id);
-            }
-            IpcMessage::PluginRemove { id } => {
-                self.handle_plugin_remove(id);
-            }
-            IpcMessage::PluginSetAuto { id, enabled } => {
-                self.handle_plugin_set_auto(id, enabled);
-            }
-            IpcMessage::PluginsOpenDir => {
-                if let Err(e) = plugins::open_scripts_dir() {
-                    log::warn!("Could not open the scripts folder: {}", e);
-                }
+            IpcMessage::LauncherStatus => {
+                self.handle_launcher_status();
             }
             IpcMessage::OpenUrl { ref url } => {
                 if let Err(e) = plugins::open_url(url) {
@@ -1568,17 +1524,13 @@ impl IpcState {
         });
     }
 
-    // ---- Plugins tab (managed script jars) ----
-
-    /// Emit what is known now, then refresh in the background when the cached
-    /// catalog is missing, stale, or the user pressed refresh. The tab therefore
-    /// paints instantly on open and fills in the release data when it lands.
-    fn handle_plugins_status(self: &Arc<Self>, force: bool) {
-        self.emit_plugins_status(None);
+    /// Emit what is known now, then refresh in the background when the cached catalog is missing or stale.
+    fn handle_launcher_status(self: &Arc<Self>) {
+        self.emit_launcher_status();
 
         let needs_fetch = {
-            let cached = self.plugin_catalog.lock().unwrap();
-            force || cached.as_ref().map(Catalog::is_stale).unwrap_or(true)
+            let cached = self.release_catalog.lock().unwrap();
+            cached.as_ref().map(Catalog::is_stale).unwrap_or(true)
         };
         if !needs_fetch {
             return;
@@ -1586,29 +1538,18 @@ impl IpcState {
 
         let state = Arc::clone(self);
         tokio::spawn(async move {
-            let error = state.refresh_plugin_catalog().await.err().map(|e| format!("{}", e));
-            state.emit_plugins_status(error);
+            if let Err(e) = state.refresh_release_catalog().await {
+                log::warn!("Launcher update check failed: {}", e);
+            }
+            state.emit_launcher_status();
         });
     }
 
-    /// Fetch the newest release catalog and cache it.
-    async fn refresh_plugin_catalog(&self) -> Result<Catalog> {
+    async fn refresh_release_catalog(&self) -> Result<Catalog> {
         let cfg = self.plugins_config();
         let catalog = plugins::fetch_catalog(&crate::http_client(), &cfg).await?;
-        *self.plugin_catalog.lock().unwrap() = Some(catalog.clone());
+        *self.release_catalog.lock().unwrap() = Some(catalog.clone());
         Ok(catalog)
-    }
-
-    /// The cached catalog if it is still fresh, otherwise a freshly fetched one.
-    async fn plugin_catalog(&self) -> Result<Catalog> {
-        let cached = {
-            let guard = self.plugin_catalog.lock().unwrap();
-            guard.clone()
-        };
-        match cached {
-            Some(catalog) if !catalog.is_stale() => Ok(catalog),
-            _ => self.refresh_plugin_catalog().await,
-        }
     }
 
     fn plugins_config(&self) -> PluginsConfig {
@@ -1775,23 +1716,14 @@ impl IpcState {
         });
     }
 
-    fn emit_plugins_status(&self, error: Option<String>) {
-        let cfg = self.plugins_config();
-        let catalog = {
-            let guard = self.plugin_catalog.lock().unwrap();
-            guard.clone()
-        };
-        let snapshot = plugins::snapshot(
-            &self.paths.config_dir,
-            &cfg,
-            catalog.as_ref(),
-            error,
-        );
-        self.send_event(&IpcEvent::PluginsStatus { snapshot });
+    fn emit_launcher_status(&self) {
+        let catalog = self.release_catalog.lock().unwrap().clone();
+        self.send_event(&IpcEvent::LauncherStatus {
+            status: plugins::launcher_status(catalog.as_ref()),
+        });
     }
 
-    /// Claim the per-channel action slot. `None` means an action is already in
-    /// flight for that channel and this one must be dropped.
+    /// `None` means an install is already in flight for that script and this one must be dropped.
     fn try_claim_plugin(self: &Arc<Self>, id: &str) -> Option<PluginGuard> {
         let mut busy = self.plugin_busy.lock().unwrap();
         if busy.iter().any(|b| b == id) {
@@ -1804,139 +1736,27 @@ impl IpcState {
         })
     }
 
-    fn handle_plugin_install(self: &Arc<Self>, id: String) {
-        let Some(guard) = self.try_claim_plugin(&id) else {
-            self.send_event(&IpcEvent::PluginResult {
-                id,
-                ok: false,
-                message: "Already working on this plugin".to_string(),
-            });
-            return;
-        };
-
-        let state = Arc::clone(self);
-        tokio::spawn(async move {
-            let _guard = guard;
-            let (ok, message) = match state.install_plugin(&id).await {
-                Ok(message) => (true, message),
-                Err(e) => (false, format!("{}", e)),
-            };
-            state.send_event(&IpcEvent::PluginResult {
-                id: id.clone(),
-                ok,
-                message,
-            });
-            state.emit_plugins_status(None);
-        });
-    }
-
-    async fn install_plugin(&self, id: &str) -> Result<String> {
-        let channel =
-            PluginChannel::from_id(id).ok_or_else(|| anyhow!("Unknown plugin {}", id))?;
-        let catalog = self.plugin_catalog().await?;
-        let plugin = catalog
-            .plugin(channel)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Release {} publishes no jar for this plugin",
-                    catalog.release_tag
-                )
-            })?
-            .clone();
-
-        let entry = plugins::install(
-            &crate::http_client(),
-            &self.paths.config_dir,
-            channel,
-            &plugin,
-        )
-        .await?;
-        Ok(format!("Installed {} {}", plugin.name, entry.version))
-    }
-
-    fn handle_plugin_remove(self: &Arc<Self>, id: String) {
-        let Some(guard) = self.try_claim_plugin(&id) else {
-            self.send_event(&IpcEvent::PluginResult {
-                id,
-                ok: false,
-                message: "Already working on this plugin".to_string(),
-            });
-            return;
-        };
-
-        let state = Arc::clone(self);
-        tokio::task::spawn_blocking(move || {
-            let _guard = guard;
-            let result = PluginChannel::from_id(&id)
-                .ok_or_else(|| anyhow!("Unknown plugin {}", id))
-                .and_then(|channel| plugins::remove(&state.paths.config_dir, channel));
-            let (ok, message) = match result {
-                Ok(message) => (true, message),
-                Err(e) => (false, format!("{}", e)),
-            };
-            state.send_event(&IpcEvent::PluginResult {
-                id: id.clone(),
-                ok,
-                message,
-            });
-            state.emit_plugins_status(None);
-        });
-    }
-
-    /// Persist a channel's managed-update toggle. Enabling it also installs,
-    /// because "keep this current" with nothing installed would otherwise do
-    /// nothing until the next launcher start.
-    fn handle_plugin_set_auto(self: &Arc<Self>, id: String, enabled: bool) {
-        let Some(channel) = PluginChannel::from_id(&id) else {
-            log::warn!("Ignoring auto-update toggle for unknown plugin {}", id);
-            return;
-        };
-
-        {
-            let mut config = self.config.lock().unwrap();
-            plugins::set_auto_update(&mut config.plugins, channel, enabled);
-            let _ = crate::config::save_config(&self.paths.config_file, &config);
-        }
-        self.emit_plugins_status(None);
-
-        if enabled {
-            self.handle_plugin_install(id);
-        }
-    }
-
-    /// On startup, bring every channel the user opted into up to the newest
-    /// release. Channels left at their default do nothing and cost no request.
-    /// One startup catalog fetch, whether or not any plugin channel is managed.
-    ///
-    /// Every channel ships opted out, so gating this on auto-update meant the
-    /// default install never looked at a release at all — and a launcher that
-    /// never looks is a launcher that can never notice it has fallen behind the
-    /// engine and plugins it installs.
+    /// One release check per start, which is how a launcher notices it has fallen behind the release.
     fn spawn_startup_update_check(self: &Arc<Self>) {
-        match plugins::retire_official_scripts(&self.paths.config_dir) {
-            Ok(Some(file)) => log::info!("Removed {}: the official scripts are on the store now", file),
-            Ok(None) => {}
-            Err(e) => log::warn!("Could not remove the old official scripts jar yet: {}", e),
+        for outcome in plugins::retire_script_channels(&self.paths.config_dir) {
+            match outcome {
+                Ok(file) => log::info!("Removed {}: its scripts come from the store now", file),
+                Err(e) => log::warn!("Could not remove a retired scripts jar yet: {}", e),
+            }
         }
-        let cfg = self.plugins_config();
-        let channels: Vec<PluginChannel> = CHANNELS
-            .into_iter()
-            .filter(|c| plugins::auto_update_enabled(&cfg, *c))
-            .collect();
 
         let state = Arc::clone(self);
         tokio::spawn(async move {
-            state.run_startup_update_check(channels).await;
+            state.run_startup_update_check().await;
             state.report_store_updates(&crate::http_client()).await;
         });
     }
 
-    async fn run_startup_update_check(&self, channels: Vec<PluginChannel>) {
-        let catalog = match self.refresh_plugin_catalog().await {
+    async fn run_startup_update_check(&self) {
+        let catalog = match self.refresh_release_catalog().await {
             Ok(catalog) => catalog,
             Err(e) => {
                 log::warn!("Update check failed: {}", e);
-                self.emit_plugins_status(Some(format!("{}", e)));
                 return;
             }
         };
@@ -1950,28 +1770,7 @@ impl IpcState {
             );
         }
 
-        let client = crate::http_client();
-        for channel in channels {
-            let Some(plugin) = catalog.plugin(channel) else {
-                continue;
-            };
-            if !plugins::needs_install(&self.paths.config_dir, channel, plugin) {
-                continue;
-            }
-            let (ok, message) =
-                match plugins::install(&client, &self.paths.config_dir, channel, plugin).await {
-                    Ok(entry) => (true, format!("Updated {} to {}", plugin.name, entry.version)),
-                    Err(e) => (false, format!("{}", e)),
-                };
-            log::info!("Plugin auto-update [{}]: {}", channel.id(), message);
-            self.send_event(&IpcEvent::PluginResult {
-                id: channel.id().to_string(),
-                ok,
-                message,
-            });
-        }
-
-        self.emit_plugins_status(None);
+        self.emit_launcher_status();
     }
 
     fn handle_save_config(&self, new_config: &Config) {
