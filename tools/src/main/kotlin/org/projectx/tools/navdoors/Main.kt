@@ -18,12 +18,15 @@ import kotlin.system.exitProcess
  *       --known-tiles worldReachableTiles.db --out-tiles navpath-tiles.tsv"
  *   ./gradlew :tools:navDoors -Pargs="--cache <copy> --near 2885,3450,0[,radius]"   (what is placed around a tile)
  *   ./gradlew :tools:navDoors -Pargs="--cache <copy> --known-tiles <db> --compare x1,y1,x2,y2,plane"
+ *   ./gradlew :tools:navDoors -Pargs="--cache <copy> --placements <ids.txt> --out <placements.tsv>"
  *
  * One line per door: loc id, option, x, y, plane, and the side of its tile the wall stands on (0 west, 1 north,
  * 2 east, 3 south). The planner's tiles were flooded out from reachable ground through its own doors only, so the
  * rooms behind the rest are missing from it: with --known-tiles, every door side it lacks is flooded through the
  * cache's collision until it meets ground the planner has, and those tiles are written with their walk masks, one
- * per line as x, y, plane, mask. --compare checks those masks against the planner's own over an area. Open a copy
+ * per line as x, y, plane, mask. --compare checks those masks against the planner's own over an area. --placements
+ * writes every tile holding one of the listed locs, itself or as a form of the loc placed there: id, placed id, x, y,
+ * plane. Open a copy
  * of the cache: it is opened read-only, but the live one may be in use.
  */
 private val DOOR_OPTIONS = listOf("Open", "Go-through", "Pass-through")
@@ -44,6 +47,7 @@ fun main(args: Array<String>) {
     var knownTiles: String? = null
     var outTiles: String? = null
     var compare: List<Int>? = null
+    var placements: String? = null
     var i = 0
     while (i < args.size) {
         when (args[i]) {
@@ -53,6 +57,7 @@ fun main(args: Array<String>) {
             "--known-tiles" -> knownTiles = args.getOrNull(++i)
             "--out-tiles" -> outTiles = args.getOrNull(++i)
             "--compare" -> compare = args.getOrNull(++i)?.split(",")?.map(String::toInt)
+            "--placements" -> placements = args.getOrNull(++i)
         }
         i++
     }
@@ -66,6 +71,7 @@ fun main(args: Array<String>) {
     }
     Cache.init(Paths.get(cacheDir), readOnly = true)
     if (near != null) return printNear(near[0], near[1], near[2], near.getOrElse(3) { NEAR_TILES })
+    if (placements != null) return writePlacements(File(placements), File(out!!))
     val known = knownTiles?.let(::readKnownTiles)
     if (compare != null) return compareMasks(known!!, compare)
 
@@ -92,6 +98,17 @@ private fun doorOption(id: Int): String? {
 
 private fun openOption(type: LocType): String? =
     type.options?.firstOrNull { op -> op != null && DOOR_OPTIONS.any { it.equals(op, ignoreCase = true) } }
+
+private fun writePlacements(idsFile: File, out: File) {
+    val wanted = idsFile.readText().split(Regex("[^0-9]+")).filter(String::isNotEmpty).map(String::toInt).toSet()
+    val lines = ArrayList<String>()
+    eachPlacement { id, _, _, x, y, plane ->
+        val forms = sequenceOf(id) + (Cache.loc(id)?.transforms?.asSequence()?.filter { it >= 0 } ?: emptySequence())
+        for (form in forms.filter { it in wanted }.distinct()) lines += "$form\t$id\t$x\t$y\t$plane"
+    }
+    out.writeText(lines.joinToString("\n", postfix = "\n"))
+    println("${lines.size} placements of ${wanted.size} locs written to $out")
+}
 
 private fun eachPlacement(visit: (id: Int, shape: Int, rotation: Int, x: Int, y: Int, plane: Int) -> Unit) {
     for (squareX in 0 until SQUARES_X) for (squareY in 0 until SQUARES_Y) {
