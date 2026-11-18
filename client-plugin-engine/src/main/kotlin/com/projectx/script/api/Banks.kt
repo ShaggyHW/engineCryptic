@@ -80,6 +80,23 @@ suspend fun Script.openNearestBank(bankPin: String? = null): Boolean {
     return false
 }
 
+/**
+ * Clicks Load Last Preset at a bank: the one in reach if there is one, otherwise the nearest in [Banks] after walking
+ * there. Returns true once the preset was clicked; the backpack changing is what says it loaded.
+ * Java: `Wait.loadLastPresetNearestBank`.
+ */
+suspend fun Script.loadLastPresetNearestBank(): Boolean {
+    if (loadLastPresetInReach()) return true
+    val site = findNearestBank() ?: return false
+    val walk = webWalk(site.tile, BANK_ARRIVE_DISTANCE)
+    if (loadLastPresetInReach()) return true
+    if (!walk.isSuccess) println("[Banks] Could not reach $site: $walk")
+    return false
+}
+
+private fun loadLastPresetInReach(): Boolean =
+    loadLastPresetClosestBank(checkReachable = true, range = BANK_REACH) || loadLastPresetClosestBank(range = ACROSS_COUNTER)
+
 private suspend fun Script.openBankInReach(bankPin: String?): Boolean {
     // Bankers behind a counter, as at the Grand Exchange, can't be walked up to but are banked with across it.
     if (!openClosestBank(checkReachable = true, range = BANK_REACH) && !openClosestBank(range = ACROSS_COUNTER)) return false

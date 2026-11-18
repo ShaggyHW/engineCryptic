@@ -465,6 +465,15 @@ sealed class Wait {
         fun openNearestBank(bankPin: String? = null, onResult: Consumer<Boolean>? = null): Wait =
             call(onResult) { this.openNearestBank(bankPin) }
 
+        /**
+         * Click Load Last Preset at the bank in reach, or walk to the nearest in [Banks] and click it there;
+         * [onResult] gets whether it was clicked. Kotlin: `loadLastPresetNearestBank`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun loadLastPresetNearestBank(onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.loadLastPresetNearestBank() }
+
         /** Fill the ore box from the backpack; [onResult] gets whether any ore moved. Kotlin: `fillOreBox`. */
         @JvmStatic
         @JvmOverloads
