@@ -229,6 +229,15 @@ object CS2Executor {
     }
 
     /**
+     * Queue [scriptId] and return the future its result completes on the next game tick, without waiting;
+     * null when the ScriptRunner isn't captured yet. Safe from any thread, the game thread included.
+     */
+    fun queueForResult(scriptId: Int, args: List<Any>): CompletableFuture<Cs2Result>? {
+        if (scriptRunnerPtr.address() == 0L) return null
+        return CompletableFuture<Cs2Result>().also { pendingScripts.offer(CS2Request(scriptId, args, it)) }
+    }
+
+    /**
      * Synchronous result variant for callers already on the game thread (e.g. MCP `onGameTick`
      * handlers). Runs the script inline rather than queueing — queueing would deadlock, since the
      * drain that completes the queue can't run while the game thread is blocked here.

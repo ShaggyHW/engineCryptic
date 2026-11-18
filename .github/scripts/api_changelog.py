@@ -43,8 +43,9 @@ AREAS = (
     ("com/projectx/webwalker/", "Web walker"),
     ("com/projectx/game/interfaces/", "Interfaces"),
     ("com/projectx/game/nxt/entity/", "Entities"),
+    ("com/projectx/game/cs2/", "Client scripts"),
 )
-AREA_ORDER = ("Overlay UI", "Overlay DSL", "Script calls", "Web walker", "Interfaces", "Entities")
+AREA_ORDER = ("Overlay UI", "Overlay DSL", "Script calls", "Web walker", "Interfaces", "Entities", "Client scripts")
 
 # Kotlin `internal` types compile to public classes, so javap cannot tell them from API; they are named
 # here instead. Only needed for internal types that live in one of the packages above.

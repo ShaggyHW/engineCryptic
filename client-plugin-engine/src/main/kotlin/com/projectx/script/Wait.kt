@@ -1,6 +1,7 @@
 package com.projectx.script
 
 import com.projectx.game.chat.MessageType
+import com.projectx.game.cs2.CS2Executor.Cs2Result
 import com.projectx.game.input.Key
 import com.projectx.game.interfaces.InstanceSystem
 import com.projectx.game.interfaces.confirmInstanceDialogue
@@ -536,6 +537,16 @@ sealed class Wait {
         @JvmStatic
         @JvmOverloads
         fun typeText(text: String, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.typeText(text) }
+
+        // ---- Clientscripts ----
+
+        /**
+         * Run clientscript [scriptId] with [args] and hand [onResult] what it leaves on the stacks, or null when it
+         * could not run. Look an id up by name with `ClientScriptsKt.clientScriptId`. Kotlin: `runClientScriptForResult`.
+         */
+        @JvmStatic
+        fun runClientScriptForResult(scriptId: Int, args: Array<Any>, onResult: Consumer<Cs2Result?>): Wait =
+            call(onResult) { runClientScriptForResult(scriptId, *args) }
 
         // ---- Grand Exchange ----
 
