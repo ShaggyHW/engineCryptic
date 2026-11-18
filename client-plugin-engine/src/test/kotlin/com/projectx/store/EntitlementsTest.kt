@@ -179,4 +179,16 @@ class EntitlementsTest {
         assertTrue("sign out and back in" in message.lowercase())
         assertFalse("could not be reached" in message)
     }
+
+    private fun entry(json: String) = JsonParser.parseString(json).asJsonObject
+
+    @Test
+    fun `a per-instance entitlement is read as one`() {
+        assertTrue(Entitlements.perInstanceIn(entry("""{"internalName":"Telos","expiresAt":"2026-12-01T00:00:00Z","perInstance":true,"seats":3}""")))
+    }
+
+    @Test
+    fun `an entitlement from a store without seats is per account`() {
+        assertFalse(Entitlements.perInstanceIn(entry("""{"internalName":"Gates","expiresAt":"2026-12-01T00:00:00Z"}""")))
+    }
 }

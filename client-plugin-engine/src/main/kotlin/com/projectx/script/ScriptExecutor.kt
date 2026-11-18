@@ -133,6 +133,7 @@ object ScriptExecutor {
             val name = script.javaClass.getAnnotation(ScriptDescription::class.java)?.name ?: script.javaClass.simpleName
             println(ScriptLogExcerpt.stopMarker(name, script.javaClass.simpleName))
             RunReports.ended(script)
+            Instances.stopped(script)
         }
     }
 

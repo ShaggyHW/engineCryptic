@@ -1,5 +1,6 @@
 package com.projectx.store
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.projectx.script.Script
@@ -15,6 +16,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -25,12 +27,18 @@ import java.util.concurrent.TimeUnit
  * the count so it holds across machines. A client takes one when its first script starts and gives it back a little
  * after its last stops, so an idle game window costs nothing. A running script carries on through a failed
  * heartbeat; only a Stop pressed on the website stops it.
+ *
+ * A script sold per instance also needs one of the player's seats of it. Every claim and heartbeat names the
+ * per-instance scripts this client runs or is about to start, and the site answers which it may: a refused one does
+ * not start, and a running one whose seat the site takes back (its seats ran out) is stopped.
  */
 internal object Instances {
     private const val HEARTBEAT_SECONDS = 30L
     private const val STOPPED = "stopped"
     private const val REMOTE_PROTOCOL = 1
+    private const val GAME = "rs3"
     private val RELEASE_AFTER_IDLE: Duration = Duration.ofMinutes(2)
+    private val SEAT_GRACE: Duration = Duration.ofSeconds(15)
 
     enum class State { IDLE, HELD, SIGNED_OUT, SIGN_IN_EXPIRED, FULL, UNREACHABLE, STOPPED }
 
@@ -45,6 +53,19 @@ internal object Instances {
     @Volatile
     var total = 0
         private set
+
+    /** The last per-instance refusal: how many seats of it were in use elsewhere, and how many the player has. */
+    @Volatile
+    var seatsUsed = 0
+        private set
+
+    @Volatile
+    var seatsTotal = 0
+        private set
+
+    @Volatile
+    private var heldSeats: Set<String> = emptySet()
+    private val grantedAt = ConcurrentHashMap<String, Long>()
 
     private val sessionId = UUID.randomUUID().toString().replace("-", "")
     private val http: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build() }
@@ -66,9 +87,13 @@ internal object Instances {
         worker.scheduleWithFixedDelay({ runCatching { tick() } }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS)
     }
 
-    /** True with an instance in hand; otherwise one is fetched in the background and [script] starts once it is. */
+    /**
+     * True with an instance in hand, and a seat of [script] when it is sold per instance; otherwise they are fetched in
+     * the background and [script] starts once they are.
+     */
     fun mayStart(script: Script): Boolean {
-        if (state == State.HELD) return true
+        val name = Entitlements.nameOf(script)
+        if (state == State.HELD && (!Entitlements.isPerInstance(name) || name in heldSeats)) return true
         waiting += script
         StoreNotices.refused(titleOf(script), null, Reason.INSTANCE_CHECKING)
         worker.submit { runCatching { claimForWaiting() } }
@@ -77,23 +102,39 @@ internal object Instances {
 
     fun release() {
         if (state != State.HELD) return
-        Entitlements.token()?.let { token -> runCatching { post(token, "release", Duration.ofSeconds(3)) } }
+        Entitlements.token()?.let { token -> runCatching { post(token, "release", emptySet(), Duration.ofSeconds(3)) } }
+        heldSeats = emptySet()
         idleSince = 0L
         change(State.IDLE)
     }
 
+    /** A per-instance script stopped: give its seat back now rather than at the next heartbeat. */
+    fun stopped(script: Script) {
+        if (state != State.HELD || !Entitlements.isPerInstance(Entitlements.nameOf(script))) return
+        worker.submit { runCatching { send("heartbeat") } }
+    }
+
     private fun claimForWaiting() {
         if (waiting.isEmpty()) return
-        if (state != State.HELD) send("claim")
+        val needsSeat = waiting.any { Entitlements.isPerInstance(Entitlements.nameOf(it)) }
+        if (state != State.HELD) send("claim") else if (needsSeat) send("heartbeat")
         val scripts = generateSequence { waiting.poll() }.toList()
-        if (state == State.HELD) {
-            GameThread.post {
-                StoreNotices.dismiss()
-                scripts.filter { !ScriptExecutor.isScriptRunning(it.javaClass) }.forEach { ScriptExecutor.activate(it) }
-            }
-        } else {
+        if (state != State.HELD) {
             scripts.lastOrNull()?.let { StoreNotices.refused(titleOf(it), null, refusalFor(state)) }
+            return
         }
+        val (ready, unseated) = scripts.partition { val n = Entitlements.nameOf(it); !Entitlements.isPerInstance(n) || n in heldSeats }
+        GameThread.post {
+            if (unseated.isEmpty()) StoreNotices.dismiss()
+            ready.filter { !ScriptExecutor.isScriptRunning(it.javaClass) }.forEach { ScriptExecutor.activate(it) }
+        }
+        unseated.lastOrNull()?.let { refuseSeat(it) }
+    }
+
+    private fun refuseSeat(script: Script) {
+        val name = Entitlements.nameOf(script)
+        val reason = if (state == State.HELD && answeredSeats) Reason.NO_SEAT else Reason.INSTANCE_UNREACHABLE
+        StoreNotices.refused(titleOf(script), Entitlements.accessOf(name), reason)
     }
 
     // Holding: heartbeat, or give the instance back once nothing has run for a while. Not holding but still running,
@@ -112,15 +153,22 @@ internal object Instances {
 
     internal fun idleLongEnough(idleSince: Long, now: Long) = idleSince != 0L && now - idleSince >= RELEASE_AFTER_IDLE.toMillis()
 
+    @Volatile
+    private var answeredSeats = false
+
     @Synchronized
     private fun send(action: String) {
         val token = Entitlements.token() ?: return change(State.SIGNED_OUT)
-        val response = runCatching { post(token, action, Duration.ofSeconds(15)) }.getOrNull()
+        val asked = seatsWanted()
+        val response = runCatching { post(token, action, asked, Duration.ofSeconds(15)) }.getOrNull()
         val answer = response?.let { runCatching { JsonParser.parseString(it.body()).asJsonObject }.getOrNull() }
         answer?.getAsJsonObject("allowance")?.let {
             used = it.get("used")?.asInt ?: used
             total = it.get("total")?.asInt ?: total
         }
+        val seats = answer?.getAsJsonObject("seats")
+        answeredSeats = seats != null
+        if (seats != null) takeSeats(asked, seats)
         val error = answer?.get("error")?.takeIf { it.isJsonPrimitive }?.asString
         when (val next = next(state, response?.statusCode(), error, local())) {
             State.STOPPED -> {
@@ -157,12 +205,55 @@ internal object Instances {
         state = next
     }
 
-    private fun post(token: String, action: String, timeout: Duration): HttpResponse<String> {
+    // Running, about to start, or granted a moment ago and not yet started by the game thread.
+    private fun seatsWanted(): Set<String> {
+        val now = System.currentTimeMillis()
+        grantedAt.entries.removeIf { now - it.value > SEAT_GRACE.toMillis() }
+        return (ScriptExecutor.activeScripts.asSequence() + waiting.asSequence())
+            .map { Entitlements.nameOf(it) }
+            .filter { Entitlements.isPerInstance(it) }
+            .toSet() + grantedAt.keys
+    }
+
+    internal fun grantedIn(answer: JsonObject): Set<String> =
+        answer.getAsJsonArray("granted")?.mapNotNull { runCatching { it.asString }.getOrNull() }?.toSet().orEmpty()
+
+    /** Running per-instance scripts this client asked to keep a seat of and was refused: they must stop. */
+    internal fun revoked(asked: Set<String>, granted: Set<String>, running: Collection<String>): Set<String> =
+        running.filter { it in asked && it !in granted }.toSet()
+
+    private fun takeSeats(asked: Set<String>, answer: JsonObject) {
+        val granted = grantedIn(answer)
+        answer.getAsJsonArray("refused")?.lastOrNull()?.asJsonObject?.let {
+            seatsUsed = it.get("used")?.asInt ?: 0
+            seatsTotal = it.get("total")?.asInt ?: 0
+        }
+        val now = System.currentTimeMillis()
+        (granted - heldSeats).forEach { grantedAt[it] = now }
+        heldSeats = granted intersect asked
+        val stopping = revoked(asked, granted, ScriptExecutor.activeScripts.map { Entitlements.nameOf(it) })
+        val revoked = ScriptExecutor.activeScripts.filter { Entitlements.nameOf(it) in stopping }
+        if (revoked.isEmpty()) return
+        GameThread.post {
+            revoked.forEach { script ->
+                println("[instances] ${titleOf(script)} has no instance free for this client any more ($seatsUsed of $seatsTotal in use elsewhere); stopping it.")
+                RunReports.markStop(script.javaClass, RunEnd.ACCESS_ENDED)
+                runCatching { script.stop() }
+            }
+            revoked.lastOrNull()?.let { StoreNotices.refused(titleOf(it), Entitlements.accessOf(Entitlements.nameOf(it)), Reason.NO_SEAT) }
+        }
+    }
+
+    private fun post(token: String, action: String, seats: Set<String>, timeout: Duration): HttpResponse<String> {
         val body = JsonObject().apply {
             addProperty("action", action)
             addProperty("sessionId", sessionId)
             addProperty("label", label())
-            if (action != "release") addLiveDetails(this)
+            if (action != "release") {
+                addLiveDetails(this)
+                addProperty("game", GAME)
+                add("seats", JsonArray().apply { seats.forEach { add(it) } })
+            }
         }
         val request = HttpRequest.newBuilder(URI.create("${Entitlements.storeBase()}/api/v1/instances"))
             .timeout(timeout)

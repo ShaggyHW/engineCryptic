@@ -67,6 +67,7 @@ object Entitlements {
     private val storeUrls = ConcurrentHashMap<String, String>()
     private val iconUrls = ConcurrentHashMap<String, String>()
     private val warned = ConcurrentHashMap.newKeySet<String>()
+    private val perInstance = ConcurrentHashMap.newKeySet<String>()
 
     @Volatile private var lastAnsweredNanos = Long.MIN_VALUE / 2
     @Volatile private var signedIn = false
@@ -148,6 +149,9 @@ object Entitlements {
             prices = prices[name],
         )
     }
+
+    /** True for a script sold per instance: each client running it needs one of the player's seats of it. */
+    internal fun isPerInstance(name: String): Boolean = name in perInstance
 
     fun isEntitled(name: String): Boolean = entitled(
         expiry = expiries[name],
@@ -283,7 +287,8 @@ object Entitlements {
             return Check.ANSWERED
         }
 
-        val reply = get("${storeBase()}/api/v1/entitlements?game=$GAME", token) ?: return Check.UNREACHABLE
+        // seats=1: this engine claims a seat before running a per-instance script, so the store may report them.
+        val reply = get("${storeBase()}/api/v1/entitlements?game=$GAME&seats=1", token) ?: return Check.UNREACHABLE
         val check = checkFor(reply.status)
         if (check == Check.SIGN_IN_REJECTED) {
             signInRejected()
@@ -295,6 +300,7 @@ object Entitlements {
         return runCatching {
             expiries.clear()
             trialDeadlines.clear()
+            val freshPerInstance = HashSet<String>()
             val root = JsonParser.parseString(body)
             val list = if (root.isJsonArray) root.asJsonArray else root.asJsonObject.getAsJsonArray("entitlements")
             list?.forEach { entry ->
@@ -306,7 +312,10 @@ object Entitlements {
                 if (obj.get("trial")?.asBoolean == true) {
                     trialDeadlines[name] = System.nanoTime() + Duration.between(Instant.now(), endsAt).toNanos()
                 }
+                if (perInstanceIn(obj)) freshPerInstance += name
             }
+            perInstance.retainAll(freshPerInstance)
+            perInstance.addAll(freshPerInstance)
             lastAnsweredNanos = System.nanoTime()
             runCatching { ScriptSync.sync(expiries.keys.toSet(), jars, token, http, home().resolve("scripts")) }
             Check.ANSWERED
@@ -348,6 +357,8 @@ object Entitlements {
             salePercent = entry.get("salePercent")?.takeUnless { it.isJsonNull }?.asInt ?: 0,
         )
     }.getOrNull()
+
+    internal fun perInstanceIn(entry: JsonObject): Boolean = entry.flag("perInstance")
 
     // A store older than free subscriptions marks only what it sells, as `paid`.
     internal fun requiresSubscription(entry: JsonObject): Boolean = entry.flag("paid") || entry.flag("requiresSubscription")

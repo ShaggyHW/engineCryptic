@@ -1,5 +1,6 @@
 package com.projectx.store
 
+import com.google.gson.JsonParser
 import com.projectx.store.Instances.State
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -42,5 +43,24 @@ class InstancesTest {
         assertFalse(Instances.idleLongEnough(0L, stopped + 600_000))
         assertFalse(Instances.idleLongEnough(stopped, stopped + 119_000))
         assertTrue(Instances.idleLongEnough(stopped, stopped + 120_000))
+    }
+
+    private fun answer(json: String) = JsonParser.parseString(json).asJsonObject
+
+    @Test
+    fun `granted seats are read from the answer, and a malformed one grants nothing`() {
+        assertEquals(setOf("Telos", "Plain"), Instances.grantedIn(answer("""{"granted":["Telos","Plain"],"refused":[]}""")))
+        assertEquals(emptySet(), Instances.grantedIn(answer("""{"refused":[{"internalName":"Telos","used":3,"total":3}]}""")))
+    }
+
+    @Test
+    fun `a running script whose seat is taken back stops, others carry on`() {
+        val asked = setOf("Telos", "Zuk")
+        assertEquals(setOf("Zuk"), Instances.revoked(asked, granted = setOf("Telos"), running = listOf("Telos", "Zuk", "Woodcutter")))
+    }
+
+    @Test
+    fun `a script started after the seats were asked for is not stopped by that answer`() {
+        assertEquals(emptySet(), Instances.revoked(setOf("Telos"), granted = setOf("Telos"), running = listOf("Telos", "Zuk")))
     }
 }

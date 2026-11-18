@@ -58,7 +58,8 @@ fun StoreRefusalBanner(refusal: StartRefusal) {
             }
         }
         if (!confirmed && access != null) {
-            ActionButton("Get it from the store", { Browser.open(access.storeUrl) }, tone = ButtonTone.Primary, height = 36.dp)
+            val label = if (refusal.reason == Reason.NO_SEAT) "Buy more instances" else "Get it from the store"
+            ActionButton(label, { Browser.open(access.storeUrl) }, tone = ButtonTone.Primary, height = 36.dp)
         }
         if (refusal.reason == Reason.NO_INSTANCE) {
             ActionButton("Add an instance", { Browser.open(Instances.instancesUrl()) }, tone = ButtonTone.Primary, height = 36.dp)
@@ -73,6 +74,9 @@ private fun explanation(refusal: StartRefusal): String {
         Reason.CONFIRMED -> "You have it now. Press Start again."
         Reason.INSTANCE_READY -> "This client has an instance now. Press Start again."
         Reason.INSTANCE_CHECKING -> "Getting an instance for this client. It starts by itself in a moment."
+        Reason.NO_SEAT ->
+            if (Instances.seatsTotal == 0) "It's sold per instance and you have no instances of it left. Buy some on the store, then press Start again."
+            else "It's sold per instance, and all ${Instances.seatsTotal} of yours are running on other clients. Stop it on one of them, or buy more instances on the store."
         Reason.NO_INSTANCE -> "All your instances are in use (${Instances.used} of ${Instances.total}). Stop the scripts on another client, or add an instance on the website."
         Reason.INSTANCE_SIGNED_OUT -> "Scripts need a Project X account. Sign in with Discord in the launcher's Store tab, then press Start again."
         Reason.INSTANCE_UNREACHABLE -> "Couldn't reach xclient.dev to check your instances. Press Start again in a moment."
