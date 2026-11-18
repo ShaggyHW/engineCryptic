@@ -26,6 +26,7 @@ import com.projectx.ui.compose.theme.Palette
 import kotlin.concurrent.thread
 
 private const val NOTE_MAX = 2000
+private const val NOTE_MIN = 10
 
 /** Sends this script's log from the last day and its settings to the Project X team, or to the player's own developer page for a script only they have. */
 @Composable
@@ -35,6 +36,8 @@ fun SendLogs(meta: ScriptMetadata, onClose: () -> Unit) {
     val note = remember(meta) { OverlayText({ draft.value }, { draft.value = it }, NOTE_MAX, multiline = true) }
     var sending by remember(meta) { mutableStateOf(false) }
     var outcome by remember(meta) { mutableStateOf<Outcome?>(null) }
+    var askedForNote by remember(meta) { mutableStateOf(false) }
+    val described = note.text.trim().length >= NOTE_MIN
     val own = remember(meta) { ScriptLibrary.isOwnScript(meta) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -52,7 +55,10 @@ fun SendLogs(meta: ScriptMetadata, onClose: () -> Unit) {
             style = type.body,
             modifier = Modifier.fillMaxWidth(0.94f),
         )
-        TextArea(note, "What went wrong? When did it happen? (optional)", Modifier.fillMaxWidth(0.94f), minHeight = 96.dp)
+        TextArea(note, "What went wrong? When did it happen?", Modifier.fillMaxWidth(0.94f), minHeight = 96.dp)
+        if (askedForNote && !described) {
+            Hint("Tell us what went wrong in a few words first, so we know what to look for in the log.", color = Palette.stop)
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             val sent = outcome is Outcome.Sent
             ActionButton(
@@ -62,7 +68,9 @@ fun SendLogs(meta: ScriptMetadata, onClose: () -> Unit) {
                     else -> "Send logs"
                 },
                 {
-                    if (!sending && !sent) {
+                    if (!described) {
+                        askedForNote = true
+                    } else if (!sending && !sent) {
                         sending = true
                         outcome = null
                         val text = note.text
@@ -72,7 +80,7 @@ fun SendLogs(meta: ScriptMetadata, onClose: () -> Unit) {
                         }
                     }
                 },
-                tone = ButtonTone.Primary,
+                tone = if (described || sending || sent) ButtonTone.Primary else ButtonTone.Quiet,
                 height = 36.dp,
             )
             ActionButton(if (sent) "Done" else "Cancel", onClose, height = 36.dp)

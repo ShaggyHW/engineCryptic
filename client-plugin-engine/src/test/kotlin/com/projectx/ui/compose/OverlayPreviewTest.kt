@@ -91,6 +91,9 @@ class OverlayPreviewTest {
         LibraryModel.detailTab = DetailTab.Settings
         render("library-settings")
         LibraryModel.detailTab = DetailTab.Overview
+        LibraryModel.sendingLogsFor = Portables::class.java.name
+        render("library-send-logs")
+        LibraryModel.sendingLogsFor = null
 
         QuestEditorState.beginEdit(
             Quest(
