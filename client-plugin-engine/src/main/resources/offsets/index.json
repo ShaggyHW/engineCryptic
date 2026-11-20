@@ -1,7 +1,7 @@
 {
   "tables": [
-    "linux-x86_64-951-3",
-    "windows-x86_64-951-3",
-    "windows-x86_64-951-3-vulkan"
+    "linux-x86_64-951-4",
+    "windows-x86_64-951-4",
+    "windows-x86_64-951-4-vulkan"
   ]
 }
