@@ -6,6 +6,7 @@ import com.projectx.game.input.Key
 import com.projectx.game.interfaces.InstanceSystem
 import com.projectx.game.interfaces.confirmInstanceDialogue
 import com.projectx.game.interfaces.startOrRejoinInstance
+import com.projectx.game.items.Item
 import com.projectx.script.api.*
 import com.projectx.script.event.Event
 import com.projectx.webwalker.WalkGoal
@@ -473,6 +474,15 @@ sealed class Wait {
         @JvmOverloads
         fun loadLastPresetNearestBank(onResult: Consumer<Boolean>? = null): Wait =
             call(onResult) { this.loadLastPresetNearestBank() }
+
+        /**
+         * Drop every backpack item [which] picks, one at a time, waiting for each slot to empty; [onResult] gets how
+         * many were dropped. Kotlin: `dropItems`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun dropItems(which: Predicate<Item>, onResult: Consumer<Int>? = null): Wait =
+            call(onResult) { this.dropItems { which.test(it) } }
 
         /** Fill the ore box from the backpack; [onResult] gets whether any ore moved. Kotlin: `fillOreBox`. */
         @JvmStatic
