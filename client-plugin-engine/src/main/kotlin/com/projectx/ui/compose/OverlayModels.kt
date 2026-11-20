@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.projectx.markers.TileMarkerState
 import com.projectx.quest.editor.QuestEditorState
+import com.projectx.store.Entitlements
 import com.projectx.ui.UIState
 import com.projectx.ui.compose.library.LibraryModel
 import com.projectx.ui.compose.screens.Cs2Model
@@ -111,6 +112,7 @@ object OverlayModels {
         GameThread.drain()
         QuestEditorModel.refresh()
         if (!ComposeOverlay.visible) return
+        Entitlements.refreshWhileWatched()
         LibraryModel.refresh()
         refreshPage(OverlayNavigation.page)
     }

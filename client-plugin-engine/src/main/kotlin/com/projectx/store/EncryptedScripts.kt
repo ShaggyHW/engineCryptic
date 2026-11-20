@@ -6,6 +6,7 @@ import com.projectx.script.InMemoryJar
 import com.projectx.script.InMemoryJarClassLoader
 import com.projectx.script.Script
 import com.projectx.script.ScriptExecutor
+import com.projectx.ui.ScriptLibrary
 import com.projectx.ui.compose.GameThread
 import java.io.File
 import java.net.URI
@@ -258,7 +259,11 @@ internal object EncryptedScripts {
         } finally {
             loading.remove(key)
             // One rescan once the queue drains, not one per script: each scan takes seconds.
-            if (worker.queue.isEmpty() && rescanPending.getAndSet(false)) GameThread.post { ScriptExecutor.loadScripts() }
+            // The sync that downloaded a build offered owned scripts to the library before this decrypt registered it.
+            if (worker.queue.isEmpty() && rescanPending.getAndSet(false)) GameThread.post {
+                ScriptExecutor.loadScripts()
+                ScriptLibrary.addOwned(Entitlements.owned())
+            }
         }
     }
 

@@ -48,6 +48,7 @@ object Entitlements {
 
     private const val ENFORCE_SECONDS = 60L
     private const val REFRESH_SECONDS = 5L * 60L
+    private const val WATCHED_REFRESH_SECONDS = 30L
     private const val GAME = "rs3"
 
     // Two refresh intervals and some slack, so one dropped request does not end a trial.
@@ -70,6 +71,7 @@ object Entitlements {
     private val perInstance = ConcurrentHashMap.newKeySet<String>()
 
     @Volatile private var lastAnsweredNanos = Long.MIN_VALUE / 2
+    @Volatile private var lastAskedNanos = Long.MIN_VALUE / 2
     @Volatile private var signedIn = false
     @Volatile private var started = false
 
@@ -122,6 +124,16 @@ object Entitlements {
         worker.scheduleWithFixedDelay({ runCatching { refresh() } }, 0, REFRESH_SECONDS, TimeUnit.SECONDS)
         worker.scheduleWithFixedDelay({ runCatching { enforce() } }, ENFORCE_SECONDS, ENFORCE_SECONDS, TimeUnit.SECONDS)
     }
+
+    /** While the overlay is open, a script claimed on the website shows within half a minute, not at the next refresh. */
+    internal fun refreshWhileWatched() {
+        if (!started || System.nanoTime() - lastAskedNanos < TimeUnit.SECONDS.toNanos(WATCHED_REFRESH_SECONDS)) return
+        lastAskedNanos = System.nanoTime()
+        worker.submit { runCatching { refresh() } }
+    }
+
+    /** The store scripts the player may run right now. */
+    internal fun owned(): Set<String> = expiries.keys.filterTo(HashSet()) { isEntitled(it) }
 
     // An unloaded engine's refresh kept running after a hot reload, re-downloading builds the new engine had replaced.
     @Synchronized
@@ -244,6 +256,7 @@ object Entitlements {
     }
 
     fun refresh(): Check {
+        lastAskedNanos = System.nanoTime()
         val catalogue = catalogueFor(GAME) ?: return Check.UNREACHABLE
         val jars = ArrayList<StoreJar>()
         runCatching {
