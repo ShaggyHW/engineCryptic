@@ -153,6 +153,7 @@ class WebLinkPermissions private constructor(
             "hasWS1Equiped" to Carried(Where.WORN, "atwild_reward_easy"),
             "hasWickedHood" to Carried(Where.ANYWHERE, "hooks3_hood"),
             "hasEctophial" to Carried(Where.BACKPACK, "ectophial"),
+            "hasGhostspeakWorn" to Carried(Where.WORN, "amulet_of_ghostspeak", "amulet_of_ghostspeak_enchanted"),
             "hasKG4" to Carried(Where.ANYWHERE, "atjun_gloves_elite"),
             "hasDA3" to Carried(Where.BACKPACK, "atdes_amulet_hard"),
             "hasDA4" to Carried(Where.BACKPACK, "atdes_amulet_elite"),

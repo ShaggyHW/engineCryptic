@@ -88,7 +88,8 @@ object WebWalker {
     private const val STEP_TIMEOUT_MS = 700L
     private const val STALL_GRACE_MS = 1200L
 
-    private val DOOR_OPTIONS = listOf("Open", "Go-through", "Pass-through")
+    // "Quick open" skips the dialogue some gates start on "Open", which otherwise leaves the gate shut.
+    private val DOOR_OPTIONS = listOf("Quick open", "Open", "Go-through", "Pass-through")
     private const val DOOR_PASSAGE_STEPS = 3
     private const val DOOR_EARLY_STEPS = 5
     private const val DOOR_OPEN_TIMEOUT_MS = 8_000L

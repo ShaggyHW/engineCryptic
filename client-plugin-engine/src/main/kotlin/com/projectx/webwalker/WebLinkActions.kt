@@ -28,6 +28,7 @@ import kotlin.math.max
  */
 internal object WebLinkActions {
     private const val PROMPT_TIMEOUT_MS = 4_000L
+    private const val WALK_TO_PROMPT_MS = 20_000L
     private const val LODESTONE_MAP_TIMEOUT_MS = 5_000L
     private const val OBJECT_STEP_SETTLE_MS = 2_500L
 
@@ -79,12 +80,22 @@ internal object WebLinkActions {
         WebLinkKind.SPELL -> link.spell?.let { SpellTeleports.cast(script, it) { script.stopped } == CastResult.STARTED } == true
     }
 
+    // The player may still be walking up to the object when the step starts; the prompt only follows once they get there.
+    private suspend fun awaitAfterWalking(script: Script, done: () -> Boolean) {
+        var stillSince = System.currentTimeMillis()
+        script.delayUntil(WALK_TO_PROMPT_MS) {
+            val now = System.currentTimeMillis()
+            if (localPlayer.isMoving) stillSince = now
+            done() || now - stillSince > PROMPT_TIMEOUT_MS
+        }
+    }
+
     /** Does one chained step: clicks an interface once it is up, or uses the next object. */
     suspend fun perform(script: Script, link: WebLink, step: WebStep): Boolean = perform(script, link, step) { false }
 
     suspend fun perform(script: Script, link: WebLink, step: WebStep, arrived: () -> Boolean): Boolean = when (step) {
         is WebInterfaceStep -> {
-            script.delayUntil(PROMPT_TIMEOUT_MS) { interfaces.isOpen(step.interfaceId) || arrived() }
+            awaitAfterWalking(script) { interfaces.isOpen(step.interfaceId) || arrived() }
             if (arrived()) {
                 true
             } else if (!interfaces.isOpen(step.interfaceId)) {

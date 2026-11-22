@@ -79,10 +79,20 @@ internal sealed interface WalkGoal {
          */
         fun candidates(from: Tile, standable: (Tile) -> Boolean): List<Tile> {
             val picked = ArrayList<Tile>(MAX_CANDIDATES)
+            val skipped = ArrayList<Tile>()
             for (tile in nearestFirst(allTiles(), from)) {
-                if (picked.any { it.plane == tile.plane && chebyshev(it, tile) < CANDIDATE_SPREAD } || !standable(tile)) continue
+                if (!standable(tile)) continue
+                if (picked.any { it.plane == tile.plane && chebyshev(it, tile) < CANDIDATE_SPREAD }) {
+                    skipped += tile
+                    continue
+                }
                 picked += tile
                 if (picked.size == MAX_CANDIDATES) break
+            }
+            // A goal smaller than the spread would otherwise offer one tile, which can be the walled-off one.
+            for (tile in skipped) {
+                if (picked.size == MAX_CANDIDATES) break
+                picked += tile
             }
             return picked
         }
