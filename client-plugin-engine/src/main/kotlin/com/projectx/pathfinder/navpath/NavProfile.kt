@@ -57,11 +57,11 @@ internal object NavProfile {
 
     // Every spirit tree row needs Tree Gnome Village done; its own key rather than varp_2661 because the tree map is
     // a menu, which a hit closes.
-    private const val SPIRIT_TREE_ACCESS = "spiritTreeAccess"
-    private const val TREE_GNOME_VILLAGE_VARP = 2661
+    internal const val SPIRIT_TREE_ACCESS = "spiritTreeAccess"
+    internal const val TREE_GNOME_VILLAGE_VARP = 2661
 
     // The planner's staff copies of the fairy ring rows.
-    private const val FAIRY_RING_STAFF_ACCESS = "fairyRingStaffAccess"
+    internal const val FAIRY_RING_STAFF_ACCESS = "fairyRingStaffAccess"
 
     // The game works the Temple Trekking level out in a client script that takes no arguments.
     private const val TEMPLE_TREKKING_LEVEL = "TempleTrekkingLevel"
@@ -149,7 +149,9 @@ internal object NavProfile {
     }
 
     /** The key of a planner `spell` row: `spell_<ability id>`, Trollheim being `spell_57`. */
-    fun spellKey(spell: TeleportSpell): String = "spell_${spell.abilityId}"
+    fun spellKey(spell: TeleportSpell): String = SPELL_KEY_PREFIX + spell.abilityId
+
+    internal const val SPELL_KEY_PREFIX = "spell_"
 
     /** One key per teleport spell: 1 when it can be cast now and has not been set aside, else 0. */
     fun spellKeys(castable: Map<TeleportSpell, Boolean>, setAside: Set<TeleportSpell>): List<Pair<String, Int>> =

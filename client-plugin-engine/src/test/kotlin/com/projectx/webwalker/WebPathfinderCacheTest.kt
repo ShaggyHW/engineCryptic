@@ -1,5 +1,6 @@
 package com.projectx.webwalker
 
+import com.projectx.pathfinder.navpath.NavProfile
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.TestInstance
@@ -47,8 +48,11 @@ class WebPathfinderCacheTest {
 
     @Test
     fun `gives up on an island in bounded time`() {
-        // Karamja is an island to a walker: with its boats and fairy rings set aside, it has to be given up on.
-        val boats = WebLinks.all.filter { it.kind == WebLinkKind.NPC || it.kind == WebLinkKind.FAIRY_RING }.toSet()
+        // Karamja is an island to a walker: with its boats, fairy rings and spirit tree set aside, it has to be given up on.
+        val boats = WebLinks.all.filter { link ->
+            link.kind == WebLinkKind.NPC || link.kind == WebLinkKind.FAIRY_RING ||
+                link.requirements.any { it.key == NavProfile.SPIRIT_TREE_ACCESS }
+        }.toSet()
         val started = System.nanoTime()
         val result = WebPathfinder().find(3222, 3218, 0, 2918, 3175, 0, 2, WebLinkPermissions.UNRESTRICTED, false, boats)
         val millis = (System.nanoTime() - started) / 1_000_000

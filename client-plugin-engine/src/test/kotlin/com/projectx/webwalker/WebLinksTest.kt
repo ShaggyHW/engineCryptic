@@ -1,6 +1,7 @@
 package com.projectx.webwalker
 
 import com.projectx.script.api.Lodestone
+import com.projectx.script.api.TeleportSpell
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -68,12 +69,24 @@ class WebLinksTest {
     }
 
     @Test
+    fun `teleport spells are teleports that name their spell`() {
+        val spells = WebLinks.globals.filter { it.kind == WebLinkKind.SPELL }
+        assertTrue(spells.isNotEmpty(), "no teleport spells loaded")
+        assertTrue(spells.all { it.spell != null }, "a spell link names no spell")
+        assertTrue(spells.any { it.spell == TeleportSpell.TROLLHEIM }, "Trollheim Teleport is missing")
+    }
+
+    @Test
     fun `a fairy ring reaches every other ring`() {
-        val rings = WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING }
+        val rings = WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING && !it.portable }
         assertTrue(rings.isNotEmpty(), "no fairy rings loaded")
         val codes = rings.mapNotNull { it.fairyCode }.toSet()
         val fromOne = rings.filter { it.from == rings.first().from }
-        assertEquals(codes.size - 1, fromOne.size, "a ring does not reach every other")
+        val ownCode = rings.first { it.to == rings.first().from }.fairyCode
+        assertEquals(codes - ownCode, fromOne.mapNotNull { it.fairyCode }.toSet(), "a ring does not reach every other")
+        val perDestination = fromOne.groupBy { it.fairyCode }.values
+        assertTrue(perDestination.all { links -> links.none { a -> links.any { b -> a !== b && a.requirements.containsAll(b.requirements) } } },
+            "a ring keeps a pairing that asks for more than another to the same destination")
         assertTrue(codes.all { it.length == 3 }, "a fairy ring code is not three letters")
     }
 

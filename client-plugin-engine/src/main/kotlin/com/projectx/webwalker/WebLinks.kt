@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 import com.projectx.script.api.Lodestone
+import com.projectx.script.api.TeleportSpell
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -67,6 +68,7 @@ object WebLinks {
         val itemId: Int = -1
         val itemName: String? = null
         val lodestone: String? = null
+        val spellId: Int = -1
         val menu: List<String>? = null
 
         @SerializedName("requirements")
@@ -241,6 +243,7 @@ object WebLinks {
         if (kind.isGlobal != raw.global && kind != WebLinkKind.FAIRY_RING) return null
 
         val lodestone = if (kind == WebLinkKind.LODESTONE) lodestoneNamed(raw.lodestone) ?: return null else null
+        val spell = if (kind == WebLinkKind.SPELL) TeleportSpell.byAbilityId(raw.spellId) ?: return null else null
         val target = when (kind) {
             WebLinkKind.NPC -> WebTarget(raw.npcId, raw.npcName)
             WebLinkKind.ITEM, WebLinkKind.POA, WebLinkKind.USE_ON -> WebTarget(raw.itemId, raw.itemName)
@@ -265,6 +268,7 @@ object WebLinks {
         if (chain.isNotEmpty()) link = link.then(*chain.toTypedArray())
         if (target != null) link = link.using(target)
         if (lodestone != null) link = link.toLodestone(lodestone)
+        if (spell != null) link = link.casting(spell)
         if (!raw.menu.isNullOrEmpty()) link = link.picking(*raw.menu.toTypedArray())
         return link
     }
@@ -291,21 +295,31 @@ object WebLinks {
 
     /** A link from every ring to every other: standing at one, dial the other's code. */
     private fun fairyRingLinks(rings: List<RawRing>, requirements: Map<Int, WebRequirement>): List<WebLink> {
-        val usable = rings.filter { it.objectId >= 0 && !it.code.isNullOrBlank() }
-        return usable.flatMap { here ->
-            usable.filter { it !== here && it.code != here.code }.map { there ->
-                WebLink(
-                    kind = WebLinkKind.FAIRY_RING,
-                    from = WebArea(here.x - FAIRY_RING_REACH, here.x + FAIRY_RING_REACH, here.y - FAIRY_RING_REACH, here.y + FAIRY_RING_REACH, here.plane),
-                    to = WebArea(there.x - FAIRY_RING_REACH, there.x + FAIRY_RING_REACH, there.y - FAIRY_RING_REACH, there.y + FAIRY_RING_REACH, there.plane),
-                    cost = here.costTiles.coerceAtLeast(1) * WebPathfinder.STEP_COST,
-                    action = here.action ?: "Configure",
-                    objectId = here.objectId,
-                    searchRadius = FAIRY_RING_SEARCH,
-                    requirements = (here.requirementIds.orEmpty() + there.requirementIds.orEmpty()).distinct().mapNotNull(requirements::get),
-                ).dialling(there.code!!)
+        val sites = rings.filter { it.objectId >= 0 && !it.code.isNullOrBlank() }.groupBy { it.code }.values
+        return sites.flatMap { here ->
+            sites.filter { it !== here }.flatMap { there ->
+                leastRequirements(here, there).map { ids ->
+                    val from = here.first()
+                    val to = there.first()
+                    WebLink(
+                        kind = WebLinkKind.FAIRY_RING,
+                        from = WebArea(from.x - FAIRY_RING_REACH, from.x + FAIRY_RING_REACH, from.y - FAIRY_RING_REACH, from.y + FAIRY_RING_REACH, from.plane),
+                        to = WebArea(to.x - FAIRY_RING_REACH, to.x + FAIRY_RING_REACH, to.y - FAIRY_RING_REACH, to.y + FAIRY_RING_REACH, to.plane),
+                        cost = from.costTiles.coerceAtLeast(1) * WebPathfinder.STEP_COST,
+                        action = from.action ?: "Configure",
+                        objectId = from.objectId,
+                        searchRadius = FAIRY_RING_SEARCH,
+                        requirements = ids.mapNotNull(requirements::get),
+                    ).dialling(to.code!!)
+                }
             }
         }
+    }
+
+    // A ring is listed once per way of being allowed to use it; a pairing that asks for more than another never helps.
+    private fun leastRequirements(here: List<RawRing>, there: List<RawRing>): List<Set<Int>> {
+        val options = here.flatMap { h -> there.map { t -> (h.requirementIds.orEmpty() + t.requirementIds.orEmpty()).toSet() } }.distinct()
+        return options.filter { option -> options.none { it != option && option.containsAll(it) } }
     }
 
     /**

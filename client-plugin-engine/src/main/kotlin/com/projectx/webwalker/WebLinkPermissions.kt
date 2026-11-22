@@ -1,7 +1,9 @@
 package com.projectx.webwalker
 
 import com.projectx.game.items.Item
+import com.projectx.game.magic.SpellCheck
 import com.projectx.game.magic.SpellTeleports
+import com.projectx.pathfinder.navpath.NavProfile
 import com.projectx.quest.runtime.CacheQuests
 import com.projectx.script.api.TeleportSpell
 import com.projectx.script.api.coinPouch
@@ -69,8 +71,9 @@ class WebLinkPermissions private constructor(
             val blocked = HashSet<WebRequirement>()
             val carriedBackpack = runCatching { inventory.toList() }.getOrDefault(emptyList())
             val carriedWorn = runCatching { equipment.toList() }.getOrDefault(emptyList())
+            val spells = lazy { SpellTeleports.checkAll() }
             for (requirement in WebLinks.all.flatMap(WebLink::requirements).distinct()) {
-                val have = valueOf(requirement.key, carriedBackpack, carriedWorn) ?: continue
+                val have = valueOf(requirement.key, carriedBackpack, carriedWorn, spells::value) ?: continue
                 val want = requirement.value.trim().toIntOrNull() ?: continue
                 val met = when (requirement.comparison.trim()) {
                     ">=" -> have >= want
@@ -406,10 +409,14 @@ class WebLinkPermissions private constructor(
             items.any { item -> target.matches(item.id, runCatching { item.name }.getOrNull()) }
 
         /** The account's current value for a requirement key, or null when this engine cannot evaluate it. */
-        private fun valueOf(key: String, backpack: List<Item>, worn: List<Item>): Int? = runCatching {
+        private fun valueOf(key: String, backpack: List<Item>, worn: List<Item>, spells: () -> Map<TeleportSpell, SpellCheck>): Int? = runCatching {
             when {
                 key.startsWith("varbit_") -> key.removePrefix("varbit_").toIntOrNull()?.let(varps::getVarBit)
                 key.startsWith("varp_") -> key.removePrefix("varp_").toIntOrNull()?.let(varps::getVar)
+                key.startsWith(NavProfile.SPELL_KEY_PREFIX) -> key.removePrefix(NavProfile.SPELL_KEY_PREFIX).toIntOrNull()
+                    ?.let(TeleportSpell::byAbilityId)?.let { if (spells()[it]?.usable == true) 1 else 0 }
+                key == NavProfile.FAIRY_RING_STAFF_ACCESS -> if (DramenStaff.ringStaffAccess(true)) 1 else 0
+                key == NavProfile.SPIRIT_TREE_ACCESS -> varps.getVar(NavProfile.TREE_GNOME_VILLAGE_VARP)
                 key == "coins" -> coinPouch.firstOrNull()?.amount ?: 0
                 key in SKILLS -> SKILLS[key]?.let(::getRealLevel)
                 else -> questFlag(key) ?: carriedValue(key, backpack, worn) ?: namedValue(key, backpack) ?: chargedValue(key, backpack, worn)

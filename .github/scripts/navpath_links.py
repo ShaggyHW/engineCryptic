@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refreshes the web walker's links.json from navpathService's worldReachableTiles.db.
+"""Adds what is new in navpathService's worldReachableTiles.db to the web walker's links.json.
 
     python3 .github/scripts/navpath_links.py <worldReachableTiles.db> [<links.json>]
 
@@ -14,10 +14,17 @@ the area to stand in. Global ones - a lodestone, an item, a spell or interface b
 the Abyss - can be used from anywhere and carry "global": true. A door also gets the way back through it
 alone, as navpathService adds it. Fairy rings are listed on their own; every ring reaches every other.
 
-Links we measured ourselves carry "measured": true and are always kept. Where upstream has the same
-way through, ours takes upstream's requirements so it is not tried by an account that lacks the
-unlock. Both copies stay, unless ours answers a prompt (a choice or steps): two different ways to
-answer the same question would compete, and ours has been driven in-game, so upstream's is dropped.
+The merge only adds. Every link, fairy ring and requirement already in links.json is kept as it is,
+whether we measured it or took it from upstream before, including ones upstream has since dropped.
+An upstream link joins only when no link we have is the same way through; where one is, ours takes
+upstream's requirements so it is not tried by an account that lacks the unlock. A link we measured
+that answers a prompt (a choice or steps) also stands in for upstream's way through the same object,
+because two different answers to one question would compete and ours has been driven in-game.
+
+Requirement ids already in links.json never change. An upstream requirement equal to one we have
+uses our id; a new one keeps upstream's id when it is free and takes the next unused one when not.
+
+A spell is only taken when the engine's TeleportSpell knows its ability id.
 
 A link whose area is inverted or wider than any real crossing is a typo upstream (one squeeze-through spans
 646 tiles, which let the planner step from Yanille to Karamja), so it is skipped.
@@ -28,6 +35,7 @@ evaluate, and the engine treats what it cannot evaluate as met, so those are lef
 import datetime
 import json
 import pathlib
+import re
 import sqlite3
 import sys
 
@@ -37,7 +45,11 @@ NPC_SEARCH_RADIUS = 20
 SWITCHED_OFF_KEYS = {"unkown", "unknown"}
 SAME_WAY_SLACK = 3
 MAX_AREA_SPAN = 32
-DEFAULT_LINKS = pathlib.Path(__file__).resolve().parents[2] / "client-plugin-engine/src/main/resources/webwalker/links.json"
+ENGINE_SOURCE = pathlib.Path(__file__).resolve().parents[2] / "client-plugin-engine/src/main"
+DEFAULT_LINKS = ENGINE_SOURCE / "resources/webwalker/links.json"
+TELEPORT_SPELLS = ENGINE_SOURCE / "kotlin/com/projectx/script/api/TeleportSpells.kt"
+WAY_FIELDS = ("kind", "action", "objectId", "npcId", "npcName", "itemId", "itemName", "lodestone", "spellId",
+              "menu", "steps", "global")
 
 TABLES = {
     "door": "teleports_door_nodes",
@@ -48,11 +60,12 @@ TABLES = {
     "ifslot": "teleports_ifslot_nodes",
     "lodestone": "teleports_lodestone_nodes",
     "poa_item": "teleports_POA_nodes",
+    "spell": "teleports_spell_nodes",
 }
 LOCAL_STARTS = ("object", "npc", "useon", "door")
-GLOBAL_STARTS = ("lodestone", "item", "ifslot", "poa_item")
+GLOBAL_STARTS = ("lodestone", "item", "ifslot", "poa_item", "spell")
 FIELD_ORDER = ["kind", "action", "objectId", "searchRadius", "costTiles", "global",
-               "npcId", "npcName", "itemId", "itemName", "lodestone", "menu",
+               "npcId", "npcName", "itemId", "itemName", "lodestone", "spellId", "menu",
                "fromMinX", "fromMaxX", "fromMinY", "fromMaxY", "fromPlane",
                "toMinX", "toMaxX", "toMinY", "toMaxY", "toPlane", "requirements", "steps"]
 
@@ -143,6 +156,9 @@ def first_step(kind, row):
                 "steps": [[row["interface_id"], row["component_id"], row["slot_id"], row["click_id"]]]}
     if kind == "lodestone":
         return {"kind": "LODESTONE", "action": "Teleport", "objectId": -1, "searchRadius": 0, "lodestone": row["lodestone"]}
+    if kind == "spell":
+        return {"kind": "SPELL", "action": row["action"] or "Cast", "objectId": -1, "searchRadius": 0,
+                "spellId": row["spell_id"]}
     if kind == "poa_item":
         return {"kind": "POA", "action": row["action"], "objectId": -1, "searchRadius": 0, "itemId": row["item_id"],
                 "menu": [m for m in (row["action2"], row["action3"]) if m]}
@@ -272,55 +288,120 @@ def inside(link, prefix, other, other_prefix):
             and link[f"{prefix}MinY"] - SAME_WAY_SLACK <= y <= link[f"{prefix}MaxY"] + SAME_WAY_SLACK)
 
 
-def same_way(measured, upstream):
+def prompt_twin(measured, upstream):
     return ("fromMinX" in upstream and measured["objectId"] == upstream["objectId"]
             and measured["action"] == upstream["action"]
             and inside(measured, "from", upstream, "from") and inside(measured, "to", upstream, "to"))
+
+
+def overlaps(a, b, prefix):
+    return (a[f"{prefix}Plane"] == b[f"{prefix}Plane"]
+            and a[f"{prefix}MinX"] - SAME_WAY_SLACK <= b[f"{prefix}MaxX"]
+            and b[f"{prefix}MinX"] - SAME_WAY_SLACK <= a[f"{prefix}MaxX"]
+            and a[f"{prefix}MinY"] - SAME_WAY_SLACK <= b[f"{prefix}MaxY"]
+            and b[f"{prefix}MinY"] - SAME_WAY_SLACK <= a[f"{prefix}MaxY"])
+
+
+def same_way(ours, upstream):
+    if any(ours.get(f) != upstream.get(f) for f in WAY_FIELDS) or not overlaps(ours, upstream, "to"):
+        return False
+    return "fromMinX" not in upstream or ("fromMinX" in ours and overlaps(ours, upstream, "from"))
+
+
+def requirement_identity(requirement):
+    return requirement["key"].strip(), str(requirement["value"]).strip(), requirement["comparison"].strip()
+
+
+def adopt_requirements(ours, upstream):
+    """Adds upstream's requirements to ours and returns which of our ids each upstream id became."""
+    by_identity = {requirement_identity(r): int(k) for k, r in ours.items()}
+    used = {int(k) for k in list(ours) + list(upstream)}
+    ids = {}
+    for key in sorted(upstream, key=int):
+        identity = requirement_identity(upstream[key])
+        if identity not in by_identity:
+            target = key
+            if target in ours:
+                spare = int(key) + 1
+                while spare in used:
+                    spare += 1
+                used.add(spare)
+                target = str(spare)
+            ours[target] = upstream[key]
+            by_identity[identity] = int(target)
+        ids[int(key)] = by_identity[identity]
+    return ids
+
+
+def renumbered(requirements, ids):
+    return sorted({ids[r] for r in requirements}) if requirements else None
+
+
+def known_spells():
+    text = TELEPORT_SPELLS.read_text(encoding="utf-8")
+    return {int(i) for i in re.findall(r"^\s+[A-Z_]+\((\d+)\)", text, re.M)}
+
+
+def ring_identity(ring):
+    return ring["objectId"], ring["x"], ring["y"], ring["plane"], ring["code"], tuple(ring["requirements"] or [])
 
 
 def main():
     db_path = sys.argv[1]
     links_path = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_LINKS
     current = json.loads(links_path.read_text(encoding="utf-8"))
-    measured = [link for link in current["links"] if link.get("measured")]
+    ours = current["links"]
+    old_rings = current.get("fairyRings", [])
+    requirements = current["requirements"]
 
-    requirements, upstream, rings, dropped = convert(open_ro(db_path))
-    switched_off = {int(k) for k, r in requirements.items() if r["key"].strip().lower() in SWITCHED_OFF_KEYS}
-    usable = [link for link in upstream if not switched_off.intersection(link["requirements"] or [])]
-    rings = [ring for ring in rings if not switched_off.intersection(ring["requirements"] or [])]
+    upstream_requirements, upstream, rings, dropped = convert(open_ro(db_path))
+    switched_off = {int(k) for k, r in upstream_requirements.items() if r["key"].strip().lower() in SWITCHED_OFF_KEYS}
+    spells = known_spells()
+    unknown_spells = sorted({l["spellId"] for l in upstream if l["kind"] == "SPELL" and l["spellId"] not in spells})
+    usable = [l for l in upstream if not switched_off.intersection(l["requirements"] or [])
+              and (l["kind"] != "SPELL" or l["spellId"] in spells)]
+    rings = [r for r in rings if not switched_off.intersection(r["requirements"] or [])]
 
-    shared, kept = 0, []
+    old_requirement_count = len(requirements)
+    ids = adopt_requirements(requirements, {k: r for k, r in upstream_requirements.items() if int(k) not in switched_off})
+    for item in usable + rings:
+        item["requirements"] = renumbered(item["requirements"], ids)
+
+    added, tightened = [], []
     for link in usable:
-        twins = [m for m in measured if same_way(m, link)]
+        twins = [o for o in ours if same_way(o, link)]
+        twins += [o for o in ours if o.get("measured") and (o.get("choice") or o.get("steps")) and prompt_twin(o, link)]
         for twin in twins:
-            if link["requirements"]:
-                twin["requirements"] = sorted(set(twin["requirements"] or []) | set(link["requirements"]))
-        shared += bool(twins)
-        if not any(twin.get("choice") or twin.get("steps") for twin in twins):
-            kept.append(link)
+            if link["requirements"] and not set(link["requirements"]) <= set(twin.get("requirements") or []):
+                twin["requirements"] = sorted(set(twin.get("requirements") or []) | set(link["requirements"]))
+                if all(t is not twin for t in tightened):
+                    tightened.append(twin)
+        if not twins and not any(same_way(a, link) for a in added):
+            added.append(link)
 
-    document = {
-        "source": "Converted from ShaggyHW/navpathService worldReachableTiles.db, used with the author's permission.",
-        "upstream": "https://github.com/ShaggyHW/navpathService",
-        "generated": datetime.date.today().isoformat(),
-        "costUnit": "costTiles is in walked tiles; upstream costs are milliseconds at 600 ms per tile.",
-        "requirements": requirements,
-        "links": kept + measured,
-        "fairyRings": rings,
-    }
+    seen = {ring_identity(r) for r in old_rings}
+    new_rings = []
+    for ring in rings:
+        if ring_identity(ring) not in seen:
+            seen.add(ring_identity(ring))
+            new_rings.append(ring)
+
+    document = dict(current)
+    document["generated"] = datetime.date.today().isoformat()
+    document["requirements"] = requirements
+    document["links"] = ours + added
+    document["fairyRings"] = old_rings + new_rings
     links_path.write_text(json.dumps(document, indent=1, ensure_ascii=False), encoding="utf-8", newline="\n")
 
     kinds = {}
-    for link in document["links"]:
+    for link in added:
         kinds[link["kind"]] = kinds.get(link["kind"], 0) + 1
-    before = {json.dumps({k: v for k, v in l.items() if k != "measured"}, sort_keys=True) for l in current["links"]}
-    after = {json.dumps({k: v for k, v in l.items() if k != "measured"}, sort_keys=True) for l in document["links"]}
     print(f"upstream: {len(upstream)} links ({dropped} incomplete or malformed skipped), "
-          f"{len(upstream) - len(usable)} switched off upstream, {shared} also measured here, "
-          f"{len(usable) - len(kept)} replaced by ours")
-    print("by kind:", ", ".join(f"{k} {v}" for k, v in sorted(kinds.items())), f"| fairy rings {len(rings)}")
-    print(f"links.json: {len(current['links'])} -> {len(document['links'])} "
-          f"({len(after - before)} new or changed, {len(before - after)} gone), {len(measured)} measured kept")
+          f"{len(upstream) - len(usable)} switched off or casting a spell the engine lacks {unknown_spells}")
+    print(f"links: {len(ours)} kept, {len(added)} added", "(" + ", ".join(f"{k} {v}" for k, v in sorted(kinds.items())) + ")",
+          f"{len(tightened)} of ours took upstream requirements")
+    print(f"fairy rings: {len(old_rings)} kept, {len(new_rings)} added; "
+          f"requirements: {old_requirement_count} kept, {len(requirements) - old_requirement_count} added")
 
 
 if __name__ == "__main__":
