@@ -78,6 +78,10 @@ void jvm_library_path(char *out, size_t out_size, const char *java_home) {
     std::snprintf(out, out_size, "%s\\bin\\server\\jvm.dll", java_home);
 }
 
+void jdwp_agent_path(char *out, size_t out_size, const char *java_home) {
+    std::snprintf(out, out_size, "%s\\bin\\jdwp.dll", java_home);
+}
+
 /// Keep the highest usable JDK found so far. Ordering is by the version the JDK itself reports
 /// rather than by its directory name, so a "jdk-latest" or a vendor-renamed directory is ranked on
 /// what it actually is — and an install root full of old JREs yields nothing instead of the newest

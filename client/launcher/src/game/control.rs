@@ -207,6 +207,10 @@ mod mapping {
     pub fn still_starting(since: Instant) -> bool {
         since.elapsed() < grace()
     }
+
+    pub fn grace_window() -> Duration {
+        grace()
+    }
 }
 
 #[cfg(any(all(unix, not(target_os = "macos")), windows))]
@@ -226,7 +230,10 @@ fn classify(pid: u32) -> ClientStatus {
     match send_command(pid, "STATUS") {
         Ok(resp) => parse_status(pid, &resp),
         Err(e) => {
-            let starting = mapping::still_starting(mapped_since);
+            // A bootstrap that has given up says so, and waiting out the grace window after that
+            // only hides the reason for another minute.
+            let failure = bootstrap_failure(pid);
+            let starting = failure.is_none() && mapping::still_starting(mapped_since);
             log::debug!(
                 "discover_clients: pid {} has the engine mapped but STATUS failed after {:?}: {}",
                 pid,
@@ -235,7 +242,7 @@ fn classify(pid: u32) -> ClientStatus {
             );
             // The supervisor is the only thing that answers the socket, so a client that never
             // binds one can only be explained by the bootstrap that would have started it.
-            let detail = if starting { None } else { bootstrap_complaint(pid) };
+            let detail = if starting { None } else { failure.or_else(|| bootstrap_complaint(pid)) };
             ClientStatus {
                 pid,
                 state: if starting { "starting" } else { "error" }.to_string(),
@@ -298,6 +305,88 @@ fn bootstrap_complaint(pid: u32) -> Option<String> {
         lines[from..].join("\n")
     );
     lines.last().map(|line| (*line).to_string())
+}
+
+/// Prefixes the bootstrap writes into its log (`projectx_bootstrap.cpp`): one when it is loaded into
+/// a client, one on the line that says why the engine will not start.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+const SESSION_MARKER: &str = "[BOOTSTRAP] loaded into pid";
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+const FAILURE_MARKER: &str = "[ENGINE FAILED]";
+
+/// The reason the bootstrap in `pid` gave for not starting the engine, if it has given up.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+pub(crate) fn bootstrap_failure(pid: u32) -> Option<String> {
+    failure_in_log(&std::fs::read_to_string(bootstrap_log_path(pid)).ok()?)
+}
+
+/// Only the latest session counts: the log is appended to, and a reused pid can carry a previous
+/// client's failure.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+fn failure_in_log(text: &str) -> Option<String> {
+    let session = text.rfind(SESSION_MARKER).map_or(text, |at| &text[at..]);
+    session
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix(FAILURE_MARKER))
+        .map(|reason| reason.trim().to_string())
+}
+
+/// Lines of the JVM's own stderr to copy into the launcher log when the engine fails to start.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+const STDERR_TAIL_LINES: usize = 15;
+
+/// Follows a client that has just had the bootstrap loaded until its engine answers, its bootstrap
+/// gives up, or the grace window runs out, and writes the outcome into the launcher log. Blocks, so
+/// it belongs on the injection thread.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+pub fn report_engine_start(pid: u32) {
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + mapping::grace_window();
+    loop {
+        if send_command(pid, "STATUS").is_ok() {
+            log::info!("Project X engine is running in pid {}.", pid);
+            return;
+        }
+        if let Some(reason) = bootstrap_failure(pid) {
+            log::error!("The Project X engine did not start in pid {}: {}", pid, reason);
+            log_jvm_stderr_tail(pid);
+            return;
+        }
+        if !is_injected(pid) {
+            log::warn!(
+                "pid {} exited or dropped the engine library before the engine started.",
+                pid
+            );
+            return;
+        }
+        if Instant::now() >= deadline {
+            log::warn!(
+                "The Project X engine in pid {} has not answered after {}s.",
+                pid,
+                mapping::grace_window().as_secs()
+            );
+            bootstrap_complaint(pid);
+            log_jvm_stderr_tail(pid);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+fn log_jvm_stderr_tail(pid: u32) {
+    let path = jvm_temp_dir().join(format!("projectx_stderr_{}.txt", pid));
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return;
+    }
+    let from = lines.len().saturating_sub(STDERR_TAIL_LINES);
+    log::warn!("Last {} lines of {}:\n{}", lines.len() - from, path.display(), lines[from..].join("\n"));
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -399,5 +488,41 @@ fn parse_status(pid: u32, resp: &str) -> ClientStatus {
         version,
         reloads,
         detail: None,
+    }
+}
+
+#[cfg(all(test, any(all(unix, not(target_os = "macos")), windows)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_failure_line_of_the_latest_session_is_the_reason() {
+        let log = "[BOOTSTRAP] loaded into pid 7
+                   [ENGINE FAILED] Java at /old refused to start
+                   [BOOTSTRAP] loaded into pid 7
+                   Using Java 27 from JAVA_HOME: /usr/lib/jvm/java-27-openjdk
+                   [ENGINE FAILED] The engine supervisor threw while starting: boom
+                   Shared library unloaded!
+";
+        assert_eq!(
+            failure_in_log(log).as_deref(),
+            Some("The engine supervisor threw while starting: boom")
+        );
+    }
+
+    #[test]
+    fn an_earlier_session_failure_does_not_count_against_a_new_one() {
+        let log = "[BOOTSTRAP] loaded into pid 7
+                   [ENGINE FAILED] No Java 25 or newer was found
+                   [BOOTSTRAP] loaded into pid 7
+                   Using Java 27 from JAVA_HOME: /usr/lib/jvm/java-27-openjdk
+";
+        assert_eq!(failure_in_log(log), None);
+    }
+
+    #[test]
+    fn a_log_from_a_bootstrap_without_markers_reports_nothing() {
+        assert_eq!(failure_in_log("Failed to create JVM -1
+"), None);
     }
 }

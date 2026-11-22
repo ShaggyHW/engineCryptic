@@ -72,7 +72,7 @@ inject_engine() {
     fi
     [[ -d "/proc/$pid" ]] || { err "process $pid is gone"; return 1; }
 
-    : "${JAVA_HOME:?JAVA_HOME must be set to a JDK 25 home for engine injection}"
+    : "${JAVA_HOME:?JAVA_HOME must be set to a JDK 25 or newer for engine injection}"
     export PROJECTX_HOME_DIR="${PROJECTX_HOME_DIR:-$(realpath "$ENGINE_DIR/build/libs")}"
 
     log "injecting $ENGINE_SO into rs2client pid $pid (PROJECTX_HOME_DIR=$PROJECTX_HOME_DIR)"

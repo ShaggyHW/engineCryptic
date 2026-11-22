@@ -76,6 +76,10 @@ void jvm_library_path(char *out, size_t out_size, const char *java_home) {
     std::snprintf(out, out_size, "%s/lib/server/libjvm.so", java_home);
 }
 
+void jdwp_agent_path(char *out, size_t out_size, const char *java_home) {
+    std::snprintf(out, out_size, "%s/lib/libjdwp.so", java_home);
+}
+
 /// Keep the highest usable JDK found so far. Ordering is by the version the JDK itself reports
 /// rather than by its directory name, so a symlink like `default-java` is ranked on what it
 /// actually is — and a root holding only old JDKs yields nothing instead of the newest of them.

@@ -16,6 +16,13 @@ JavaVM *jvm = nullptr;
 
 typedef jint (*JNI_CreateJavaVM_t)(JavaVM **, void **, void *);
 
+// The launcher reads the bootstrap log back (client/launcher/src/game/control.rs) and keys on these
+// two prefixes, so they change together or not at all.
+static constexpr char SESSION_MARKER[] = "[BOOTSTRAP] loaded into pid";
+static constexpr char FAILURE_MARKER[] = "[ENGINE FAILED]";
+
+static char stderr_log_path[256] = "the client's standard error";
+
 // ============================================================================
 // Crash forensics: breadcrumb ring buffer.
 //
@@ -100,6 +107,57 @@ using projectx::forensics::breadcrumbs;
 using projectx::forensics::breadcrumb_seq;
 using projectx::forensics::BREADCRUMB_COUNT;
 
+/// Records why the engine will not start, as the one line the launcher shows the user.
+static void fail(const char *format, ...) PROJECTX_PRINTF_FORMAT(1, 2);
+static void fail(const char *format, ...) {
+    char reason[1024];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(reason, sizeof(reason), format, args);
+    va_end(args);
+    projectx::forensics::log("%s %s\n", FAILURE_MARKER, reason);
+}
+
+/// Prints the pending exception's stack trace to stderr and leaves its one-line summary in `out`.
+static void take_pending_exception(JNIEnv *env, char *out, size_t out_size) {
+    std::snprintf(out, out_size, "no exception was raised");
+    jthrowable thrown = env->ExceptionOccurred();
+    if (thrown == nullptr) return;
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+
+    jmethodID to_string =
+        env->GetMethodID(env->GetObjectClass(thrown), "toString", "()Ljava/lang/String;");
+    jstring text = to_string ? static_cast<jstring>(env->CallObjectMethod(thrown, to_string)) : nullptr;
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (text == nullptr) {
+        std::snprintf(out, out_size, "an exception whose description could not be read");
+        return;
+    }
+    const char *utf = env->GetStringUTFChars(text, nullptr);
+    std::snprintf(out, out_size, "%s", utf ? utf : "an unreadable exception");
+    if (utf) env->ReleaseStringUTFChars(text, utf);
+}
+
+static const char *jni_error_text(jint code) {
+    switch (code) {
+        case JNI_ERR:      return "JNI_ERR, usually an option or agent the JVM rejected";
+        case JNI_EDETACHED: return "JNI_EDETACHED";
+        case JNI_EVERSION: return "JNI_EVERSION, the JVM does not support the requested JNI version";
+        case JNI_ENOMEM:   return "JNI_ENOMEM, not enough memory to reserve the Java heap";
+        case JNI_EEXIST:   return "JNI_EEXIST, a JVM is already running in this process";
+        case JNI_EINVAL:   return "JNI_EINVAL, invalid start-up arguments";
+        default:           return "an unrecognised error code";
+    }
+}
+
+static bool file_exists(const char *path) {
+    std::FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) return false;
+    std::fclose(file);
+    return true;
+}
+
 extern "C" JNIEXPORT void JNICALL
 breadcrumb_jni(JNIEnv *env, jclass /*cls*/, jstring tag, jlong addr) {
     uint64_t seq = breadcrumb_seq.fetch_add(1, std::memory_order_relaxed);
@@ -167,11 +225,7 @@ int jdk_feature_version(const char *java_home) {
 
     char probe[512];
     jvm_library_path(probe, sizeof(probe), java_home);
-    if (std::FILE *jvm_lib = std::fopen(probe, "rb")) {
-        std::fclose(jvm_lib);
-    } else {
-        return -1;
-    }
+    if (!file_exists(probe)) return -1;
 
     char release_path[512];
     std::snprintf(release_path, sizeof(release_path), "%s/release", java_home);
@@ -250,6 +304,16 @@ static void log_rejected_jdk(const char *source, const char *java_home) {
     }
 }
 
+static const char *log_chosen_jdk(const char *source, const char *java_home) {
+    int version = jdk_feature_version(java_home);
+    if (version > 0) {
+        projectx::forensics::log("Using Java %d from %s: %s\n", version, source, java_home);
+    } else {
+        projectx::forensics::log("Using a JDK of unknown version from %s: %s\n", source, java_home);
+    }
+    return java_home;
+}
+
 /// The JDK the engine will run on, in descending order of how deliberate the choice is: an explicit
 /// JAVA_HOME, an explicit JDK_HOME, the launcher's hint, then whatever the platform scan turns up.
 ///
@@ -263,23 +327,18 @@ static const char *resolve_java_home() {
     for (const char *name : ENV_VARS) {
         const char *value = std::getenv(name);
         if (value == nullptr || value[0] == '\0') continue;
-        if (jdk_is_usable(value)) {
-            log("Using the JDK from %s: %s\n", name, value);
-            return value;
-        }
+        if (jdk_is_usable(value)) return log_chosen_jdk(name, value);
         log_rejected_jdk(name, value);
     }
 
     if (const char *hinted = java_home_hint()) {
-        if (jdk_is_usable(hinted)) return hinted;
+        if (jdk_is_usable(hinted)) return log_chosen_jdk("the launcher's java-home.txt", hinted);
         log_rejected_jdk("the launcher's java-home.txt", hinted);
     }
 
-    if (const char *discovered = discover_java_home()) {
-        log("Using the JDK discovered at %s\n", discovered);
-        return discovered;
-    }
+    if (const char *discovered = discover_java_home()) return log_chosen_jdk("a scan of this machine", discovered);
 
+    log("No usable JDK in JAVA_HOME, JDK_HOME, the launcher's hint or the standard install folders.\n");
     return nullptr;
 }
 
@@ -293,6 +352,8 @@ void *initialize_projectx(void *base_address) {
     jclass supervisorClass = nullptr;
     jmethodID startMethod = nullptr;
     jstring engineHomeStr = nullptr;
+    char exception_text[768];
+    int option_count = 0;
 
     // PROJECTX_HOME_DIR is by definition the directory holding this library alongside the jars, so
     // fall back to deriving it. Only the POSIX injector can plant the variable in a process it did
@@ -303,15 +364,15 @@ void *initialize_projectx(void *base_address) {
         log("PROJECTX_HOME_DIR unset; derived from the loaded module: %s\n", classpath_dir);
     }
     if (classpath_dir == nullptr || classpath_dir[0] == '\0') {
-        log("Could not determine PROJECTX_HOME_DIR.\n");
+        fail("Could not work out which folder the engine is installed in.");
         return nullptr;
     }
 
     const char *java_home = resolve_java_home();
     if (java_home == nullptr) {
-        log("No JDK %d or newer could be located on this machine, so the engine cannot start. "
-            "Install one and set JAVA_HOME to its home directory.\n",
-            MIN_JDK_FEATURE_VERSION);
+        fail("No Java %d or newer was found, so the engine cannot start. Install a JDK %d or any "
+             "newer one and set JAVA_HOME to its folder.",
+             MIN_JDK_FEATURE_VERSION, MIN_JDK_FEATURE_VERSION);
         return nullptr;
     }
 
@@ -324,44 +385,55 @@ void *initialize_projectx(void *base_address) {
     // here, or the supervisor's child URLClassLoader would parent-delegate to stale classes and a
     // rebuilt engine jar would never take effect on reinject. The supervisor resolves + loads the
     // engine shadow jar from PROJECTX_HOME_DIR itself.
+    char supervisor_jar[1024];
+    std::snprintf(supervisor_jar, sizeof(supervisor_jar), "%s/projectx-supervisor.jar", classpath_dir);
+    if (!file_exists(supervisor_jar)) {
+        fail("%s is missing, so the engine install is incomplete. Reinstall the engine.", supervisor_jar);
+        return nullptr;
+    }
     char classpath_option[2048];
-    std::snprintf(classpath_option, sizeof(classpath_option),
-                  "-Djava.class.path=%s/projectx-supervisor.jar", classpath_dir);
+    std::snprintf(classpath_option, sizeof(classpath_option), "-Djava.class.path=%s", supervisor_jar);
 
     char librarypath_option[512];
     std::snprintf(librarypath_option, sizeof(librarypath_option), "-Djava.library.path=%s", classpath_dir);
-
-    char debug_option[128];
-    int debug_port = find_available_port(5005);
-    std::snprintf(debug_option, sizeof(debug_option),
-                  "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:%d", debug_port);
 
     const char *home = home_dir();
     char error_file_option[512];
     std::snprintf(error_file_option, sizeof(error_file_option),
                   "-XX:ErrorFile=%s/.projectx/logs/hs_err_pid%%p.log", home);
 
-    options[0].optionString = const_cast<char *>("--enable-native-access=ALL-UNNAMED");
-    options[1].optionString = classpath_option;
-    options[2].optionString = librarypath_option;
-    options[3].optionString = const_cast<char *>("-verbose:jni");
-    options[4].optionString = debug_option;
-    options[5].optionString = error_file_option;
+    options[option_count++].optionString = const_cast<char *>("--enable-native-access=ALL-UNNAMED");
+    options[option_count++].optionString = classpath_option;
+    options[option_count++].optionString = librarypath_option;
+    options[option_count++].optionString = const_cast<char *>("-verbose:jni");
+    options[option_count++].optionString = error_file_option;
     // Lower JIT thresholds so render-hot paths (MeshProjection, SceneSnapshot) hit C2 compilation
     // in ~1-2 s instead of ~15 s after a toggle.
-    options[6].optionString = const_cast<char *>("-XX:CompileThresholdScaling=0.2");
+    options[option_count++].optionString = const_cast<char *>("-XX:CompileThresholdScaling=0.2");
     // Force AWT headless so the texture loader's BufferedImage/Graphics2D never tries to open a
     // display; on an EGL/Wayland client that throws AWTError and poisons every subsequent frame.
-    options[7].optionString = const_cast<char *>("-Djava.awt.headless=true");
+    options[option_count++].optionString = const_cast<char *>("-Djava.awt.headless=true");
     // The hs_err log alone captures nothing from threads outside the JVM's own, so request a core
     // too. Pair with an unlimited core rlimit, which the injector raises from outside.
-    options[8].optionString = const_cast<char *>("-XX:+CreateCoredumpOnCrash");
+    options[option_count++].optionString = const_cast<char *>("-XX:+CreateCoredumpOnCrash");
     // Without this the JVM elides stack data on recurring throws after JIT warm-up, which makes
     // hs_err logs far less useful when a crash follows a chain of trapped exceptions.
-    options[9].optionString = const_cast<char *>("-XX:-OmitStackTraceInFastThrow");
+    options[option_count++].optionString = const_cast<char *>("-XX:-OmitStackTraceInFastThrow");
+
+    char jdwp_agent[512];
+    char debug_option[128];
+    jdwp_agent_path(jdwp_agent, sizeof(jdwp_agent), java_home);
+    if (file_exists(jdwp_agent)) {
+        std::snprintf(debug_option, sizeof(debug_option),
+                      "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:%d",
+                      find_available_port(5005));
+        options[option_count++].optionString = debug_option;
+    } else {
+        log("This Java has no debug agent (%s); starting without remote debugging.\n", jdwp_agent);
+    }
 
     vm_args.version = JNI_VERSION_1_8;
-    vm_args.nOptions = 10;
+    vm_args.nOptions = option_count;
     vm_args.options = options;
     vm_args.ignoreUnrecognized = JNI_TRUE;
 
@@ -382,7 +454,7 @@ void *initialize_projectx(void *base_address) {
 
     void *handle = load_library(libjvm);
     if (!handle) {
-        log("Failed to load the JVM library: %s\n", load_error());
+        fail("Could not load Java from %s: %s", libjvm, load_error());
         return nullptr;
     }
     load_error();
@@ -390,13 +462,14 @@ void *initialize_projectx(void *base_address) {
     JNI_CreateJavaVM_t JNI_CreateJavaVM =
         reinterpret_cast<JNI_CreateJavaVM_t>(library_symbol(handle, "JNI_CreateJavaVM"));
     if (!JNI_CreateJavaVM) {
-        log("Failed to resolve JNI_CreateJavaVM: %s\n", load_error());
+        fail("%s is not a usable JVM (no JNI_CreateJavaVM): %s", libjvm, load_error());
         return nullptr;
     }
 
     jint res = JNI_CreateJavaVM(&jvm, reinterpret_cast<void **>(&env), &vm_args);
     if (res != JNI_OK) {
-        log("Failed to create JVM %d\n", res);
+        fail("Java at %s refused to start (%d, %s). Its own explanation is in %s.", java_home, res,
+             jni_error_text(res), stderr_log_path);
         return nullptr;
     }
 
@@ -413,7 +486,9 @@ void *initialize_projectx(void *base_address) {
 
     supervisorClass = env->FindClass("com/projectx/supervisor/Supervisor");
     if (supervisorClass == nullptr) {
-        log("Failed to find class com.projectx.supervisor.Supervisor\n");
+        take_pending_exception(env, exception_text, sizeof(exception_text));
+        fail("Java started but could not load the engine supervisor from %s: %s", supervisor_jar,
+             exception_text);
         goto destroy;
     }
 
@@ -421,7 +496,9 @@ void *initialize_projectx(void *base_address) {
 
     startMethod = env->GetStaticMethodID(supervisorClass, "start", "(JLjava/lang/String;)V");
     if (startMethod == nullptr) {
-        log("Failed to find method start in class Supervisor\n");
+        take_pending_exception(env, exception_text, sizeof(exception_text));
+        fail("%s does not match this bootstrap (no Supervisor.start): %s. Reinstall the engine.",
+             supervisor_jar, exception_text);
         goto destroy;
     }
 
@@ -431,10 +508,10 @@ void *initialize_projectx(void *base_address) {
     engineHomeStr = env->NewStringUTF(classpath_dir);
     env->CallStaticVoidMethod(supervisorClass, startMethod,
                               reinterpret_cast<jlong>(base_address), engineHomeStr);
-    if (env->ExceptionOccurred()) {
-        log("Exception occurred calling Supervisor.start:\n");
-        env->ExceptionDescribe();
-        env->ExceptionClear();
+    if (env->ExceptionCheck()) {
+        take_pending_exception(env, exception_text, sizeof(exception_text));
+        fail("The engine supervisor threw while starting: %s. The stack trace is in %s.", exception_text,
+             stderr_log_path);
     }
 
     return nullptr;
@@ -462,12 +539,13 @@ void projectx_bootstrap_start(int pid) {
         log_file = stderr;
         std::printf("Failed to access logfile at %s\n", log_path);
     } else {
-        char stream_path[256];
-        std::snprintf(stream_path, sizeof(stream_path), "%s/projectx_stderr_%d.txt", temp_dir(), pid);
-        redirect_stderr(stream_path);
-        std::snprintf(stream_path, sizeof(stream_path), "%s/projectx_stdout_%d.txt", temp_dir(), pid);
-        redirect_stdout(stream_path);
+        std::snprintf(stderr_log_path, sizeof(stderr_log_path), "%s/projectx_stderr_%d.txt", temp_dir(), pid);
+        redirect_stderr(stderr_log_path);
+        char stdout_path[256];
+        std::snprintf(stdout_path, sizeof(stdout_path), "%s/projectx_stdout_%d.txt", temp_dir(), pid);
+        redirect_stdout(stdout_path);
     }
+    log("%s %d\n", SESSION_MARKER, pid);
 
     // The directory may not exist on first run; creating it is best-effort.
     const char *home = home_dir();
@@ -492,7 +570,7 @@ void projectx_bootstrap_start(int pid) {
         pid, reinterpret_cast<void *>(base_address));
 
     if (!start_detached_thread(initialize_projectx, reinterpret_cast<void *>(base_address))) {
-        log("Failed to create thread\n");
+        fail("Could not start the thread that boots Java inside the client.");
     }
 }
 

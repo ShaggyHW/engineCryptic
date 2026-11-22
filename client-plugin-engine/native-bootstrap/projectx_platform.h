@@ -36,6 +36,10 @@ uint64_t current_thread_id();
 /// Absolute path of the JVM shared library inside a JDK home.
 void jvm_library_path(char *out, size_t out_size, const char *java_home);
 
+/// Absolute path of the JDWP debug agent inside a JDK home. Trimmed runtimes leave it out, and a
+/// requested agent that cannot load makes JNI_CreateJavaVM fail outright.
+void jdwp_agent_path(char *out, size_t out_size, const char *java_home);
+
 /// Lowest JDK feature version that can run the engine's class files. An older JVM loads fine and
 /// then throws UnsupportedClassVersionError on the first supervisor class, which from outside the
 /// process is indistinguishable from a hang: the bootstrap is mapped, so the client looks injected,

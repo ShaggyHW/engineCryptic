@@ -300,7 +300,8 @@ pub(crate) mod linux {
         let java_home = crate::java::resolve_home()
             .ok_or_else(|| {
                 anyhow!(
-                    "no JDK 25+ install could be found. Searched {}. Set JAVA_HOME to a JDK 25 home.",
+                    "no Java 25 or newer could be found (any JDK from 25 up works). Searched {}. \
+                     Install one, or set JAVA_HOME to its folder.",
                     crate::java::searched_locations()
                 )
             })?
@@ -375,7 +376,10 @@ pub(crate) mod linux {
         );
 
         match run_gdb_inject(target_pid, &env.engine_so, &env.java_home, &env.home_dir) {
-            Ok(()) => log::info!("Auto-inject: Project X engine injected into pid {}", target_pid),
+            Ok(()) => {
+                log::info!("Auto-inject: bootstrap loaded into pid {}", target_pid);
+                crate::game::control::report_engine_start(target_pid);
+            }
             Err(e) => log::warn!("Auto-inject: injection failed (continuing): {}", e),
         }
     }
@@ -562,7 +566,15 @@ pub(crate) mod linux {
         java_home: &str,
         home_dir: &Path,
     ) -> anyhow::Result<()> {
-        use anyhow::{anyhow, Context};
+        use anyhow::bail;
+
+        if find_on_path("gdb").is_none() {
+            bail!(
+                "gdb is not installed, and on Linux the engine is loaded into the client through it. \
+                 Install it with your package manager (for example `sudo apt install gdb`, \
+                 `sudo dnf install gdb` or `sudo pacman -S gdb`) and inject again."
+            );
+        }
 
         let so = gdb_quote(&engine_so.to_string_lossy());
         let home = gdb_quote(&home_dir.to_string_lossy());
@@ -591,43 +603,133 @@ pub(crate) mod linux {
             v
         };
 
-        // Attempt 1: plain gdb, only worthwhile when ptrace is unrestricted.
+        // Plain gdb only when ptrace is unrestricted; then pkexec, whose PolicyKit agent shows a
+        // graphical prompt in a GUI app with no terminal; then `sudo -n` for NOPASSWD setups, where
+        // -n fails fast instead of hanging on a password prompt nobody can see.
+        let mut ladder: Vec<(&str, &[&str])> = Vec::new();
         if ptrace_scope_allows_plain() {
-            log::info!("Auto-inject: ptrace_scope permits unprivileged attach; trying plain gdb");
-            let args = gdb_args("gdb", &[]);
-            match run_command(&args[0], &args[1..]) {
-                Ok(true) => return Ok(()),
-                Ok(false) => log::warn!("Auto-inject: plain gdb attach failed; escalating via pkexec"),
-                Err(e) => log::warn!("Auto-inject: plain gdb not runnable ({}); escalating via pkexec", e),
+            ladder.push(("gdb", &[]));
+        }
+        ladder.push(("pkexec gdb", &["pkexec"]));
+        ladder.push(("sudo -n gdb", &["sudo", "-n"]));
+
+        let mut refusals: Vec<String> = Vec::new();
+        for (label, prefix) in ladder {
+            let args = gdb_args("gdb", prefix);
+            let run = match run_capturing(&args[0], &args[1..]) {
+                Ok(run) => run,
+                Err(e) => {
+                    log::warn!("Inject: {} could not be run: {}", label, e);
+                    refusals.push(format!("{} could not be run ({})", label, e));
+                    continue;
+                }
+            };
+            match gdb_outcome(&run.output) {
+                GdbOutcome::Loaded => return Ok(()),
+                GdbOutcome::LoadFailed(reason) => {
+                    log::warn!("Inject: {} attached but the load failed. gdb said:\n{}", label, tail(&run.output));
+                    bail!(
+                        "the client was attached, but it could not load {}: {}",
+                        engine_so.display(),
+                        reason
+                    );
+                }
+                GdbOutcome::NotAttached(reason) => {
+                    let why = refusal(label, run.code, reason.as_deref());
+                    log::warn!("Inject: {}. gdb said:\n{}", why, tail(&run.output));
+                    refusals.push(why);
+                }
             }
         }
 
-        // Attempt 2: pkexec gdb — PolicyKit shows a GRAPHICAL auth dialog via the
-        // desktop's polkit agent, which works in a GUI app with no controlling
-        // terminal. This is the user-friendly elevation path.
-        let args = gdb_args("gdb", &["pkexec"]);
-        match run_command(&args[0], &args[1..]) {
-            Ok(true) => return Ok(()),
-            Ok(false) => log::warn!(
-                "Auto-inject: pkexec gdb did not succeed (auth dismissed, or attach rejected); \
-                 trying sudo -n gdb"
-            ),
-            Err(e) => log::warn!("Auto-inject: pkexec unavailable ({}); trying sudo -n gdb", e),
+        bail!(
+            "could not attach to the client: {}. Install a PolicyKit agent for a graphical \
+             password prompt, add a NOPASSWD sudoers rule for gdb, or set \
+             /proc/sys/kernel/yama/ptrace_scope to 0.",
+            refusals.join("; ")
+        )
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum GdbOutcome {
+        Loaded,
+        /// gdb got into the process, so asking again with more privileges would fail the same way.
+        LoadFailed(String),
+        NotAttached(Option<String>),
+    }
+
+    /// What a `gdb -batch` run of [`run_gdb_inject`]'s commands achieved. Its exit status cannot
+    /// say: the final `quit` succeeds whether or not the attach and the `dlopen` call before it did.
+    fn gdb_outcome(output: &str) -> GdbOutcome {
+        let values: Vec<&str> = output.lines().filter_map(history_value).collect();
+
+        if let Some(at) = values.iter().position(|v| v.starts_with("(void *)")) {
+            if values[at].trim_start_matches("(void *)").trim() != "0x0" {
+                return GdbOutcome::Loaded;
+            }
+            let reason = values
+                .get(at + 1)
+                .and_then(|v| quoted(v))
+                .unwrap_or("dlopen returned nothing and dlerror gave no reason");
+            return GdbOutcome::LoadFailed(reason.to_string());
         }
 
-        // Attempt 3: sudo -n gdb (non-interactive — for NOPASSWD/headless setups;
-        // -n makes sudo fail fast instead of hanging on a TTY-less password prompt).
-        let args = gdb_args("gdb", &["sudo", "-n"]);
-        match run_command(&args[0], &args[1..]) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(anyhow!(
-                "Engine injection could not get privileges: the pkexec prompt was \
-                 dismissed/unavailable and `sudo -n gdb` failed. Install a PolicyKit \
-                 agent for a graphical prompt, add a NOPASSWD sudoers rule for gdb, or \
-                 relax /proc/sys/kernel/yama/ptrace_scope."
-            )),
-            Err(e) => Err(e).context("Failed to run sudo -n gdb for injection"),
+        if !values.is_empty() {
+            let reason = output
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('$') && !l.starts_with('['))
+                .last()
+                .unwrap_or("gdb could not call dlopen in the client");
+            return GdbOutcome::LoadFailed(reason.to_string());
         }
+
+        let reason = output
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with("ptrace:"))
+            .or_else(|| output.lines().map(str::trim).find(|l| l.starts_with("Could not attach")))
+            .or_else(|| output.lines().map(str::trim).filter(|l| !l.is_empty()).last());
+        GdbOutcome::NotAttached(reason.map(str::to_string))
+    }
+
+    /// `$3 = (void *) 0x55d0` -> `(void *) 0x55d0`: a value gdb printed for a `call`.
+    fn history_value(line: &str) -> Option<&str> {
+        let (number, value) = line.trim().strip_prefix('$')?.split_once(" = ")?;
+        number.bytes().all(|b| b.is_ascii_digit()).then_some(value)
+    }
+
+    fn quoted(value: &str) -> Option<&str> {
+        let start = value.find('"')? + 1;
+        let end = value.rfind('"')?;
+        (end > start).then(|| &value[start..end])
+    }
+
+    /// Why one rung of the ladder did not get gdb into the client, in words a user can act on.
+    fn refusal(label: &str, code: Option<i32>, gdb_said: Option<&str>) -> String {
+        match (label, code) {
+            ("pkexec gdb", Some(126)) => "the pkexec password prompt was dismissed".to_string(),
+            ("pkexec gdb", Some(127)) => {
+                "pkexec was refused (no PolicyKit agent is running, or the password was wrong)".to_string()
+            }
+            _ => match gdb_said {
+                Some(said) => format!("{} failed: {}", label, said),
+                None => format!("{} failed with no output", label),
+            },
+        }
+    }
+
+    const GDB_LOG_TAIL_LINES: usize = 15;
+
+    fn tail(output: &str) -> String {
+        let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
+        lines[lines.len().saturating_sub(GDB_LOG_TAIL_LINES)..].join("\n")
+    }
+
+    fn find_on_path(program: &str) -> Option<PathBuf> {
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(program))
+            .find(|candidate| candidate.is_file())
     }
 
     /// Escape a value for embedding in a gdb string literal, so a path holding a
@@ -642,18 +744,81 @@ pub(crate) mod linux {
             .unwrap_or(false)
     }
 
-    /// Run a command to completion, returning Ok(true) on a zero exit status.
-    /// stdin is `/dev/null` so `sudo -n` can never stall waiting for input.
-    fn run_command(program: &str, args: &[String]) -> anyhow::Result<bool> {
+    struct CapturedRun {
+        code: Option<i32>,
+        output: String,
+    }
+
+    /// Run a command to completion with stdout and stderr joined, since gdb splits its account of
+    /// one attempt across both. stdin is `/dev/null` so `sudo -n` can never stall waiting for input.
+    fn run_capturing(program: &str, args: &[String]) -> anyhow::Result<CapturedRun> {
         use anyhow::Context;
-        let status = Command::new(program)
+        let out = Command::new(program)
             .args(args)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+            .output()
             .with_context(|| format!("Failed to spawn {}", program))?;
-        Ok(status.success())
+        let mut output = String::from_utf8_lossy(&out.stdout).into_owned();
+        output.push('\n');
+        output.push_str(&String::from_utf8_lossy(&out.stderr));
+        Ok(CapturedRun { code: out.status.code(), output })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_non_null_dlopen_handle_is_a_load() {
+            let out = "0x00007f3a in __GI___poll () from /lib/x86_64-linux-gnu/libc.so.6\n\
+                       $1 = 0\n$2 = 0\n$3 = (void *) 0x5581f0c2a6b0\n$4 = 0x0\n\
+                       [Inferior 1 (process 4242) detached]\n";
+            assert_eq!(gdb_outcome(out), GdbOutcome::Loaded);
+        }
+
+        #[test]
+        fn a_null_handle_carries_the_dlerror_text() {
+            let out = "$1 = 0\n$2 = 0\n$3 = (void *) 0x0\n\
+                       $4 = 0x7f12a0001230 \"libSDL2-2.0.so.0: cannot open shared object file: No such file or directory\"\n";
+            assert_eq!(
+                gdb_outcome(out),
+                GdbOutcome::LoadFailed(
+                    "libSDL2-2.0.so.0: cannot open shared object file: No such file or directory".into()
+                )
+            );
+        }
+
+        #[test]
+        fn a_refused_ptrace_is_reported_as_not_attached() {
+            let out = "Could not attach to process.  If your uid matches the uid of the target\n\
+                       process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try\n\
+                       again as the root user.\n\
+                       ptrace: Operation not permitted.\n\
+                       No symbol table is loaded.  Use the \"file\" command.\n\
+                       You can't do that without a process to debug.\n";
+            assert_eq!(
+                gdb_outcome(out),
+                GdbOutcome::NotAttached(Some("ptrace: Operation not permitted.".into()))
+            );
+        }
+
+        #[test]
+        fn an_attached_process_without_dlopen_is_a_load_failure() {
+            let out = "$1 = 0\n$2 = 0\nNo symbol \"dlopen\" in current context.\n";
+            assert_eq!(
+                gdb_outcome(out),
+                GdbOutcome::LoadFailed("No symbol \"dlopen\" in current context.".into())
+            );
+        }
+
+        #[test]
+        fn a_dismissed_pkexec_prompt_is_named() {
+            assert_eq!(refusal("pkexec gdb", Some(126), None), "the pkexec password prompt was dismissed");
+            assert_eq!(
+                refusal("sudo -n gdb", Some(1), Some("sudo: a password is required")),
+                "sudo -n gdb failed: sudo: a password is required"
+            );
+        }
     }
 }
 
@@ -815,7 +980,10 @@ pub(crate) mod windows {
         );
 
         match run_injector(&env, target_pid) {
-            Ok(()) => log::info!("Auto-inject: Project X engine injected into pid {}", target_pid),
+            Ok(()) => {
+                log::info!("Auto-inject: bootstrap loaded into pid {}", target_pid);
+                crate::game::control::report_engine_start(target_pid);
+            }
             Err(e) => log::warn!("Auto-inject: injection failed (continuing): {}", e),
         }
     }
