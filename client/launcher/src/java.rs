@@ -304,11 +304,14 @@ fn release_file_version(home: &Path) -> Option<u32> {
 }
 
 fn launcher_version(home: &Path) -> Option<u32> {
-    let output = Command::new(home.join("bin").join(java_exe_name()))
-        .arg("-version")
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
+    let mut command = Command::new(home.join("bin").join(java_exe_name()));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.arg("-version").stdin(Stdio::null()).output().ok()?;
     // `java -version` writes to stderr.
     let text = String::from_utf8_lossy(&output.stderr);
     let quoted = text.split('"').nth(1)?;

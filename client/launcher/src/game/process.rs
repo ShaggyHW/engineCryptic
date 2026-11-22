@@ -343,6 +343,11 @@ fn build_windows_command(
                 );
             }
             let mut cmd = Command::new(&injector);
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
             // injector usage: projectx_injector.exe <path-to-rs2client.exe> [args...]
             // target_argv[0] is the client exe path; target_argv[1..] are its args.
             cmd.arg(&target_argv[0]);
@@ -610,16 +615,14 @@ pub(crate) fn find_deploy_artifact(name: &str) -> Option<std::path::PathBuf> {
 /// antivirus quarantining them is by far the usual cause on a customer's machine.
 #[cfg(windows)]
 pub(crate) fn missing_artifact_message(name: &str) -> String {
-    let folder = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.display().to_string()))
-        .unwrap_or_else(|| "the launcher folder".to_string());
+    let folder = crate::helpers::dir()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_else(|| "the launcher's data folder".to_string());
     let mut message = format!(
         "{name} is missing from {folder}. Antivirus software often removes it because it loads \
          Project X into the game client. Restore it from your antivirus quarantine (Windows \
-         Security > Virus & threat protection > Protection history) or extract the whole \
-         launcher zip again, then add {folder} as an antivirus exclusion so it is not removed \
-         again."
+         Security > Virus & threat protection > Protection history) or restart the launcher to \
+         unpack it again, then add {folder} as an antivirus exclusion so it is not removed again."
     );
     if dev_artifacts_enabled() {
         message.push_str(" Build it with `cd client/launcher/patcher-win && cargo build --release`.");
@@ -654,6 +657,12 @@ fn injector_search_slots(name: &str) -> Vec<std::path::PathBuf> {
         if let Some(dir) = exe.parent() {
             slots.push(dir.join(name));
         }
+    }
+
+    // 1b. Where the Windows launcher unpacks the copies it carries inside itself.
+    #[cfg(windows)]
+    if let Some(dir) = crate::helpers::dir() {
+        slots.push(dir.join(name));
     }
 
     // 2 & 3. ProjectDirs-based slots (matches what config.rs uses for the

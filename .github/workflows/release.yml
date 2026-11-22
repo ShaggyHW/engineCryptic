@@ -202,7 +202,7 @@ jobs:
             archive: targz
           - name: windows-x86_64
             runner: windows-latest
-            archive: zip
+            archive: exe
           - name: macos-universal
             runner: macos-latest
             archive: bare
@@ -218,13 +218,8 @@ jobs:
         if: matrix.runner == 'ubuntu-latest'
         run: |
           sh .github/ci/apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
-      - name: Build the launcher
-        env:
-          PROJECTX_VERSION: ${{ needs.version.outputs.version }}
-        run: cargo build --release --manifest-path client/launcher/Cargo.toml --bin project-x-launcher
-      # A bare launcher is not a working install: a patched launch needs the
-      # patcher, and injection needs the injectors. They are small and
-      # platform-specific, so they ship in the bundle.
+      # A launch needs the patcher and injection needs the injectors. They are built first: the Windows launcher
+      # carries them inside its exe, so its release is one file; elsewhere they ship beside it in the bundle.
       - name: Build the patcher and injectors
         shell: bash
         run: |
@@ -234,6 +229,16 @@ jobs:
             linux-*)   cargo build --release --manifest-path client/launcher/patcher/Cargo.toml ;;
             macos-*)   cargo build --release --manifest-path client/launcher/patcher-mac/Cargo.toml ;;
           esac
+      - name: Build the launcher
+        shell: bash
+        env:
+          PROJECTX_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          case '${{ matrix.name }}' in
+            windows-*) export PROJECTX_EMBED_DIR="$PWD/client/launcher/patcher-win/target/release" ;;
+          esac
+          cargo build --release --manifest-path client/launcher/Cargo.toml --bin project-x-launcher
       - name: Stage
         shell: bash
         run: |
@@ -242,9 +247,6 @@ jobs:
           case '${{ matrix.name }}' in
             windows-*)
               cp client/launcher/target/release/project-x-launcher.exe stage/
-              cp client/launcher/patcher-win/target/release/projectx_patcher.dll stage/
-              cp client/launcher/patcher-win/target/release/projectx_injector.exe stage/
-              cp client/launcher/patcher-win/target/release/projectx_engine_injector.exe stage/
               ;;
             linux-*)
               cp client/launcher/target/release/project-x-launcher stage/
@@ -262,14 +264,12 @@ jobs:
           path: stage/
           retention-days: 3
 
-  # Per-platform bundles: everything needed for a working install, in the search
-  # slots the launcher already uses. The ~160 MB engine jar is deliberately left
-  # out — the launcher downloads that one asset into its data dir on first use,
-  # so this download stays small and the engine can update without a new
-  # launcher.
+  # Per-platform downloads. The Windows launcher is a single exe with the patcher
+  # and injectors inside it; it downloads the engine, bootstrap and supervisor
+  # into its data dir on first use, like every platform does the engine jar.
+  # Linux ships a folder:
   #
-  #   project-x-launcher[.exe]
-  #   projectx_patcher.dll | libprojectx_patcher.so, *_injector.exe
+  #   project-x-launcher, libprojectx_patcher.so
   #   engine/  bootstrap + supervisor, the seed for PROJECTX_HOME_DIR
   bundle:
     needs: [version, launcher, engine-jar, bootstrap-linux, bootstrap-windows]
@@ -284,7 +284,7 @@ jobs:
             archive: targz
           - name: windows-x86_64
             bootstrap: bootstrap-windows
-            archive: zip
+            archive: exe
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -296,7 +296,14 @@ jobs:
           v='${{ needs.version.outputs.version }}'
           n='${{ matrix.name }}'
           dir="project-x-launcher-$n-$v"
-          mkdir -p "$dir/engine" dist
+          mkdir -p dist
+          if [ '${{ matrix.archive }}' = exe ]; then
+            cp "incoming/launcher-$n/project-x-launcher.exe" "dist/$dir.exe"
+            cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
+            ls -la
+            exit 0
+          fi
+          mkdir -p "$dir/engine"
 
           cp incoming/launcher-$n/* "$dir/"
           # The bootstrap ships versioned as its own release asset; inside the

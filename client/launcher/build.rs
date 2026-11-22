@@ -1,10 +1,35 @@
 fn main() {
     stamp_version();
+    embed_helpers();
 
     #[cfg(windows)]
     embed_resource::compile("assets/projectx.rc", embed_resource::NONE)
         .manifest_optional()
         .expect("failed to embed assets/projectx.rc");
+}
+
+/// The patcher and injectors to carry inside the launcher, so a Windows release is one exe. The release
+/// pipeline builds them first and points `PROJECTX_EMBED_DIR` at them; a local build without it finds
+/// them beside the exe or in the source tree as before.
+fn embed_helpers() {
+    const HELPERS: [(&str, &str); 3] = [
+        ("PROJECTX_EMBED_PATCHER", "projectx_patcher.dll"),
+        ("PROJECTX_EMBED_INJECTOR", "projectx_injector.exe"),
+        ("PROJECTX_EMBED_ENGINE_INJECTOR", "projectx_engine_injector.exe"),
+    ];
+    println!("cargo:rustc-check-cfg=cfg(embedded_helpers)");
+    println!("cargo:rerun-if-env-changed=PROJECTX_EMBED_DIR");
+    let Some(dir) = std::env::var_os("PROJECTX_EMBED_DIR").filter(|dir| !dir.is_empty()) else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    for (key, name) in HELPERS {
+        let path = dir.join(name);
+        assert!(path.is_file(), "PROJECTX_EMBED_DIR has no {}", path.display());
+        println!("cargo:rerun-if-changed={}", path.display());
+        println!("cargo:rustc-env={}={}", key, path.display());
+    }
+    println!("cargo:rustc-cfg=embedded_helpers");
 }
 
 /// Bake in the version the release pipeline stamps every artifact with, so the

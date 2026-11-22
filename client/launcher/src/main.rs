@@ -1,8 +1,13 @@
+// A release on Windows opens no console window; its log goes to a file in the data folder instead (see log_target).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod auth;
 mod characters;
 mod config;
 mod engine;
 mod game;
+#[cfg(windows)]
+mod helpers;
 mod java;
 mod plugins;
 mod store;
@@ -121,9 +126,40 @@ pub fn apply_log_level(debug_logging: bool) {
     });
 }
 
+/// Where the log goes: the console in a development build, and in a Windows release, which has no console,
+/// `logs/launcher.log` in the data folder, keeping the previous run's as `launcher.previous.log`.
+fn log_target() -> env_logger::Target {
+    if !cfg!(all(windows, not(debug_assertions))) {
+        return env_logger::Target::Stderr;
+    }
+    let Some(dirs) = directories::ProjectDirs::from("", "", "project-x-launcher") else {
+        return env_logger::Target::Stderr;
+    };
+    let dir = dirs.data_dir().join("logs");
+    let path = dir.join("launcher.log");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::rename(&path, dir.join("launcher.previous.log"));
+    match File::create(&path) {
+        Ok(file) => env_logger::Target::Pipe(Box::new(file)),
+        Err(_) => env_logger::Target::Stderr,
+    }
+}
+
+/// Without a console a second copy would otherwise vanish without a word.
+#[cfg(windows)]
+fn already_running_notice() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let title = wide("Project X Launcher");
+    let body = wide("Project X Launcher is already running. Look for it on your taskbar.");
+    unsafe { MessageBoxW(std::ptr::null_mut(), body.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION) };
+}
+
 fn main() -> Result<()> {
     let _ = RUST_LOG_EXPLICIT.set(std::env::var_os("RUST_LOG").is_some());
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+        .target(log_target())
+        .init();
     apply_log_level(false);
 
     // Work around GBM buffer creation failures on some GPU/driver combos
@@ -140,9 +176,20 @@ fn main() -> Result<()> {
     let paths = Arc::new(Paths::new().context("Failed to initialize paths")?);
     paths.ensure_dirs()?;
 
+    #[cfg(windows)]
+    {
+        helpers::unpack();
+        // The browser profile lives with the rest of the data rather than in a folder beside the exe.
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", paths.data_dir.join("webview2"));
+        }
+    }
+
     let lock_file = File::create(&paths.lock_file).context("Failed to create lockfile")?;
     if lock_file.try_lock_exclusive().is_err() {
         log::error!("Another instance is already running");
+        #[cfg(windows)]
+        already_running_notice();
         std::process::exit(1);
     }
 
