@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <limits.h>
+#include <link.h>
 #include <execinfo.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -49,27 +50,19 @@ const char *temp_dir() { return "/tmp"; }
 
 uint64_t current_thread_id() { return (uint64_t)syscall(SYS_gettid); }
 
+/// The executable's load address, which is where offset 0 of its image sits. The client's first
+/// segment is read-only and its code starts a few pages in, so the first executable mapping is not it.
 uintptr_t main_module_base() {
-    char maps_path[256];
-    std::snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", getpid());
-
-    FILE *maps_file = std::fopen(maps_path, "r");
-    if (!maps_file) {
-        log("[ERROR] fopen for maps file failed\n");
-        return 0;
-    }
-
-    unsigned long base_address = 0;
-    char line[256];
-    while (std::fgets(line, sizeof(line), maps_file)) {
-        if (std::strstr(line, "r-xp") && !std::strstr(line, "vdso")) {
-            std::sscanf(line, "%lx", &base_address);
-            break;
-        }
-    }
-
-    std::fclose(maps_file);
-    return base_address;
+    uintptr_t base = 0;
+    // The loader reports the executable itself first.
+    dl_iterate_phdr(
+        [](dl_phdr_info *info, size_t, void *out) -> int {
+            *static_cast<uintptr_t *>(out) = info->dlpi_addr;
+            return 1;
+        },
+        &base);
+    if (base == 0) log("[ERROR] could not find the client's load address\n");
+    return base;
 }
 
 void jvm_library_path(char *out, size_t out_size, const char *java_home) {
