@@ -7,6 +7,7 @@ import com.projectx.game.items.Item
 import com.projectx.game.nxt.OffsetUnavailableException
 import com.projectx.script.Script
 import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.gameval.Gameval
 
 enum class GrandExchangeOfferStatus(val id: Int) {
     EMPTY(0),
@@ -72,6 +73,7 @@ object GrandExchange {
     internal const val QUANTITY_BOX = 170
     internal const val PRICE_BOX = 185
     internal const val CONFIRM_BUTTON = 212
+    internal val BACK_BUTTON by lazy { Gameval.requireComponentHash("stockmarket:backbutton") and 0xFFFF }
     internal const val COLLECT_TO_INVENTORY = 0
 
     internal const val OFFER_ITEM_VARP = 135
@@ -200,9 +202,9 @@ object GrandExchange {
     /** A row is a clickable container followed by its name text; the name itself takes no clicks. */
     private fun clickableRowSlot(nameSlot: Int, slots: Set<Int>) = if (nameSlot - 1 in slots) nameSlot - 1 else nameSlot
 
-    internal fun searchResultSlot(itemId: Int): Int? {
-        val name = Cache.obj(itemId)?.name ?: return null
-        return searchResults().entries.firstOrNull { it.value.equals(name, ignoreCase = true) }?.key
+    internal fun searchResultSlots(itemId: Int): List<Int> {
+        val name = Cache.obj(itemId)?.name ?: return emptyList()
+        return searchResults().filterValues { it.equals(name, ignoreCase = true) }.keys.toList()
     }
 
     internal fun searchRows() =
@@ -226,11 +228,43 @@ suspend fun Script.geOpen(timeoutMillis: Long = 8000): Boolean {
  * Places a buy offer for [quantity] of [itemId] at [price] coins each in [slot] (default: the first empty one).
  * Returns true once the server has accepted the offer. The exchange window must be open.
  */
-suspend fun Script.geBuy(itemId: Int, quantity: Int, price: Long, slot: Int = GrandExchange.firstEmptySlot()): Boolean {
-    if (!canPlaceOffer(slot, quantity, price)) return false
+suspend fun Script.geBuy(itemId: Int, quantity: Int, price: Long, slot: Int = GrandExchange.firstEmptySlot()): Boolean =
+    placeBuy(itemId, quantity, slot, price) { price }
+
+/**
+ * Places a buy offer for [quantity] of [itemId] at the exchange's guide price plus [percentAbove] percent, rounded up,
+ * in [slot] (default: the first empty one). The guide price is read off the offer screen once the item is chosen.
+ * Returns true once the server has accepted the offer. The exchange window must be open.
+ */
+suspend fun Script.geBuyAtGuidePrice(
+    itemId: Int,
+    quantity: Int,
+    percentAbove: Int,
+    slot: Int = GrandExchange.firstEmptySlot(),
+): Boolean = placeBuy(itemId, quantity, slot, 1L) { previousGuide ->
+    // The guide price arrives a moment after the item does, so until it changes the screen still shows the last item's.
+    delayUntil(3000) { GrandExchange.setupMarketPrice != previousGuide && GrandExchange.setupPrice == GrandExchange.setupMarketPrice }
+    val guide = GrandExchange.setupMarketPrice
+    if (guide <= 0) 0L else (guide * (100 + percentAbove) + 99) / 100
+}
+
+private suspend fun Script.placeBuy(
+    itemId: Int,
+    quantity: Int,
+    slot: Int,
+    checkPrice: Long,
+    price: suspend Script.(previousGuide: Long) -> Long,
+): Boolean {
+    if (GrandExchange.isSettingUpOffer && (GrandExchange.setupSlot != slot || GrandExchange.setupItemId != itemId) &&
+        !backToOffers()
+    ) return false
+    if (!canPlaceOffer(slot, quantity, checkPrice)) return false
     if (!openSetup(GrandExchange.buyButton(slot), slot, GrandExchangeOfferType.BUY)) return false
-    if (!chooseSearchResult(itemId)) return false
-    return finishOffer(slot, quantity, price)
+    val previousGuide = GrandExchange.setupMarketPrice
+    if (!chooseSearchResult(itemId, slot)) return false
+    val each = price(previousGuide)
+    if (each <= 0) return false
+    return finishOffer(slot, quantity, each, intArrayOf(itemId))
 }
 
 /**
@@ -248,7 +282,7 @@ suspend fun Script.geSell(itemId: Int, quantity: Int, price: Long, slot: Int = G
     IFSlot(GrandExchange.SELL_SIDE_INTERFACE, GrandExchange.SELL_SIDE_BACKPACK, backpackSlot).click(1)
     delayUntil(4000) { GrandExchange.setupItemId in forms }
     if (GrandExchange.setupItemId !in forms) return false
-    return finishOffer(slot, quantity, price)
+    return finishOffer(slot, quantity, price, forms)
 }
 
 /** Aborts the offer in [slot]. Returns true once the server has settled it; collect the refund with [geCollectAll]. */
@@ -290,35 +324,62 @@ private suspend fun Script.openSetup(button: Int, slot: Int, type: GrandExchange
     return GrandExchange.setupSlot == slot && varps.getVar(GrandExchange.OFFER_TYPE_VARP) == type.ordinal
 }
 
-private suspend fun Script.chooseSearchResult(itemId: Int): Boolean {
+private suspend fun Script.chooseSearchResult(itemId: Int, slot: Int): Boolean {
     if (GrandExchange.setupItemId == itemId) return true
     val name = Cache.obj(itemId)?.name ?: return false
     val query = name.lowercase().takeWhile { canTypeText(it.toString()) }.take(SEARCH_QUERY_LIMIT).trimEnd()
     if (query.isEmpty()) return false
+    // Items can share a name (a strung and an unstrung amulet), so each matching row is tried in turn. Searching again
+    // on a screen that already picked an item lists recent searches instead, so every try starts from a fresh one.
+    var tried = 0
+    while (true) {
+        if (tried > 0 && (!backToOffers() || !openSetup(GrandExchange.buyButton(slot), slot, GrandExchangeOfferType.BUY))) return false
+        if (!search(query, itemId)) return false
+        val row = GrandExchange.searchResultSlots(itemId).getOrNull(tried++) ?: return false
+        val before = GrandExchange.setupItemId
+        geReaction(640, 360)
+        IFSlot(GrandExchange.INTERFACE, GrandExchange.SEARCH_RESULTS, row).click(1)
+        delayUntil(4000) { GrandExchange.setupItemId == itemId || GrandExchange.setupItemId != before }
+        delay(420, 180)
+        if (GrandExchange.setupItemId == itemId) return true
+    }
+}
+
+private suspend fun Script.search(query: String, itemId: Int): Boolean {
     geReaction()
     if (!IFSlot(GrandExchange.INTERFACE, GrandExchange.SEARCH_BAR, -1).click(1)) return false
     delay(520, 260)
     typeText(query)
-    delayUntil(4000) { GrandExchange.searchResultSlot(itemId) != null }
-    val resultSlot = GrandExchange.searchResultSlot(itemId) ?: return false
-    geReaction(640, 360)
-    IFSlot(GrandExchange.INTERFACE, GrandExchange.SEARCH_RESULTS, resultSlot).click(1)
-    delayUntil(4000) { GrandExchange.setupItemId == itemId }
-    return GrandExchange.setupItemId == itemId
+    delayUntil(4000) { GrandExchange.searchResultSlots(itemId).isNotEmpty() }
+    return GrandExchange.searchResultSlots(itemId).isNotEmpty()
 }
 
 /**
  * Both boxes are always entered: choosing an item makes the server reset them (price to the guide price, a sell's
  * quantity to everything carried) a moment later, so a value that already looks right can still be overwritten.
  */
-private suspend fun Script.finishOffer(slot: Int, quantity: Int, price: Long): Boolean {
+private suspend fun Script.finishOffer(slot: Int, quantity: Int, price: Long, items: IntArray): Boolean {
     if (!enterAmount(GrandExchange.QUANTITY_BOX, quantity.toString()) { GrandExchange.setupQuantity == quantity }) return false
     if (!enterAmount(GrandExchange.PRICE_BOX, price.toString()) { GrandExchange.setupPrice == price }) return false
     if (GrandExchange.setupQuantity != quantity || GrandExchange.setupPrice != price) return false
+    if (GrandExchange.setupItemId !in items) return false
     geReaction()
     if (!IFSlot(GrandExchange.INTERFACE, GrandExchange.CONFIRM_BUTTON, -1).click(1)) return false
     delayUntil(8000) { GrandExchange.offer(slot).let { !it.isEmpty && it.status != GrandExchangeOfferStatus.ADDING } }
-    return !GrandExchange.offer(slot).isEmpty
+    val placed = GrandExchange.offer(slot)
+    if (!placed.isEmpty && placed.itemId !in items) {
+        geAbort(slot)
+        return false
+    }
+    return !placed.isEmpty
+}
+
+private suspend fun Script.backToOffers(): Boolean {
+    if (!GrandExchange.isSettingUpOffer) return true
+    geReaction(420, 200)
+    if (!IFSlot(GrandExchange.INTERFACE, GrandExchange.BACK_BUTTON, -1).click(1)) return false
+    delayUntil(3000) { !GrandExchange.isSettingUpOffer }
+    return !GrandExchange.isSettingUpOffer
 }
 
 private suspend fun Script.enterAmount(box: Int, digits: String, landed: () -> Boolean): Boolean {

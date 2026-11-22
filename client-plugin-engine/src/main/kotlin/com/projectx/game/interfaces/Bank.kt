@@ -1,6 +1,7 @@
 package com.projectx.game.interfaces
 
 import com.projectx.game.nxt.interfaces.InterfaceComponent
+import com.projectx.script.api.bank
 import com.projectx.script.api.interfaces
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.gameval.Gameval
@@ -49,7 +50,7 @@ class Bank {
                 if (Cache.obj(item.itemId)?.name == name)
                     return doBankAction(BANK_ITEMS_COMPONENT_ID, item.slotId, optionNum)
             }
-            return false
+            return clickBankSlot(optionNum) { Cache.obj(it)?.name == name }
         }
 
         internal fun doBankItemsAction(regex: Regex, optionNum: Int): Boolean {
@@ -57,7 +58,7 @@ class Bank {
                 if (regex.matches(Cache.obj(item.itemId)?.name ?: ""))
                     return doBankAction(BANK_ITEMS_COMPONENT_ID, item.slotId, optionNum)
             }
-            return false
+            return clickBankSlot(optionNum) { regex.matches(Cache.obj(it)?.name ?: "") }
         }
 
         internal fun doBankItemsAction(itemId: Int, optionNum: Int): Boolean {
@@ -65,7 +66,13 @@ class Bank {
                 if (item.itemId == itemId)
                     return doBankAction(BANK_ITEMS_COMPONENT_ID, item.slotId, optionNum)
             }
-            return false
+            return clickBankSlot(optionNum) { it == itemId }
+        }
+
+        // The window holds slots for only part of a large bank; the bank inventory has every one, at the same index.
+        private fun clickBankSlot(optionNum: Int, matches: (Int) -> Boolean): Boolean {
+            val slot = bank.firstOrNull { it.amount > 0 && matches(it.id) }?.slot?.slotId ?: return false
+            return doBankAction(BANK_ITEMS_COMPONENT_ID, slot, optionNum)
         }
 
         internal fun doBankInventoryAction(name: String, optionNum: Int): Boolean {

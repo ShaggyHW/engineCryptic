@@ -649,6 +649,32 @@ suspend fun Script.webWalkToArea(minX: Int, minY: Int, maxX: Int, maxY: Int, pla
 suspend fun Script.webWalkToTiles(tiles: Collection<Tile>, useLodestones: Boolean = true): WebWalkResult =
     WebWalker.walk(this, WalkGoal.tiles(tiles), useLodestones)
 
+/**
+ * The tiles [obj] can be used from without moving: beside it, on a side it can be reached from, with no wall or closed
+ * door in between. Empty when no tile next to it reaches it.
+ */
+fun objectInteractTiles(obj: SceneObject): List<Tile> {
+    val footprintX = obj.tileX until obj.tileX + obj.footprintX
+    val footprintY = obj.tileY until obj.tileY + obj.footprintY
+    val tiles = ArrayList<Tile>()
+    for (x in obj.tileX - 1..obj.tileX + obj.footprintX) for (y in obj.tileY - 1..obj.tileY + obj.footprintY) {
+        if (x in footprintX && y in footprintY) continue
+        val from = Tile.of(x, y, obj.plane)
+        val route = routeToObject(from, obj)
+        if (route.success && !route.alternative && route.isEmpty()) tiles += from
+    }
+    return tiles
+}
+
+/**
+ * Web-walks to a tile [obj] can be used from ([objectInteractTiles]), opening doors on the way, so an interact that
+ * follows reaches it even when it stands in a closed room or just behind a wall. Java: `Wait.webWalkToObject`.
+ */
+suspend fun Script.webWalkToObject(obj: SceneObject, useLodestones: Boolean = true): WebWalkResult {
+    val tiles = objectInteractTiles(obj)
+    return if (tiles.isEmpty()) webWalk(obj.tile, 1, useLodestones) else webWalkToTiles(tiles, useLodestones)
+}
+
 /** Plans the route [webWalkToArea] would walk, without walking it. */
 suspend fun Script.findWebPathToArea(area: Area): WebWalkResult =
     WebWalker.findPath(this, localPlayer.tile, WalkGoal.of(area))
@@ -1000,6 +1026,17 @@ fun withdrawBankItem(name: String, amount: Int = 0) = when (amount) {
         println("Withdraw-X not implemented (needs keyboard support)") //option 6 is withdraw-x
         false
     }
+}
+
+/** Withdraws by item id, for items that share a name with another (a strung and an unstrung amulet). */
+@JvmOverloads
+fun withdrawBankItem(itemId: Int, amount: Int = 0) = when (amount) {
+    1 -> doBankItemsAction(itemId, 2)
+    5 -> doBankItemsAction(itemId, 3)
+    10 -> doBankItemsAction(itemId, 4)
+    50 -> doBankItemsAction(itemId, 5)
+    0 -> doBankItemsAction(itemId, 7)
+    else -> false
 }
 
 @JvmOverloads

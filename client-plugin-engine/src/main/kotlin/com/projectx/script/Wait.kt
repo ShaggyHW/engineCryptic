@@ -7,6 +7,7 @@ import com.projectx.game.interfaces.InstanceSystem
 import com.projectx.game.interfaces.confirmInstanceDialogue
 import com.projectx.game.interfaces.startOrRejoinInstance
 import com.projectx.game.items.Item
+import com.projectx.game.nxt.entity.location.SceneObject
 import com.projectx.script.api.*
 import com.projectx.script.event.Event
 import com.projectx.webwalker.WalkGoal
@@ -252,6 +253,12 @@ sealed class Wait {
         @JvmOverloads
         fun webWalkToTiles(xs: IntArray, ys: IntArray, plane: Int, onResult: Consumer<WebWalkResult>? = null, useLodestones: Boolean = true): Wait =
             call(onResult) { WebWalker.walk(this, WalkGoal.tiles(xs, ys, plane), useLodestones) }
+
+        /** Walk to a tile [obj] can be used from, opening doors on the way. Kotlin: `webWalkToObject`. */
+        @JvmStatic
+        @JvmOverloads
+        fun webWalkToObject(obj: SceneObject, onResult: Consumer<WebWalkResult>? = null, useLodestones: Boolean = true): Wait =
+            call(onResult) { this.webWalkToObject(obj, useLodestones) }
 
         /** Plan the route [webWalkToArea] would walk without walking it; [onResult] gets it. Kotlin: `findWebPathToArea`. */
         @JvmStatic
@@ -584,6 +591,17 @@ sealed class Wait {
         @JvmStatic
         fun geBuyInSlot(itemId: Int, quantity: Int, price: Long, slot: Int, onResult: Consumer<Boolean>?): Wait =
             call(onResult) { this.geBuy(itemId, quantity, price, slot) }
+
+        /** Buy [quantity] of [itemId] at the guide price plus [percentAbove] percent. Kotlin: `geBuyAtGuidePrice`. */
+        @JvmStatic
+        @JvmOverloads
+        fun geBuyAtGuidePrice(itemId: Int, quantity: Int, percentAbove: Int, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.geBuyAtGuidePrice(itemId, quantity, percentAbove) }
+
+        /** Buy [quantity] of [itemId] at the guide price plus [percentAbove] percent in [slot]. Kotlin: `geBuyAtGuidePrice`. */
+        @JvmStatic
+        fun geBuyAtGuidePriceInSlot(itemId: Int, quantity: Int, percentAbove: Int, slot: Int, onResult: Consumer<Boolean>?): Wait =
+            call(onResult) { this.geBuyAtGuidePrice(itemId, quantity, percentAbove, slot) }
 
         /** Sell [quantity] of [itemId] from the backpack at [price] each in the first empty slot. Kotlin: `geSell`. */
         @JvmStatic

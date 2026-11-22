@@ -72,10 +72,13 @@ suspend fun Script.findNearestBank(): BankSite? = Banks.byDistanceFrom(localPlay
 suspend fun Script.openNearestBank(bankPin: String? = null): Boolean {
     if (bankOpen) return true
     if (openBankInReach(bankPin)) return true
-    val site = findNearestBank() ?: return false
+    // No bank on foot (a closed-off spot like the Observatory's top floor): head for the nearest, teleporting if need be.
+    val site = findNearestBank() ?: Banks.byDistanceFrom(localPlayer.tile).firstOrNull() ?: return false
     val walk = webWalk(site.tile, BANK_ARRIVE_DISTANCE)
     // A walk that stops a few tiles short usually still has the bank in reach.
     if (openBankInReach(bankPin)) return true
+    // Not always: at the Grand Exchange four tiles short leaves every banker beyond the counter's reach.
+    if (walk.isSuccess && webWalk(site.tile, 0).isSuccess && openBankInReach(bankPin)) return true
     if (!walk.isSuccess) println("[Banks] Could not reach $site: $walk")
     return false
 }
