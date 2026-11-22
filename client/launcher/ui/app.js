@@ -1,80 +1,96 @@
-// Project X Launcher - Frontend
 (function () {
   "use strict";
 
   const CLIENTS_POLL_MS = 3000;
-  // A client mid-startup flips to Active on its own, with no result event to
-  // drive a redraw — only a poll reveals it, so poll harder while one is pending.
+  // A client mid-startup turns Active with no result event, so only a poll reveals it.
   const CLIENTS_STARTING_POLL_MS = 1000;
-  // Off the Clients view the header and sidebar still show how many clients run,
-  // so keep a slow poll going rather than letting that count go stale.
   const CLIENTS_BACKGROUND_POLL_MS = 15000;
   const MAX_LOG_ENTRIES = 500;
-  // A discovery sweep can legitimately take seconds (a /proc scan plus a control
-  // socket round trip per injected client), so a poll never overlaps the one
-  // before it — without this the requests pile up faster than they drain.
+  // A discovery sweep can take seconds; without this, polls pile up faster than they drain.
   const CLIENTS_REQUEST_TIMEOUT_MS = 15000;
-  // Backstop for an action whose result never arrives, so a row can't stay
-  // disabled forever. Generous: an inject can sit on a sudo prompt.
+  // Backstop for a result that never arrives. Generous: an inject can sit on a sudo prompt.
   const BUSY_TIMEOUT_MS = 120000;
-  const EXPANDED_KEY = "projectx.expandedAccounts";
+  const COLLAPSED_KEY = "projectx.collapsedAccounts";
 
   const state = {
     config: null,
-    sessions: [], // [{user_id, display_name, accounts, session_id, last_account_id}]
-    // accountId -> character_info event, null while one is in flight.
+    sessions: [],
     characters: {},
     launchingAccountId: null,
-    view: "accounts",
-    expanded: loadExpanded(),
-    clients: null, // null until the first poll answers
+    view: "play",
+    collapsed: loadSet(COLLAPSED_KEY),
+    clients: null,
     clientsPollTimer: null,
     clientsPollMs: 0,
     clientsRequestAt: 0,
-    busyPids: {}, // pid -> timestamp of the action in flight
+    busyPids: {},
     renderedClients: null,
     launcherStatus: null,
-    store: null, // last store_status event
-    storeScripts: null, // null until the first listing answers
+    store: null,
+    storeScripts: null,
     storeError: null,
-    busyStore: {}, // internalName -> timestamp of the install in flight
-    signInDismissed: false, // "Not now" lasts for this run of the launcher only
+    busyStore: {},
+    signInDismissed: false,
+    schedulerRunning: false,
+    schedulerStatus: null,
+    heroTarget: null,
   };
+  const schedulerChosen = new Set();
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
 
   const views = {
-    accounts: $("#accounts-view"),
+    play: $("#play-view"),
     clients: $("#clients-view"),
     scheduler: $("#scheduler-view"),
     store: $("#store-view"),
     logs: $("#logs-view"),
     settings: $("#settings-view"),
   };
-  const navItems = $$(".nav-item[data-view]");
+  const navItems = $$(".nav-link[data-view]");
+  const content = $("#content");
+  const railQuery = window.matchMedia("(min-width: 900px)");
 
-  const topbarVersion = $("#topbar-version");
   const topbarStats = $("#topbar-stats");
   const sidebarVersion = $("#sidebar-version");
+  const clientStatus = $("#client-status");
   const statusbar = $("#statusbar");
+
+  const heroGreeting = $("#hero-greeting");
+  const heroSubtitle = $("#hero-subtitle");
+  const btnHeroPlay = $("#btn-hero-play");
+  const heroPlayLabel = $("#hero-play-label");
 
   const accountsList = $("#accounts-list");
   const accountsEmpty = $("#accounts-empty");
   const btnLogin = $("#btn-login");
   const btnExpandAll = $("#btn-expand-all");
+  const btnSelectAll = $("#btn-select-all");
+
+  const launchLabel = $("#launch-label");
+  const launchSub = $("#launch-sub");
+  const launchStatus = $("#launch-status");
+  const launchGap = $("#launch-gap");
+  const btnLaunch = $("#btn-launch");
+  const schedDelay = $("#sched-delay");
 
   const clientsList = $("#clients-list");
   const clientsEmpty = $("#clients-empty");
+  const runningList = $("#running-list");
+  const runningEmpty = $("#running-empty");
   const navClientsCount = $("#nav-clients-count");
   const btnRefreshClients = $("#btn-refresh-clients");
+  const btnSideRefresh = $("#btn-side-refresh");
 
   const launcherUpdate = $("#launcher-update");
   const launcherUpdateDetail = $("#launcher-update-detail");
   const btnLauncherUpdate = $("#btn-launcher-update");
-  const btnDonate = $("#btn-donate");
 
-  const DONATE_URL = "https://www.paypal.com/donate/?business=Leightkenno8%40icloud.com&item_name=Project+X";
+  const userName = $("#user-name");
+  const userSub = $("#user-sub");
+  const btnUserSignIn = $("#btn-user-sign-in");
+  const btnUserSignOut = $("#btn-user-sign-out");
 
   const storeAccount = $("#store-account");
   const storeOrigin = $("#store-origin");
@@ -108,13 +124,11 @@
     window.ipc.postMessage(JSON.stringify(msg));
   }
 
-  // Receive events from Rust
   window.__projectx_callback = function (event) {
     switch (event.type) {
       case "init":
         state.config = event.config;
         state.sessions = event.sessions;
-        if (state.sessions.length === 1) state.expanded.add(state.sessions[0].user_id);
         restoreConfigToUI();
         renderAccounts();
         logStatus("Launcher ready");
@@ -130,8 +144,8 @@
 
       case "login_complete":
         state.sessions.push(event.session);
-        state.expanded.add(event.session.user_id);
-        saveExpanded();
+        state.collapsed.delete(event.session.user_id);
+        saveSet(COLLAPSED_KEY, state.collapsed);
         renderAccounts();
         logStatus("Logged in as " + event.session.display_name, "success");
         break;
@@ -142,8 +156,8 @@
 
       case "logout_complete":
         state.sessions = state.sessions.filter((s) => s.user_id !== event.user_id);
-        state.expanded.delete(event.user_id);
-        saveExpanded();
+        state.collapsed.delete(event.user_id);
+        saveSet(COLLAPSED_KEY, state.collapsed);
         renderAccounts();
         logStatus("Logged out");
         break;
@@ -200,6 +214,8 @@
         state.store = event;
         if (event.error) logStatus(event.error, "error");
         renderStore();
+        renderUserCard();
+        renderHero();
         renderSignInDialog();
         break;
 
@@ -218,8 +234,6 @@
       case "client_control_result":
         delete state.busyPids[event.pid];
         logStatus("pid " + event.pid + ": " + event.message, event.ok ? "success" : "error");
-        // A clients_list event follows from the backend; re-render now so the
-        // row's buttons come back without waiting for it.
         state.renderedClients = null;
         renderClients();
         break;
@@ -245,7 +259,7 @@
   }
 
   function button(label, variant, disabled, onClick) {
-    const b = el("button", "btn btn-sm" + (variant ? " " + variant : ""), label);
+    const b = el("button", "btn btn-small" + (variant ? " " + variant : ""), label);
     b.type = "button";
     b.disabled = !!disabled;
     b.addEventListener("click", (e) => {
@@ -275,18 +289,23 @@
     return parts.map((n) => String(n).padStart(2, "0")).join(":");
   }
 
-  // Storage can be unavailable in the webview; expansion is only a convenience.
-  function loadExpanded() {
+  function greeting() {
+    const hour = new Date().getHours();
+    return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  }
+
+  // Storage can be unavailable in the webview; collapsing is only a convenience.
+  function loadSet(key) {
     try {
-      return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY) || "[]"));
+      return new Set(JSON.parse(localStorage.getItem(key) || "[]"));
     } catch (_) {
       return new Set();
     }
   }
 
-  function saveExpanded() {
+  function saveSet(key, set) {
     try {
-      localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded]));
+      localStorage.setItem(key, JSON.stringify([...set]));
     } catch (_) {
       // ignored
     }
@@ -294,7 +313,7 @@
 
   /** The chathead when RuneScape has one, otherwise the character's initial. */
   function paintFace(portrait, displayName, known) {
-    portrait.innerHTML = "";
+    portrait.textContent = "";
     if (known && known.avatar) {
       const img = document.createElement("img");
       img.src = known.avatar;
@@ -307,22 +326,25 @@
     portrait.classList.add("is-blank");
   }
 
+  function characterMeta(known) {
+    const parts = [];
+    if (known && known.total) parts.push("Total " + known.total.toLocaleString("en-GB"));
+    if (known && known.rank) parts.push("Rank " + known.rank.toLocaleString("en-GB"));
+    return parts.join(" · ");
+  }
+
   function paintKnownFaces(event) {
-    $$('.char-face[data-account-id="' + event.account_id + '"]').forEach((portrait) => {
-      const row = portrait.parentElement;
-      const name = row && row.querySelector(".char-name");
+    $$(".char-face").forEach((portrait) => {
+      if (portrait.dataset.accountId !== event.account_id) return;
+      const card = portrait.closest(".account-card");
+      const name = card && card.querySelector(".card-name");
       paintFace(portrait, name && name.textContent, event);
-      if (event.total && row && !row.querySelector(".char-stat")) {
-        const stat = el("span", "char-stat", "Total " + event.total.toLocaleString("en-GB"));
-        row.insertBefore(stat, row.querySelector(".char-name").nextSibling);
-      }
+      const meta = card && card.querySelector(".card-meta");
+      if (meta) meta.textContent = characterMeta(event);
     });
   }
 
   // ---- Scheduler ----
-
-  const schedulerChosen = new Set();
-  let schedulerRunning = false;
 
   function everyCharacter() {
     return state.sessions.flatMap((session) =>
@@ -336,32 +358,32 @@
     );
   }
 
+  function chosenCharacters() {
+    return everyCharacter().filter((c) => schedulerChosen.has(c.account_id));
+  }
+
   function renderScheduler() {
     const list = $("#scheduler-list");
     const empty = $("#scheduler-empty");
     const characters = everyCharacter();
-    list.innerHTML = "";
+    list.textContent = "";
     empty.hidden = characters.length > 0;
 
     characters.forEach((character) => {
-      const row = document.createElement("label");
-      row.className = "setting sched-row";
-      const text = document.createElement("span");
-      text.className = "setting-text";
-      const name = document.createElement("span");
-      name.textContent = character.display_name;
-      const under = document.createElement("small");
-      under.className = "muted";
-      under.textContent = character.session_name || "";
-      text.append(name, under);
-      const tick = document.createElement("input");
+      const row = el("label", "toggle-row");
+      const text = el("span", "toggle-text");
+      text.append(
+        el("span", "toggle-title", character.display_name),
+        el("small", "toggle-note", character.session_name || ""),
+      );
+      const tick = el("input", "switch");
       tick.type = "checkbox";
-      tick.className = "switch";
       tick.checked = schedulerChosen.has(character.account_id);
-      tick.disabled = schedulerRunning;
+      tick.disabled = state.schedulerRunning;
       tick.addEventListener("change", () => {
         if (tick.checked) schedulerChosen.add(character.account_id);
         else schedulerChosen.delete(character.account_id);
+        renderAccounts();
       });
       row.append(text, tick);
       list.appendChild(row);
@@ -369,21 +391,30 @@
   }
 
   function onSchedulerStatus(event) {
-    schedulerRunning = event.running;
+    const flipped = state.schedulerRunning !== event.running;
+    state.schedulerRunning = event.running;
+    state.schedulerStatus = event;
     const box = $("#scheduler-status");
-    const position =
-      event.index === undefined || event.index === null ? "" : ` (${event.index + 1}/${event.total})`;
     box.hidden = false;
-    box.textContent = event.message + position;
+    box.textContent = event.message + schedulerPosition(event);
     box.classList.toggle("notice-warn", event.running);
     $("#btn-scheduler-start").disabled = event.running;
     $("#btn-scheduler-stop").disabled = !event.running;
-    if (!event.running) renderScheduler();
+    if (flipped || !event.running) {
+      renderScheduler();
+      renderAccounts();
+    } else {
+      renderLaunchBar();
+    }
     logStatus("Scheduler: " + event.message);
   }
 
+  function schedulerPosition(event) {
+    return event.index === undefined || event.index === null ? "" : ` (${event.index + 1}/${event.total})`;
+  }
+
   function startScheduler() {
-    const chosen = everyCharacter().filter((c) => schedulerChosen.has(c.account_id));
+    const chosen = chosenCharacters();
     if (!chosen.length) {
       logStatus("Scheduler: tick at least one character first", "error");
       return;
@@ -391,15 +422,21 @@
     send({
       type: "scheduler_start",
       accounts: chosen.map((c) => ({ account_id: c.account_id, display_name: c.display_name })),
-      delay_seconds: Math.max(0, Number($("#sched-delay").value) || 0),
+      delay_seconds: Math.max(0, Number(schedDelay.value) || 0),
       repeat: $("#sched-repeat").checked,
     });
+  }
+
+  function syncGap(from, to) {
+    to.value = from.value;
+    renderLaunchBar();
   }
 
   // ---- Frame ----
 
   function showView(name) {
     state.view = name;
+    content.dataset.view = name;
     Object.entries(views).forEach(([key, section]) => {
       section.hidden = key !== name;
     });
@@ -414,23 +451,22 @@
   }
 
   function renderStats() {
-    const accounts = state.sessions.length;
     const characters = state.sessions.reduce((n, s) => n + s.accounts.length, 0);
-    const parts = [plural(accounts, "account"), plural(characters, "character")];
+    const parts = [plural(state.sessions.length, "account"), plural(characters, "character")];
     if (state.clients) parts.push(state.clients.length + " running");
-
-    topbarStats.textContent = "";
-    parts.forEach((part, i) => {
-      if (i) topbarStats.appendChild(el("span", "sep", "|"));
-      topbarStats.appendChild(document.createTextNode(part));
-    });
+    topbarStats.textContent = parts.join(" · ");
   }
 
   function renderVersion() {
-    const version = state.launcherStatus && state.launcherStatus.launcher_version;
-    if (!version) return;
-    topbarVersion.textContent = "Launcher v" + version;
-    sidebarVersion.textContent = "v" + version;
+    const status = state.launcherStatus;
+    if (!status || !status.launcher_version) return;
+    let text = "Launcher v" + status.launcher_version;
+    if (status.launcher_update) text = "v" + status.launcher_version + " · update available";
+    else if (status.release_tag) text = "v" + status.launcher_version + " · up to date";
+    sidebarVersion.textContent = text;
+    sidebarVersion.title = text;
+    clientStatus.classList.toggle("warn", !!status.launcher_update);
+    clientStatus.classList.toggle("ok", !status.launcher_update && !!status.release_tag);
   }
 
   function logStatus(msg, cls) {
@@ -445,50 +481,83 @@
     }
     if (pinned) statusLog.scrollTop = statusLog.scrollHeight;
 
-    statusbar.textContent = msg;
-    statusbar.className = "statusbar muted" + (cls ? " " + cls : "");
+    [statusbar, launchStatus].forEach((line) => {
+      line.textContent = msg;
+      line.classList.toggle("success", cls === "success");
+      line.classList.toggle("error", cls === "error");
+    });
   }
 
-  // ---- Accounts ----
+  // ---- Play ----
+
+  function renderHero() {
+    const store = state.store;
+    const name = (store && store.signed_in && store.name) || (state.sessions[0] && state.sessions[0].display_name);
+    heroGreeting.textContent = name ? greeting() + ", " + name : "Welcome back";
+
+    state.heroTarget = heroTarget();
+    const target = state.heroTarget;
+    btnHeroPlay.hidden = !target;
+    if (target) {
+      const launchingThis = state.launchingAccountId === target.account.accountId;
+      heroPlayLabel.textContent = launchingThis ? "Launching…" : "Play " + (target.account.displayName || "character");
+      btnHeroPlay.disabled = !!state.launchingAccountId;
+    }
+    heroSubtitle.textContent = state.sessions.length
+      ? "Press Play on a character, or tick several and launch them one after another."
+      : "Log in with your Jagex account and its characters appear here, ready to launch.";
+  }
+
+  function heroTarget() {
+    for (const session of state.sessions) {
+      const last = session.accounts.find((a) => a.accountId === session.last_account_id);
+      if (last) return { session, account: last };
+    }
+    for (const session of state.sessions) {
+      const named = session.accounts.find((a) => a.displayName);
+      if (named) return { session, account: named };
+    }
+    return null;
+  }
 
   function renderAccounts() {
     renderStats();
+    renderHero();
     accountsList.textContent = "";
     accountsEmpty.hidden = state.sessions.length > 0;
 
-    const allOpen =
-      state.sessions.length > 0 && state.sessions.every((s) => state.expanded.has(s.user_id));
+    const allOpen = state.sessions.length > 0 && state.sessions.every((s) => !state.collapsed.has(s.user_id));
     btnExpandAll.textContent = allOpen ? "Collapse all" : "Expand all";
     btnExpandAll.hidden = state.sessions.length === 0;
-    btnLogin.textContent = state.sessions.length ? "Add account" : "Login with Jagex";
+    btnLogin.textContent = state.sessions.length ? "+ Add account" : "Login with Jagex";
+    btnLogin.classList.toggle("btn-primary", !state.sessions.length);
+    btnLogin.classList.toggle("btn-glass", !!state.sessions.length);
 
-    state.sessions.forEach((session) => accountsList.appendChild(renderAccount(session)));
+    state.sessions.forEach((session) => accountsList.appendChild(renderGroup(session)));
+    renderSelectionChrome();
   }
 
-  function renderAccount(session) {
-    const open = state.expanded.has(session.user_id);
-    const wrap = el("div", "acct" + (open ? " is-open" : ""));
+  function renderGroup(session) {
+    const open = !state.collapsed.has(session.user_id);
+    const wrap = el("section", "group" + (open ? " is-open" : ""));
 
-    const head = el("div", "acct-head");
+    const head = el("div", "group-head");
     head.setAttribute("role", "button");
     head.setAttribute("tabindex", "0");
     head.setAttribute("aria-expanded", String(open));
     head.appendChild(icon("i-chevron", "chev"));
-    head.appendChild(el("span", "acct-name", session.display_name || "Jagex account"));
-    head.appendChild(el("span", "acct-meta", plural(session.accounts.length, "character")));
-
-    const actions = el("div", "acct-actions");
-    actions.appendChild(
-      button("Log out", "btn-danger", !!state.launchingAccountId, () =>
+    head.appendChild(el("span", "group-name", session.display_name || "Jagex account"));
+    head.appendChild(el("span", "group-meta", plural(session.accounts.length, "character")));
+    head.appendChild(
+      button("Log out", "btn-danger group-logout", !!state.launchingAccountId, () =>
         send({ type: "logout", user_id: session.user_id })
       )
     );
-    head.appendChild(actions);
 
     const toggle = () => {
-      if (state.expanded.has(session.user_id)) state.expanded.delete(session.user_id);
-      else state.expanded.add(session.user_id);
-      saveExpanded();
+      if (state.collapsed.has(session.user_id)) state.collapsed.delete(session.user_id);
+      else state.collapsed.add(session.user_id);
+      saveSet(COLLAPSED_KEY, state.collapsed);
       renderAccounts();
     };
     head.addEventListener("click", toggle);
@@ -499,48 +568,93 @@
     });
     wrap.appendChild(head);
 
-    if (open) wrap.appendChild(renderCharacters(session));
+    if (!open) return wrap;
+    if (!session.accounts.length) {
+      wrap.appendChild(el("div", "empty", "No characters on this account yet."));
+      return wrap;
+    }
+    const grid = el("div", "account-grid");
+    session.accounts.forEach((account) => grid.appendChild(renderCard(session, account)));
+    wrap.appendChild(grid);
     return wrap;
   }
 
-  function renderCharacters(session) {
-    const list = el("div", "chars");
-    if (!session.accounts.length) {
-      list.appendChild(el("div", "char-empty", "No characters on this account yet."));
-      return list;
+  function renderCard(session, account) {
+    const chosen = schedulerChosen.has(account.accountId);
+    const card = el("div", "account-card" + (chosen ? " selected" : ""));
+
+    const tick = el("button", "tick");
+    tick.type = "button";
+    tick.setAttribute("role", "checkbox");
+    tick.setAttribute("aria-checked", String(chosen));
+    tick.setAttribute("aria-label", "Include " + (account.displayName || "character") + " in the launch");
+    tick.disabled = !account.displayName || state.schedulerRunning;
+    tick.appendChild(el("span", "", "✓"));
+    tick.addEventListener("click", () => {
+      const on = !schedulerChosen.has(account.accountId);
+      if (on) schedulerChosen.add(account.accountId);
+      else schedulerChosen.delete(account.accountId);
+      tick.setAttribute("aria-checked", String(on));
+      card.classList.toggle("selected", on);
+      renderSelectionChrome();
+    });
+    card.appendChild(tick);
+
+    const known = state.characters[account.accountId];
+    const portrait = el("span", "avatar char-face");
+    portrait.dataset.accountId = account.accountId;
+    paintFace(portrait, account.displayName, known);
+    card.appendChild(portrait);
+    if (account.displayName && known === undefined) {
+      state.characters[account.accountId] = null;
+      send({ type: "character_info", account_id: account.accountId, display_name: account.displayName });
     }
 
-    session.accounts.forEach((account) => {
-      const row = el("div", "char");
-      const portrait = el("span", "char-face");
-      portrait.dataset.accountId = account.accountId;
-      const known = state.characters[account.accountId];
-      paintFace(portrait, account.displayName, known);
-      row.appendChild(portrait);
-      row.appendChild(el("span", "char-name", account.displayName || "Unnamed character"));
-      if (known && known.total) {
-        row.appendChild(el("span", "char-stat", "Total " + known.total.toLocaleString("en-GB")));
-      }
-      if (account.displayName && known === undefined) {
-        state.characters[account.accountId] = null;
-        send({ type: "character_info", account_id: account.accountId, display_name: account.displayName });
-      }
-      if (session.last_account_id === account.accountId) {
-        row.appendChild(badge("Last played", "last"));
-      }
+    const main = el("div", "card-main");
+    main.appendChild(el("span", "card-name", account.displayName || "Unnamed character"));
+    main.appendChild(el("span", "card-meta", characterMeta(known)));
+    card.appendChild(main);
 
-      const launchingThis = state.launchingAccountId === account.accountId;
-      const play = button(
-        launchingThis ? "Launching…" : "Play",
-        "btn-accent btn-play",
-        !!state.launchingAccountId,
-        () => launch(session, account)
-      );
-      if (!launchingThis) play.prepend(icon("i-play"));
-      row.appendChild(play);
-      list.appendChild(row);
-    });
-    return list;
+    const side = el("div", "card-side");
+    if (session.last_account_id === account.accountId) side.appendChild(el("span", "status-pill last", "Last played"));
+    const launchingThis = state.launchingAccountId === account.accountId;
+    side.appendChild(
+      button(launchingThis ? "Launching…" : "Play", "card-play", !!state.launchingAccountId, () => launch(session, account))
+    );
+    card.appendChild(side);
+    return card;
+  }
+
+  function renderSelectionChrome() {
+    const characters = everyCharacter();
+    const allChosen = characters.length > 0 && characters.every((c) => schedulerChosen.has(c.account_id));
+    btnSelectAll.textContent = allChosen ? "Clear selection" : "Select all";
+    btnSelectAll.hidden = characters.length === 0;
+    btnSelectAll.disabled = state.schedulerRunning;
+    renderLaunchBar();
+  }
+
+  function renderLaunchBar() {
+    const running = state.schedulerRunning;
+    launchGap.disabled = running;
+    btnLaunch.classList.toggle("btn-primary", !running);
+    btnLaunch.classList.toggle("btn-danger", running);
+    if (running) {
+      const status = state.schedulerStatus;
+      launchLabel.textContent = "Launching in turn";
+      launchSub.textContent = status ? status.message + schedulerPosition(status) : "";
+      btnLaunch.textContent = "Stop";
+      btnLaunch.disabled = false;
+      return;
+    }
+    const n = chosenCharacters().length;
+    const gap = Math.max(0, Number(launchGap.value) || 0);
+    launchLabel.textContent = n ? plural(n, "character") + " selected" : "No characters selected";
+    launchSub.textContent = n
+      ? "They start one after another, " + gap + " s apart"
+      : "Tick the characters you want to start one after another";
+    btnLaunch.textContent = "Launch";
+    btnLaunch.disabled = n === 0;
   }
 
   function launch(session, account) {
@@ -556,22 +670,19 @@
     });
   }
 
-  // ---- Clients (Project X engine hot-reload control) ----
+  // ---- Clients ----
 
   function requestClients(force) {
     const now = Date.now();
-    const inFlight =
-      state.clientsRequestAt && now - state.clientsRequestAt < CLIENTS_REQUEST_TIMEOUT_MS;
+    const inFlight = state.clientsRequestAt && now - state.clientsRequestAt < CLIENTS_REQUEST_TIMEOUT_MS;
     if (inFlight && !force) return;
     state.clientsRequestAt = now;
     send({ type: "list_clients" });
   }
 
   function desiredClientsPollMs() {
-    if (state.view !== "clients") return CLIENTS_BACKGROUND_POLL_MS;
-    return (state.clients || []).some((c) => c.state === "starting")
-      ? CLIENTS_STARTING_POLL_MS
-      : CLIENTS_POLL_MS;
+    if (state.view !== "clients" && !railQuery.matches) return CLIENTS_BACKGROUND_POLL_MS;
+    return (state.clients || []).some((c) => c.state === "starting") ? CLIENTS_STARTING_POLL_MS : CLIENTS_POLL_MS;
   }
 
   function startClientsPolling() {
@@ -619,64 +730,50 @@
     navClientsCount.textContent = String(clients.length);
     navClientsCount.hidden = clients.length === 0;
 
-    // Polls arrive every few seconds; rebuilding identical rows would steal focus
-    // from a button and restart the badge animation, so redraw only on change.
+    // Rebuilding identical cards every poll would steal focus from a button, so redraw only on change.
     const signature = JSON.stringify(
-      clients.map((c) => [
-        c.pid,
-        c.state,
-        c.version,
-        c.reloads,
-        c.detail,
-        isBusy(state.busyPids, c.pid),
-      ])
+      clients.map((c) => [c.pid, c.state, c.version, c.reloads, c.detail, isBusy(state.busyPids, c.pid)])
     );
     if (signature === state.renderedClients) return;
     state.renderedClients = signature;
 
     clientsList.textContent = "";
+    runningList.textContent = "";
     clientsEmpty.hidden = clients.length > 0;
-
+    runningEmpty.hidden = clients.length > 0;
     clients.forEach((c) => {
-      const meta = clientStateMeta(c.state);
-      const busy = isBusy(state.busyPids, c.pid);
-
-      const row = el("div", "row");
-      const main = el("div", "row-main");
-      const title = el("div", "row-title");
-      title.appendChild(el("span", "row-name", "Client " + c.pid));
-      title.appendChild(badge(meta.label, meta.cls));
-      main.appendChild(title);
-
-      const parts = [];
-      if (c.version) parts.push("engine v" + c.version);
-      if (c.state === "active" && typeof c.reloads === "number") {
-        parts.push(plural(c.reloads, "reload"));
-      }
-      if (parts.length) main.appendChild(el("div", "row-sub", parts.join(" · ")));
-      // A client that never answers its control socket has no version or reload count to show, and
-      // the badge alone gives the user nothing to act on — so show what the bootstrap said instead.
-      if (c.detail) main.appendChild(el("div", "row-sub row-sub-error", c.detail));
-      row.appendChild(main);
-
-      const actions = el("div", "row-actions");
-      if (c.state === "not-injected" || c.state === "unloaded") {
-        actions.appendChild(
-          button(busy ? "…" : "Inject", "btn-accent", busy, () => clientAction(c.pid, "inject_client"))
-        );
-      } else if (c.state === "active") {
-        actions.appendChild(
-          button(busy ? "…" : "Reinject", "", busy, () => clientAction(c.pid, "reinject_client"))
-        );
-        actions.appendChild(
-          button("Uninject", "btn-danger", busy, () => clientAction(c.pid, "uninject_client"))
-        );
-      }
-      // "starting" and "error" rows expose no actions: there is no socket to
-      // command yet, and re-injecting an already-mapped bootstrap is never right.
-      row.appendChild(actions);
-      clientsList.appendChild(row);
+      clientsList.appendChild(clientCard(c));
+      runningList.appendChild(clientCard(c));
     });
+  }
+
+  function clientCard(c) {
+    const meta = clientStateMeta(c.state);
+    const busy = isBusy(state.busyPids, c.pid);
+    const card = el("div", "run-card");
+
+    const top = el("div", "run-top");
+    top.appendChild(el("span", "run-name", "Client " + c.pid));
+    top.appendChild(badge(meta.label, meta.cls));
+    card.appendChild(top);
+
+    const parts = [];
+    if (c.version) parts.push("engine v" + c.version);
+    if (c.state === "active" && typeof c.reloads === "number") parts.push(plural(c.reloads, "reload"));
+    card.appendChild(el("span", "run-script", parts.length ? parts.join(" · ") : "No engine loaded"));
+    // A client that never answered its control socket has nothing else to act on, so show the bootstrap's words.
+    if (c.detail) card.appendChild(el("span", "run-note run-error", c.detail));
+
+    const actions = el("div", "run-buttons");
+    if (c.state === "not-injected" || c.state === "unloaded") {
+      actions.appendChild(button(busy ? "…" : "Inject", "btn-strong", busy, () => clientAction(c.pid, "inject_client")));
+    } else if (c.state === "active") {
+      actions.appendChild(button(busy ? "…" : "Reinject", "", busy, () => clientAction(c.pid, "reinject_client")));
+      actions.appendChild(button("Uninject", "btn-danger", busy, () => clientAction(c.pid, "uninject_client")));
+    }
+    // "starting" and "error" have no socket to command yet, and re-injecting a mapped bootstrap is never right.
+    if (actions.childElementCount) card.appendChild(actions);
+    return card;
   }
 
   function clientAction(pid, type) {
@@ -686,14 +783,7 @@
     send({ type: type, pid: pid });
   }
 
-  function metaItem(label, value) {
-    const span = el("span", "", label + " ");
-    span.appendChild(el("b", "", value));
-    return span;
-  }
-
-  // The launcher cannot replace itself while it is running, so this is a prompt
-  // and a link rather than an install.
+  // The launcher cannot replace itself while running, so this is a prompt and a link, not an install.
   function renderLauncherUpdate() {
     const status = state.launcherStatus;
     const update = status && status.launcher_update;
@@ -701,9 +791,7 @@
     if (!update) return;
     const size = formatSize(update.size);
     launcherUpdateDetail.textContent =
-      "You have " + status.launcher_version + " · " +
-      (status.release_tag || "latest") +
-      (size ? " · " + size : "");
+      "You have " + status.launcher_version + " · " + (status.release_tag || "latest") + (size ? " · " + size : "");
   }
 
   // ---- Store ----
@@ -711,6 +799,22 @@
   function requestStore() {
     send({ type: "store_status" });
     send({ type: "store_scripts" });
+  }
+
+  function renderUserCard() {
+    const status = state.store;
+    const signedIn = !!(status && status.signed_in);
+    const pairing = status && status.pairing;
+    userName.textContent = signedIn ? status.name || "Signed in" : "Not signed in";
+    userSub.textContent = signedIn
+      ? "Store linked. Scripts you buy install by themselves."
+      : pairing
+        ? "Approve code " + pairing.code + " in your browser."
+        : "Sign in so the scripts you buy install here.";
+    btnUserSignIn.hidden = signedIn;
+    btnUserSignIn.disabled = !!pairing;
+    $("#user-sign-in-label").textContent = pairing ? "Waiting…" : "Sign in";
+    btnUserSignOut.hidden = !signedIn;
   }
 
   function renderStore() {
@@ -741,57 +845,63 @@
     storeEmpty.hidden = !(state.storeScripts && scripts.length === 0 && !state.storeError);
   }
 
+  function metaItem(label, value) {
+    const span = el("span", "store-meta-item", label + " ");
+    span.appendChild(el("b", "", value));
+    return span;
+  }
+
   function renderStoreRow(s) {
     const busy = isBusy(state.busyStore, s.internal_name);
     const installed = s.install_state === "current";
     const outdated = s.install_state === "outdated";
-    // Paid scripts the engine downloads into the game at every start; nothing of them is saved on the PC.
+    // Paid scripts the engine downloads into the game at every start; nothing is saved on the PC.
     const inGame = s.install_state === "in_game";
-    const row = el("div", "plugin");
+    const card = el("div", "store-card");
 
-    const title = el("div", "row-title");
-    title.appendChild(el("span", "row-name", s.name));
-    if (s.free) title.appendChild(badge("Free", "ok"));
-    if (s.pending) title.appendChild(badge("Trial ready", "ok"));
-    else if (s.owned) title.appendChild(badge(s.trial ? "Trial" : s.free ? "Claimed" : "Owned", "ok"));
-    else title.appendChild(badge(s.free ? "Not claimed" : "Not owned", "warn"));
-    if (s.sale_percent && !s.free) title.appendChild(badge(s.sale_percent + "% off", "ok"));
-    if (s.installable && installed) title.appendChild(badge("Installed", "ok"));
-    if (s.installable && outdated) title.appendChild(badge("Update available", "warn"));
-    if (s.installable && inGame && s.owned) title.appendChild(badge("Loads in game", "ok"));
-    row.appendChild(title);
+    card.appendChild(el("span", "store-name", s.name));
+    const badges = el("div", "store-badges");
+    if (s.free) badges.appendChild(badge("Free", "ok"));
+    if (s.pending) badges.appendChild(badge("Trial ready", "ok"));
+    else if (s.owned) badges.appendChild(badge(s.trial ? "Trial" : s.free ? "Claimed" : "Owned", "ok"));
+    else badges.appendChild(badge(s.free ? "Not claimed" : "Not owned", "warn"));
+    if (s.sale_percent && !s.free) badges.appendChild(badge(s.sale_percent + "% off", "ok"));
+    if (s.installable && installed) badges.appendChild(badge("Installed", "ok"));
+    if (s.installable && outdated) badges.appendChild(badge("Update available", "warn"));
+    if (s.installable && inGame && s.owned) badges.appendChild(badge("Loads in game", "ok"));
+    card.appendChild(badges);
 
-    const metaLine = el("div", "plugin-meta");
+    const metaLine = el("div", "store-meta");
     metaLine.appendChild(metaItem("price", priceLine(s)));
     if (s.installable) metaLine.appendChild(metaItem("version", "v" + s.version));
     if (s.owned && s.expires_at && !s.pending) {
       metaLine.appendChild(metaItem(s.trial ? "trial ends" : "until", formatClock(new Date(s.expires_at))));
     }
-    row.appendChild(metaLine);
+    card.appendChild(metaLine);
 
-    // The point of installing before the game: the hour has not started yet.
+    // Installing before the game is the point: the trial hour has not started yet.
     if (s.pending) {
-      row.appendChild(
+      card.appendChild(
         el(
           "p",
-          "plugin-desc",
+          "store-desc",
           inGame
             ? "Your trial hour starts when you launch the game with Project X loaded, not now."
             : "Your trial hour starts when you launch the game with Project X loaded, not now. Install it first."
         )
       );
     }
-
-    const actions = el("div", "row-actions");
     if (s.owned && s.installable && inGame) {
-      row.appendChild(
-        el("p", "plugin-desc", "Downloads into the game each time you start it with Project X. Nothing is saved on your PC.")
+      card.appendChild(
+        el("p", "store-desc", "Downloads into the game each time you start it with Project X. Nothing is saved on your PC.")
       );
     }
+
+    const actions = el("div", "store-actions");
     if (s.owned && s.installable && !inGame) {
       const label = busy ? "…" : outdated ? "Update" : installed ? "Reinstall" : "Install";
       actions.appendChild(
-        button(label, "btn-accent", busy, () => {
+        button(label, "btn-primary", busy, () => {
           state.busyStore[s.internal_name] = Date.now();
           send({ type: "store_install", internal_name: s.internal_name });
           renderStore();
@@ -800,12 +910,12 @@
     }
     if (s.store_url) {
       const label = s.owned ? (s.free ? "Renew free" : "View") : s.free ? "Get it free" : "Buy";
-      actions.appendChild(button(label, s.owned ? "" : "btn-accent", false, () => send({ type: "open_url", url: s.store_url })));
+      actions.appendChild(
+        button(label, s.owned ? "" : "btn-strong", false, () => send({ type: "open_url", url: s.store_url }))
+      );
     }
-    const foot = el("div", "plugin-foot");
-    foot.appendChild(actions);
-    row.appendChild(foot);
-    return row;
+    if (actions.childElementCount) card.appendChild(actions);
+    return card;
   }
 
   // Quoted the way the store page quotes it: free, or the price of each tier in X Tokens.
@@ -847,6 +957,12 @@
     if (signInDialog.open) signInDialog.close();
   }
 
+  function storeSignOut() {
+    // Signing out on purpose is an answer; the prompt waits for the next launch.
+    state.signInDismissed = true;
+    send({ type: "store_sign_out" });
+  }
+
   // ---- Settings ----
 
   function restoreConfigToUI() {
@@ -868,70 +984,87 @@
 
   // ---- Wiring ----
 
+  function openPairingLink(e) {
+    e.preventDefault();
+    const url = e.currentTarget.dataset.url;
+    if (url) send({ type: "open_url", url: url });
+  }
+
   navItems.forEach((item) => item.addEventListener("click", () => showView(item.dataset.view)));
   $("#btn-scheduler-start").addEventListener("click", startScheduler);
   $("#btn-scheduler-stop").addEventListener("click", () => send({ type: "scheduler_stop" }));
 
   btnLogin.addEventListener("click", () => send({ type: "login" }));
+  btnHeroPlay.addEventListener("click", () => {
+    const target = state.heroTarget;
+    if (target) launch(target.session, target.account);
+  });
   btnExpandAll.addEventListener("click", () => {
-    const allOpen = state.sessions.every((s) => state.expanded.has(s.user_id));
+    const allOpen = state.sessions.every((s) => !state.collapsed.has(s.user_id));
     state.sessions.forEach((s) => {
-      if (allOpen) state.expanded.delete(s.user_id);
-      else state.expanded.add(s.user_id);
+      if (allOpen) state.collapsed.add(s.user_id);
+      else state.collapsed.delete(s.user_id);
     });
-    saveExpanded();
+    saveSet(COLLAPSED_KEY, state.collapsed);
     renderAccounts();
   });
+  btnSelectAll.addEventListener("click", () => {
+    const characters = everyCharacter();
+    const allChosen = characters.every((c) => schedulerChosen.has(c.account_id));
+    characters.forEach((c) => {
+      if (allChosen) schedulerChosen.delete(c.account_id);
+      else schedulerChosen.add(c.account_id);
+    });
+    renderAccounts();
+  });
+  btnLaunch.addEventListener("click", () => {
+    if (state.schedulerRunning) send({ type: "scheduler_stop" });
+    else startScheduler();
+  });
+  launchGap.addEventListener("input", () => syncGap(launchGap, schedDelay));
+  schedDelay.addEventListener("input", () => syncGap(schedDelay, launchGap));
 
   btnRefreshClients.addEventListener("click", () => requestClients(true));
+  btnSideRefresh.addEventListener("click", () => requestClients(true));
+  railQuery.addEventListener("change", startClientsPolling);
 
   btnStoreSignIn.addEventListener("click", () => send({ type: "store_sign_in" }));
+  btnUserSignIn.addEventListener("click", () => send({ type: "store_sign_in" }));
   signInGo.addEventListener("click", () => send({ type: "store_sign_in" }));
   $("#sign-in-later").addEventListener("click", dismissSignIn);
   signInDialog.addEventListener("cancel", (e) => {
     e.preventDefault();
     dismissSignIn();
   });
-  $("#sign-in-reopen").addEventListener("click", (e) => {
-    e.preventDefault();
-    const url = e.currentTarget.dataset.url;
-    if (url) send({ type: "open_url", url: url });
-  });
-  btnStoreSignOut.addEventListener("click", () => {
-    // Signing out on purpose is an answer; the prompt waits for the next launch.
-    state.signInDismissed = true;
-    send({ type: "store_sign_out" });
-  });
+  $("#sign-in-reopen").addEventListener("click", openPairingLink);
+  storePairingLink.addEventListener("click", openPairingLink);
+  btnStoreSignOut.addEventListener("click", storeSignOut);
+  btnUserSignOut.addEventListener("click", storeSignOut);
   btnStoreRefresh.addEventListener("click", requestStore);
   btnStorePage.addEventListener("click", () => {
     const base = state.store && state.store.store;
     if (base) send({ type: "open_url", url: base + "/rs3/store" });
-  });
-  storePairingLink.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (storePairingLink.dataset.url) send({ type: "open_url", url: storePairingLink.dataset.url });
   });
 
   btnLauncherUpdate.addEventListener("click", () => {
     const update = state.launcherStatus && state.launcherStatus.launcher_update;
     if (update) send({ type: "open_url", url: update.url });
   });
-  btnDonate.addEventListener("click", () => send({ type: "open_url", url: DONATE_URL }));
 
   btnClearLogs.addEventListener("click", () => {
     statusLog.textContent = "";
     statusbar.textContent = "";
+    launchStatus.textContent = "";
   });
 
   btnSaveSettings.addEventListener("click", saveSettings);
   btnResetSettings.addEventListener("click", restoreConfigToUI);
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && state.view !== "accounts") showView("accounts");
+    if (e.key === "Escape" && state.view !== "play") showView("play");
   });
 
-  // Signal the Rust backend that the frontend is ready. The backend replies with
-  // the "init" event (config + saved sessions), so the payload always lands
-  // after __projectx_callback is installed.
+  // The backend answers "ready" with "init", so the payload always lands after the callback is installed.
+  renderAccounts();
   send({ type: "ready" });
 })();
