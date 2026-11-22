@@ -6,25 +6,25 @@
       "CLIENT_CYCLE": {
         "value": "0x500",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_CYCLE).",
         "verified_build": "951-1"
       },
       "CLIENT_RENDER_CYCLE": {
         "value": "0x508",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_RENDER_CYCLE).",
         "verified_build": "951-1"
       },
       "SDL_MANAGER": {
         "value": "0x186a0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_CLIENT_SDL_MANAGER); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_CLIENT_SDL_MANAGER); Windows did not move this field. The third-party 951-4 table agrees (GS_CLIENT_SDL_MANAGER).",
         "verified_build": "951-1"
       },
       "INPUT": {
         "value": "0x18d38",
         "confidence": "HIGH",
-        "note": "Moved from 0x18d30: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x18d30: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_INPUT).",
         "verified_build": "951-1"
       },
       "BUILD_AREA_VECTOR": {
@@ -42,97 +42,97 @@
       "CONNECTION_MANAGER": {
         "value": "0x19468",
         "confidence": "HIGH",
-        "note": "Moved from 0x19460: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19460: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_CONNECTION_MANAGER).",
         "verified_build": "951-1"
       },
       "HINTTRAIL_LIST": {
         "value": "0x194b0",
         "confidence": "HIGH",
-        "note": "Moved from 0x194a0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194a0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_HINTTRAIL_LIST).",
         "verified_build": "951-1"
       },
       "INTERFACE_MANAGER": {
         "value": "0x194b8",
         "confidence": "HIGH",
-        "note": "Moved from 0x194a8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194a8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_INTERFACE_LIST).",
         "verified_build": "951-1"
       },
       "MAINLOGIC_MANAGER": {
         "value": "0x194d8",
         "confidence": "HIGH",
-        "note": "Moved from 0x194c8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194c8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_MAINLOGIC_MANAGER).",
         "verified_build": "951-1"
       },
       "MINIMENU": {
         "value": "0x194e0",
         "confidence": "HIGH",
-        "note": "Moved from 0x194d0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194d0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_MINIMENU_MANAGER).",
         "verified_build": "951-1"
       },
       "NPC_MANAGER": {
         "value": "0x194e8",
         "confidence": "HIGH",
-        "note": "Moved from 0x194d8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194d8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_NPC_MANAGER).",
         "verified_build": "951-1"
       },
       "ITEMSTACK_LIST": {
         "value": "0x194f0",
         "confidence": "HIGH",
-        "note": "Moved from 0x194e0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194e0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_ITEMSTACK_LIST).",
         "verified_build": "951-1"
       },
       "PLAYER_MANAGER": {
         "value": "0x19510",
         "confidence": "HIGH",
-        "note": "Moved from 0x194f8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x194f8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_PLAYER_MANAGER).",
         "verified_build": "951-1"
       },
       "PROJECTILE_LIST": {
         "value": "0x19520",
         "confidence": "HIGH",
-        "note": "Moved from 0x19508: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19508: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_PROJECTILE_LIST).",
         "verified_build": "951-1"
       },
       "SPOTANIM_MANAGER": {
         "value": "0x19548",
         "confidence": "HIGH",
-        "note": "Moved from 0x19530: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19530: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_SPOTANIM_MANAGER).",
         "verified_build": "951-1"
       },
       "INVENTORY_MANAGER": {
         "value": "0x19588",
         "confidence": "HIGH",
-        "note": "Moved from 0x19570: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19570: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_INVENTORY_MANAGER).",
         "verified_build": "951-1"
       },
       "SCENE_MANAGER": {
         "value": "0x19590",
         "confidence": "HIGH",
-        "note": "Moved from 0x19578: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19578: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_SCENE_MANAGER).",
         "verified_build": "951-1"
       },
       "MAIN_STATE": {
         "value": "0x19b68",
         "confidence": "HIGH",
-        "note": "Moved from 0x19b48: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19b48: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_MAIN_STATE).",
         "verified_build": "951-1"
       },
       "LOGGED_IN_PLAYER": {
         "value": "0x19b70",
         "confidence": "HIGH",
-        "note": "Moved from 0x19b50: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19b50: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_LOGGED_IN_PLAYER).",
         "verified_build": "951-1"
       },
       "PLAYER_VAR_DOMAIN": {
         "value": "0x19b80",
         "confidence": "HIGH",
-        "note": "Moved from 0x19b60: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19b60: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_PLAYER_VAR_DOMAIN).",
         "verified_build": "951-1"
       },
       "HINTARROW_LIST": {
         "value": "0x194a0",
         "confidence": "HIGH",
-        "note": "Moved from 0x19498: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x19498: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENT_HINTARROW_LIST).",
         "verified_build": "951-1"
       }
     },
@@ -251,34 +251,34 @@
     "OSDLManager": {
       "WINDOW": {
         "value": "0x90",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLMANAGER_WINDOW); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLMANAGER_WINDOW); Windows did not move this field. The third-party 951-4 table agrees (GS_SDLMANAGER_WINDOW).",
         "verified_build": "951-1"
       },
       "SDL_WINDOW": {
         "value": "0x28",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLMANAGER_SDL_WINDOW); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLMANAGER_SDL_WINDOW); Windows did not move this field. The third-party 951-4 table agrees (GS_SDLMANAGER_SDL_WINDOW).",
         "verified_build": "951-1"
       },
       "WINDOW_FLAGS_BITFIELD": {
         "value": "0x40",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLMANAGER_WINDOW_FLAGS_BITFIELD); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLMANAGER_WINDOW_FLAGS_BITFIELD); Windows did not move this field. The third-party 951-4 table agrees (GS_SDLMANAGER_WINDOW_FLAGS_BITFIELD).",
         "verified_build": "951-1"
       }
     },
     "OSDLWindow": {
       "WINDOW_NAME": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLWINDOW_WINDOW_NAME); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLWINDOW_WINDOW_NAME); Windows did not move this field. The third-party 951-4 table agrees (GS_SDLWINDOW_WINDOW_NAME).",
         "verified_build": "951-1"
       },
       "WINDOW_DATA": {
         "value": "0xd8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLWINDOW_WINDOW_DATA); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_SDLWINDOW_WINDOW_DATA); Windows did not move this field. The third-party 951-4 table agrees (GS_SDLWINDOW_WINDOW_DATA).",
         "verified_build": "951-1"
       }
     },
@@ -286,8 +286,8 @@
     "OItemStackList": {
       "RB_TREE_BASE": {
         "value": "0x18",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_ITEMSTACKLIST_RBTREE).",
         "verified_build": "951-1"
       }
     },
@@ -295,43 +295,43 @@
       "LEFT": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMNODE_LEFT).",
         "verified_build": "951-1"
       },
       "RIGHT": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMNODE_RIGHT).",
         "verified_build": "951-1"
       },
       "PARENT": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMSTACKNODE_PARENT).",
         "verified_build": "951-1"
       },
       "POS_PLANE": {
         "value": "0x20",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMNODE_POS_PLANE).",
         "verified_build": "951-1"
       },
       "POS_X": {
         "value": "0x24",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMNODE_POS_X).",
         "verified_build": "951-1"
       },
       "POS_Y": {
         "value": "0x28",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMNODE_POS_Y).",
         "verified_build": "951-1"
       },
       "ITEM_STACK": {
         "value": "0x38",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMNODE_ITEM_STACK).",
         "verified_build": "951-1"
       }
     },
@@ -339,25 +339,25 @@
       "ITEM_VECTOR": {
         "value": "0x70",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMSTACK_ITEM_VECTOR).",
         "verified_build": "951-1"
       },
       "ITEM_VECTOR_ELEM_SIZE": {
         "value": "0x90",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_ITEMSTACK_ELEM_SIZE).",
         "verified_build": "951-1"
       },
       "ITEM_ID": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMSTACK_ITEM_ID).",
         "verified_build": "951-1"
       },
       "ITEM_AMOUNT": {
         "value": "0x4",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ITEMSTACK_ITEM_AMOUNT).",
         "verified_build": "951-1"
       }
     },
@@ -365,7 +365,7 @@
       "SIZE": {
         "value": "0x50",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PROJLIST_SIZE).",
         "verified_build": "951-1"
       }
     },
@@ -373,21 +373,21 @@
       "ID": {
         "value": "0x70",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PROJECTILE_ID).",
         "verified_build": "951-1"
       },
       "LOCKON_SERVER_INDEX": {
         "value": "0x80",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_PROJECTILE_LOCKON).",
         "verified_build": "951-1"
       }
     },
     "OInterfaceManager": {
       "INTERFACE_LIST": {
         "value": "0x38",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFMGR_LIST_PTR).",
         "verified_build": "951-1"
       },
       "KEY_EVENT_BEGIN": {
@@ -406,76 +406,76 @@
     "OInterfaceList": {
       "START_PTR": {
         "value": "0x18",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFLIST_START).",
         "verified_build": "951-1"
       },
       "END_PTR": {
         "value": "0x20",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFLIST_END).",
         "verified_build": "951-1"
       },
       "CAPACITY_PTR": {
         "value": "0x28",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_INTERFACELIST_CAPACITY_PTR).",
         "verified_build": "951-1"
       },
       "PARENT_OFFSET": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFLIST_PARENT_OFFSET).",
         "verified_build": "951-1"
       },
       "ENTRY_STRIDE": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFLIST_ENTRY_SIZE).",
         "verified_build": "951-1"
       }
     },
     "OInterfaceParent": {
       "CHILD_ARRAY_BEGIN": {
         "value": "0x8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_CHILD_BEGIN).",
         "verified_build": "951-1"
       },
       "CHILD_ARRAY_END": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_CHILD_END).",
         "verified_build": "951-1"
       },
       "CHILD_SLOT_STRIDE": {
         "value": "0x18",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_SLOT_STRIDE).",
         "verified_build": "951-1"
       },
       "CHILD_SLOT_HIDDEN_FLAG": {
         "value": "0x0",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_INTERFACEPARENT_CHILD_SLOT_REMOVED_FLAG).",
         "verified_build": "951-1"
       },
       "CHILD_SLOT_PTR": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_SLOT_PTR).",
         "verified_build": "951-1"
       },
       "CHILDREN": {
         "value": "0x8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_INTERFACEPARENT_CHILD_ARRAY_START).",
         "verified_build": "951-1"
       },
       "CHILDREN_END": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_CHILD_END).",
         "verified_build": "951-1"
       }
     },
@@ -483,139 +483,139 @@
       "INTERFACE_ID": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_INTERFACE_ID).",
         "verified_build": "951-1"
       },
       "COMPONENT_ID": {
         "value": "0x1a",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_ID).",
         "verified_build": "951-1"
       },
       "PARENT_LAYER_ID": {
         "value": "0x1e",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_PARENT_INDEX).",
         "verified_build": "951-1"
       },
       "SLOT_ID": {
         "value": "0x1c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_SLOT_ID).",
         "verified_build": "951-1"
       },
       "PARENT_SHAREDPTR": {
         "value": "0x20",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_PARENT_SHAREDPTR).",
         "verified_build": "951-1"
       },
       "FLAGS": {
         "value": "0x41",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_HOVERED).",
         "verified_build": "951-1"
       },
       "X_ORIGIN_OFFSET": {
         "value": "0x44",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_X_ORIGIN_OFFSET).",
         "verified_build": "951-1"
       },
       "Y_ORIGIN_OFFSET": {
         "value": "0x50",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_Y_ORIGIN_OFFSET).",
         "verified_build": "951-1"
       },
       "RAW_WIDTH": {
         "value": "0x5c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_RAW_WIDTH).",
         "verified_build": "951-1"
       },
       "RAW_HEIGHT": {
         "value": "0x64",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_RAW_HEIGHT).",
         "verified_build": "951-1"
       },
       "PARENT_REL_X": {
         "value": "0x78",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_X).",
         "verified_build": "951-1"
       },
       "PARENT_REL_Y": {
         "value": "0x7c",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_Y).",
         "verified_build": "951-1"
       },
       "SCREEN_WIDTH": {
         "value": "0x80",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_W).",
         "verified_build": "951-1"
       },
       "SCREEN_HEIGHT": {
         "value": "0x84",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_H).",
         "verified_build": "951-1"
       },
       "TEXT": {
         "value": "0x190",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_TEXT).",
         "verified_build": "951-1"
       },
       "GRAPHIC_ID": {
         "value": "0x1cc",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_GRAPHIC_ID).",
         "verified_build": "951-1"
       },
       "ITEM_ID": {
         "value": "0x1b8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_ITEM_ID).",
         "verified_build": "951-1"
       },
       "STACK_SIZE": {
         "value": "0x1c0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_STACK_SIZE).",
         "verified_build": "951-1"
       },
       "MODEL_ID": {
         "value": "0x1c0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_MODEL_ID).",
         "verified_build": "951-1"
       },
       "MODEL_OBJECT": {
         "value": "0x1c8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_MODEL_OBJECT).",
         "verified_build": "951-1"
       },
       "HOOKS": {
         "value": "0x90",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_HOOKS).",
         "verified_build": "951-1"
       },
       "TEXT_TRANSFORM": {
         "value": "0x170",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_TEXT_TRANSFORM).",
         "verified_build": "951-1"
       },
       "STATIC_CHILDREN": {
         "value": "0x1a8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_IFCOMP_CHILDREN = 0x1b0). Not yet checked against the 951-4 binary, so this value is kept until it is.",
         "verified_build": "951-1"
       },
       "STATIC_CHILDREN_END": {
@@ -633,7 +633,7 @@
       "DYNAMIC_CHILDREN": {
         "value": "0x1c0",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_IFCOMP_DYNAMIC_CHILDREN = 0x1c8). Not yet checked against the 951-4 binary, so this value is kept until it is.",
         "verified_build": "951-1"
       },
       "DYNAMIC_CHILDREN_END": {
@@ -669,73 +669,73 @@
       "PAGE_STRIDE": {
         "value": "0x68",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_PAGE_STRIDE).",
         "verified_build": "951-1"
       },
       "ACTIVE_PAGE": {
         "value": "0x3a1",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_ACTIVE_PAGE).",
         "verified_build": "951-1"
       },
       "STATIC_PAGE_COUNT": {
         "value": "0x3a0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_STATIC_PAGE_COUNT).",
         "verified_build": "951-1"
       },
       "PAGE_INDEX": {
         "value": "0x40",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_PAGE_INDEX).",
         "verified_build": "951-1"
       },
       "ID": {
         "value": "0x1c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_SLOT_ID).",
         "verified_build": "951-1"
       },
       "X_ANCHOR_FRACTION": {
         "value": "0x48",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_X_ANCHOR_FRACTION).",
         "verified_build": "951-1"
       },
       "X_ORIGIN_FRACTION": {
         "value": "0x4c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_X_ORIGIN_FRACTION).",
         "verified_build": "951-1"
       },
       "Y_ANCHOR_FRACTION": {
         "value": "0x54",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_Y_ANCHOR_FRACTION).",
         "verified_build": "951-1"
       },
       "Y_ORIGIN_FRACTION": {
         "value": "0x58",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_Y_ORIGIN_FRACTION).",
         "verified_build": "951-1"
       },
       "X_SIZE_SCALE": {
         "value": "0x60",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_X_SIZE_SCALE).",
         "verified_build": "951-1"
       },
       "Y_SIZE_SCALE": {
         "value": "0x68",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_Y_SIZE_SCALE).",
         "verified_build": "951-1"
       },
       "ASPECT_LOCK_MODE": {
         "value": "0x6c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_ASPECT_LOCK_MODE).",
         "verified_build": "951-1"
       }
     },
@@ -743,31 +743,31 @@
       "PLAYER_RIGHTS": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOGGEDINPLAYER_PLAYER_RIGHTS).",
         "verified_build": "951-1"
       },
       "PLAYER_INDEX": {
         "value": "0x48",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LIP_PLAYER_INDEX, GS_LOGGEDINPLAYER_PLAYER_INDEX).",
         "verified_build": "951-1"
       },
       "PLAYER_NAME": {
         "value": "0x68",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LIP_PLAYER_NAME).",
         "verified_build": "951-1"
       },
       "TARGET_INDEX": {
         "value": "0xa0",
-        "confidence": "MEDIUM",
-        "note": "Moved from 0x98 per the third-party 951-1 table (GS_LIP_TARGET_INDEX); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Moved from 0x98 per the third-party 951-1 table (GS_LIP_TARGET_INDEX); Windows did not move this field. The third-party 951-4 table agrees (GS_LIP_TARGET_INDEX).",
         "verified_build": "951-1"
       },
       "TARGET_TYPE": {
         "value": "0xa2",
-        "confidence": "MEDIUM",
-        "note": "Moved from 0x9a per the third-party 951-1 table (GS_LIP_TARGET_TYPE); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Moved from 0x9a per the third-party 951-1 table (GS_LIP_TARGET_TYPE); Windows did not move this field. The third-party 951-4 table agrees (GS_LIP_TARGET_TYPE).",
         "verified_build": "951-1"
       }
     },
@@ -775,13 +775,13 @@
       "PLAYER_LIST": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PLAYERMGR_PLAYER_LIST).",
         "verified_build": "951-1"
       },
       "PLAYER_LIST_NODE_ENTITY": {
         "value": "0x30",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_PLAYERMGR_NODE_ENTITY).",
         "verified_build": "951-1"
       }
     },
@@ -789,13 +789,13 @@
       "HASH_TABLE": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPCMGR_HASH_TABLE).",
         "verified_build": "951-1"
       },
       "LOCAL_NPC_INDICES": {
         "value": "0xa0a0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPCMANAGER_LOCAL_NPC_INDICES).",
         "verified_build": "951-1"
       },
       "HASH_ELEMENT_SIZE": {
@@ -809,19 +809,19 @@
       "WORLD_ARRAY": {
         "value": "0x58",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SCENEMGR_WORLD_ARRAY).",
         "verified_build": "951-1"
       },
       "CURRENT_WORLD_INDEX": {
         "value": "0x70",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_SCENEMGR_WORLD_INDEX).",
         "verified_build": "951-1"
       },
       "WORLD_ARRAY_STRIDE": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_WORLD_ELEM_STRIDE).",
         "verified_build": "951-1"
       }
     },
@@ -829,25 +829,25 @@
       "VIEW_MATRIX": {
         "value": "0x137e0",
         "confidence": "HIGH",
-        "note": "Moved from 0x13100: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x13100: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_VIEW_MATRIX).",
         "verified_build": "951-1"
       },
       "PROJECTION_MATRIX": {
         "value": "0x138e0",
         "confidence": "HIGH",
-        "note": "Moved from 0x13200: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x13200: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_PROJECTION_MATRIX).",
         "verified_build": "951-1"
       },
       "MAPSQUARE_X_OFFSET": {
         "value": "0x146b4",
         "confidence": "HIGH",
-        "note": "Moved from 0x13fd4: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x13fd4: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_MAPSQUARE_X_OFF).",
         "verified_build": "951-1"
       },
       "MAPSQUARE_Y_OFFSET": {
         "value": "0x146b8",
         "confidence": "HIGH",
-        "note": "Moved from 0x13fd8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x13fd8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_MAPSQUARE_Y_OFF).",
         "verified_build": "951-1"
       },
       "MAPSQUARE_X_MAX": {
@@ -865,25 +865,25 @@
       "MAPSQUARES_VECTOR": {
         "value": "0x14700",
         "confidence": "HIGH",
-        "note": "Moved from 0x14020: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x14020: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_MAPSQUARES_VECTOR).",
         "verified_build": "951-1"
       },
       "ROOT_GRAPH_NODE": {
         "value": "0x10170",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_WORLD_ROOT_GRAPH_NODE, a malformed row whose value field still reads the same number).",
         "verified_build": "951-1"
       },
       "HEIGHT_MAP": {
         "value": "0x14738",
         "confidence": "HIGH",
-        "note": "Moved from 0x14058: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x14058: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_HEIGHT_MAP).",
         "verified_build": "951-1"
       },
       "LINK_MAP": {
         "value": "0x14748",
         "confidence": "HIGH",
-        "note": "Moved from 0x14068: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x14068: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_WORLD_LINK_MAP).",
         "verified_build": "951-1"
       }
     },
@@ -922,38 +922,38 @@
     "ORegionHeightContainer": {
       "PRIMARY": {
         "value": "0xa0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MAPSQUARE_TERRAIN).",
         "verified_build": "951-1"
       },
       "FALLBACK": {
         "value": "0xebb0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MAPSQUARE_TERRAIN_ALT).",
         "verified_build": "951-1"
       },
       "READY_LO": {
         "value": "0x21",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_TERRAINOBJ_READY_A).",
         "verified_build": "951-1"
       },
       "READY_HI": {
         "value": "0x22",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_TERRAINOBJ_READY_B).",
         "verified_build": "951-1"
       },
       "NOT_LOADED_FLAG": {
         "value": "0x169",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_TERRAINOBJ_FLAT_FLAG).",
         "verified_build": "951-1"
       },
       "PLANE_VEC_BEGIN": {
         "value": "0x170",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_TERRAINOBJ_HEIGHT_LEVELS).",
         "verified_build": "951-1"
       },
       "PLANE_VEC_END": {
@@ -965,13 +965,13 @@
       "PLANE_STRIDE": {
         "value": "0x10",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_TERRAINOBJ_LEVEL_ENTRY_STRIDE).",
         "verified_build": "951-1"
       },
       "PLANE_ELEM": {
         "value": "0x8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_TERRAINOBJ_LEVEL_ENTRY_PTR).",
         "verified_build": "951-1"
       },
       "PLANE0_BRIDGE_GRID": {
@@ -1027,43 +1027,43 @@
       "MAPSQUARE_X": {
         "value": "0x6c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MAPSQUARE_MAPSQUARE_X).",
         "verified_build": "951-1"
       },
       "MAPSQUARE_Y": {
         "value": "0x70",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MAPSQUARE_MAPSQUARE_Y).",
         "verified_build": "951-1"
       },
       "COMPOSITE_DATA_COUNTER": {
         "value": "0x78",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MAPSQUARE_COMPOSITE_DATA_COUNTER).",
         "verified_build": "951-1"
       },
       "COMPOSITE_DATA": {
         "value": "0x80",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MAPSQUARE_COMPOSITE_DATA).",
         "verified_build": "951-1"
       },
       "LOCATION_CONTAINERS": {
         "value": "0xeb90",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MAPSQUARE_LOC_CONTAINERS, a malformed row whose value field still reads the same number).",
         "verified_build": "951-1"
       },
       "LOCATION_CONTAINER_ENTRY_STRIDE": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MAPSQUARE_CONT_ENTRY_STRIDE).",
         "verified_build": "951-1"
       },
       "LOCATION_CONTAINER_ENTRY_PTR_OFFSET": {
         "value": "0x8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MAPSQUARE_CONT_ENTRY_PTR).",
         "verified_build": "951-1"
       }
     },
@@ -1071,67 +1071,67 @@
       "ENTRY_STRIDE": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LC_ENTRY_STRIDE).",
         "verified_build": "951-1"
       },
       "ENTRY_LOCATION_PTR_OFFSET": {
         "value": "0x8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_LC_ENTRY_LOC_PTR).",
         "verified_build": "951-1"
       },
       "PRIMARY_LOCATIONS_BEGIN": {
         "value": "0x308",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_LC_PRIMARY_BEGIN).",
         "verified_build": "951-1"
       },
       "PRIMARY_LOCATIONS_END": {
         "value": "0x310",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_LC_PRIMARY_END).",
         "verified_build": "951-1"
       },
       "MULTI_LOCATIONS_BEGIN": {
         "value": "0xc0",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_LC_MULTI_BEGIN = 0x2f0). Not yet checked against the 951-4 binary, so this value is kept until it is.",
         "verified_build": "951-1"
       },
       "MULTI_LOCATIONS_END": {
         "value": "0xc8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_LC_MULTI_END = 0x2f8). Not yet checked against the 951-4 binary, so this value is kept until it is.",
         "verified_build": "951-1"
       },
       "TERTIARY_LOCATIONS_BEGIN": {
         "value": "0x320",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_LC_TERTIARY_BEGIN).",
         "verified_build": "951-1"
       },
       "TERTIARY_LOCATIONS_END": {
         "value": "0x328",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_LC_TERTIARY_END).",
         "verified_build": "951-1"
       },
       "DISPATCH_SLOT_TABLE_START": {
         "value": "0xd8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_LOCATIONCONTAINER_DISPATCH_SLOT_TABLE_START = 0x120). Not yet checked against the 951-4 binary, so this value is kept until it is.",
         "verified_build": "951-1"
       },
       "DISPATCH_SLOT_STRIDE": {
         "value": "0x50",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_LOCATIONCONTAINER_DISPATCH_SLOT_STRIDE = 0x48). Not yet checked against the 951-4 binary, so this value is kept until it is.",
         "verified_build": "951-1"
       },
       "DISPATCH_SLOT_COUNT": {
         "value": "0x5",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOCATIONCONTAINER_DISPATCH_SLOT_COUNT).",
         "verified_build": "951-1"
       }
     },
@@ -1139,85 +1139,85 @@
       "RENDER_NODE_CTRL": {
         "value": "0x278",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_RENDER_NODE_CTRL).",
         "verified_build": "951-1"
       },
       "RENDER_NODE": {
         "value": "0x280",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_RENDER_NODE).",
         "verified_build": "951-1"
       },
       "VISIBLE_TYPE": {
         "value": "0xd0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_VISIBLE_TYPE).",
         "verified_build": "951-1"
       },
       "ORIGINAL_TYPE": {
         "value": "0xe0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_ORIGINAL_TYPE).",
         "verified_build": "951-1"
       },
       "SHAPE": {
         "value": "0x128",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_SHAPE).",
         "verified_build": "951-1"
       },
       "ROTATION": {
         "value": "0x129",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_ROTATION).",
         "verified_build": "951-1"
       },
       "POS_X": {
         "value": "0x174",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_POS_X).",
         "verified_build": "951-1"
       },
       "POS_Y": {
         "value": "0x178",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_POS_Y).",
         "verified_build": "951-1"
       },
       "IS_DELETED": {
         "value": "0x195",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_IS_DELETED).",
         "verified_build": "951-1"
       },
       "IS_HIDDEN": {
         "value": "0x197",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_IS_HIDDEN).",
         "verified_build": "951-1"
       },
       "TYPE_ID": {
         "value": "0x1b0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_TYPE_ID).",
         "verified_build": "951-1"
       },
       "HIGHLIGHT_INTENSITY": {
         "value": "0x32c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_HIGHLIGHT_INTENSITY).",
         "verified_build": "951-1"
       },
       "HIGHLIGHT_CATEGORY": {
         "value": "0x334",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_HIGHLIGHT_CATEGORY).",
         "verified_build": "951-1"
       },
       "SHOW_AS_IMPORTANT": {
         "value": "0x33c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_SHOW_AS_IMPORTANT).",
         "verified_build": "951-1"
       }
     },
@@ -1225,13 +1225,13 @@
       "LOCATION_DATA_VECTOR": {
         "value": "0xa0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMBINEDLOCATION_LOCATION_DATA_VECTOR).",
         "verified_build": "951-1"
       },
       "VECTOR_ELEMENT_LOC_SHAREDPTR": {
         "value": "0xa0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMBINEDLOCATION_VECTOR_ELEMENT_LOC_SHAREDPTR).",
         "verified_build": "951-1"
       },
       "RENDER_MODEL": {
@@ -1245,43 +1245,43 @@
       "TYPE_SHAREDPTR": {
         "value": "0xa8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_TYPE_SHAREDPTR).",
         "verified_build": "951-1"
       },
       "HIDDEN": {
         "value": "0xf2",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_HIDDEN).",
         "verified_build": "951-1"
       },
       "SHAPE": {
         "value": "0xb8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_SHAPE).",
         "verified_build": "951-1"
       },
       "ROTATION": {
         "value": "0xb9",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_ROTATION).",
         "verified_build": "951-1"
       },
       "POS_X": {
         "value": "0xa0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_POS_X).",
         "verified_build": "951-1"
       },
       "POS_Y": {
         "value": "0xa4",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_POS_Y).",
         "verified_build": "951-1"
       },
       "POS_PLANE": {
         "value": "0x9c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLS_POS_PLANE).",
         "verified_build": "951-1"
       }
     },
@@ -1289,19 +1289,19 @@
       "ID": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOCTYPE_ID).",
         "verified_build": "951-1"
       },
       "SIZE_X": {
         "value": "0x37c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOCTYPE_SIZE_X).",
         "verified_build": "951-1"
       },
       "SIZE_Y": {
         "value": "0x380",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOCTYPE_SIZE_Y).",
         "verified_build": "951-1"
       }
     },
@@ -1309,25 +1309,25 @@
       "VTABLE": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIMMANAGER_VTABLE).",
         "verified_build": "951-1"
       },
       "CLIENT_REF": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIMMANAGER_CLIENT_REF).",
         "verified_build": "951-1"
       },
       "FIRST_NODE": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIM_FIRST_NODE).",
         "verified_build": "951-1"
       },
       "LIST_SIZE": {
         "value": "0x50",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIM_LIST_SIZE).",
         "verified_build": "951-1"
       },
       "POOL_FREE_LIST_HEAD": {
@@ -1359,13 +1359,13 @@
       "NEXT": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIM_NODE_NEXT).",
         "verified_build": "951-1"
       },
       "VALUE": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIM_NODE_VALUE).",
         "verified_build": "951-1"
       }
     },
@@ -1373,39 +1373,39 @@
       "HASH_TABLE": {
         "value": "0x1c0c0",
         "confidence": "HIGH",
-        "note": "Moved from 0x1c0d0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x1c0d0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PLAYERVARDOMAIN_HASH).",
         "verified_build": "951-1"
       },
       "VAR_ID": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_VAR_ID).",
         "verified_build": "951-1"
       },
       "VAR_VALUE": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_VAR_VALUE).",
         "verified_build": "951-1"
       }
     },
     "OClientVarDomain": {
       "HASH_TABLE": {
         "value": "0x18",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CLIENTVARDOMAIN_HASH).",
         "verified_build": "951-1"
       },
       "VAR_ID": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENTVARDOMAIN_VAR_ID).",
         "verified_build": "951-1"
       },
       "VAR_VALUE": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CLIENTVARDOMAIN_VAR_VALUE).",
         "verified_build": "951-1"
       }
     },
@@ -1413,69 +1413,69 @@
       "TARGET_STRING": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_TARGET_STRING).",
         "verified_build": "951-1"
       },
       "ACTION_STRING": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_ACTION_STRING).",
         "verified_build": "951-1"
       },
       "HIGHLIGHT_TYPE": {
         "value": "0x30",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_HIGHLIGHT_TYPE).",
         "verified_build": "951-1"
       },
       "ACTION": {
         "value": "0x38",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_ACTION).",
         "verified_build": "951-1"
       },
       "UNK_1": {
         "value": "0x40",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MINIMENUENTRY_UNK_1).",
         "verified_build": "951-1"
       },
       "ITEM_ID": {
         "value": "0x44",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_ITEM_ID).",
         "verified_build": "951-1"
       },
       "PARAM_1": {
         "value": "0x48",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_PARAM_1).",
         "verified_build": "951-1"
       },
       "PARAM_2": {
         "value": "0x4c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_PARAM_2).",
         "verified_build": "951-1"
       },
       "PARAM_3": {
         "value": "0x50",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_PARAM_3).",
         "verified_build": "951-1"
       },
       "TARGETED_ENTITY": {
         "value": "0x120",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MME_TARGETED_ENTITY).",
         "verified_build": "951-1"
       }
     },
     "OMiniMenu": {
       "MENU_OPEN": {
         "value": "0x68",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MINIMENU_OPEN_FLAG).",
         "verified_build": "951-1"
       }
     },
@@ -1483,7 +1483,7 @@
       "ACTION_VTABLE": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MINIMENUACTION_ACTION_VTABLE).",
         "verified_build": "951-1"
       },
       "CLIENT": {
@@ -1495,13 +1495,13 @@
       "VTABLE_ACTION_SEND_FUNCTION": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MINIMENUACTION_VTABLE_ACTION_SEND_FUNCTION).",
         "verified_build": "951-1"
       },
       "ACTION_ID": {
         "value": "0x20",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MMACTION_ACTION_ID).",
         "verified_build": "951-1"
       }
     },
@@ -1509,13 +1509,13 @@
       "STAT_TABLE": {
         "value": "0x7070",
         "confidence": "HIGH",
-        "note": "Moved from 0x73a0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x73a0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MLM_STAT_TABLE).",
         "verified_build": "951-1"
       },
       "CLIENT_VAR_DOMAIN": {
         "value": "0x7078",
         "confidence": "HIGH",
-        "note": "Moved from 0x73a8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x73a8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_MLM_CLIENT_VAR_DOMAIN).",
         "verified_build": "951-1"
       },
       "CLICK_BUFFER_BASE": {
@@ -1609,19 +1609,19 @@
       "TABLE_SIZE": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STATTABLE_TABLE_SIZE).",
         "verified_build": "951-1"
       },
       "TABLE_BEGIN": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STATTABLE_TABLE_BEGIN).",
         "verified_build": "951-1"
       },
       "ENTRY_SIZE": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STATTABLE_ENTRY_SIZE).",
         "verified_build": "951-1"
       }
     },
@@ -1629,31 +1629,31 @@
       "INFO_PTR": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STAT_INFO_PTR).",
         "verified_build": "951-1"
       },
       "EXPERIENCE": {
         "value": "0xc",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STAT_EXPERIENCE).",
         "verified_build": "951-1"
       },
       "REAL_LEVEL": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STAT_REAL_LEVEL).",
         "verified_build": "951-1"
       },
       "CURRENT_LEVEL": {
         "value": "0x14",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_STAT_CURRENT_LEVEL).",
         "verified_build": "951-1"
       },
       "XP_IN_TENTHS": {
         "value": "0x8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_STAT_ELITE_FLAG).",
         "verified_build": "951-1"
       }
     },
@@ -1661,31 +1661,31 @@
       "INVENTORY_ID": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_INVENTORY_ID).",
         "verified_build": "951-1"
       },
       "INVENTORY_ITEMS": {
         "value": "0x10",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_INVENTORY_ITEMS).",
         "verified_build": "951-1"
       },
       "OBJ_VAR_DOMAINS": {
         "value": "0x28",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_INVENTORY_OBJ_VAR_DOMAINS).",
         "verified_build": "951-1"
       },
       "OBJ_VAR_DOMAIN_STRIDE": {
         "value": "0x38",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_OBJVAR_ELEMENT_STRIDE).",
         "verified_build": "951-1"
       },
       "OBJ_VAR_DOMAIN_FIELD": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_OBJVAR_HEADER_OFFSET).",
         "verified_build": "951-1"
       }
     },
@@ -1719,139 +1719,139 @@
       "BOUNDS_MIN_X": {
         "value": "0x40",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_BOUNDS_MIN_X).",
         "verified_build": "951-1"
       },
       "BOUNDS_MIN_Z": {
         "value": "0x44",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_BOUNDS_MIN_Z).",
         "verified_build": "951-1"
       },
       "BOUNDS_MIN_Y": {
         "value": "0x48",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_BOUNDS_MIN_Y).",
         "verified_build": "951-1"
       },
       "BOUNDS_MAX_X": {
         "value": "0x50",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_BOUNDS_MAX_X).",
         "verified_build": "951-1"
       },
       "BOUNDS_MAX_Z": {
         "value": "0x54",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_BOUNDS_MAX_Z).",
         "verified_build": "951-1"
       },
       "BOUNDS_MAX_Y": {
         "value": "0x58",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_BOUNDS_MAX_Y).",
         "verified_build": "951-1"
       },
       "SRC_BOUNDS_MIN_X": {
         "value": "0x60",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SRC_BOUNDS_MIN_X).",
         "verified_build": "951-1"
       },
       "SRC_BOUNDS_MIN_Z": {
         "value": "0x64",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SRC_BOUNDS_MIN_Z).",
         "verified_build": "951-1"
       },
       "SRC_BOUNDS_MIN_Y": {
         "value": "0x68",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SRC_BOUNDS_MIN_Y).",
         "verified_build": "951-1"
       },
       "SRC_BOUNDS_MAX_X": {
         "value": "0x70",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SRC_BOUNDS_MAX_X).",
         "verified_build": "951-1"
       },
       "SRC_BOUNDS_MAX_Z": {
         "value": "0x74",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SRC_BOUNDS_MAX_Z).",
         "verified_build": "951-1"
       },
       "SRC_BOUNDS_MAX_Y": {
         "value": "0x78",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SRC_BOUNDS_MAX_Y).",
         "verified_build": "951-1"
       },
       "LOCAL_X": {
         "value": "0xd0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_LOCAL_X).",
         "verified_build": "951-1"
       },
       "LOCAL_Z": {
         "value": "0xd4",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_LOCAL_Z).",
         "verified_build": "951-1"
       },
       "LOCAL_Y": {
         "value": "0xd8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_LOCAL_Y).",
         "verified_build": "951-1"
       },
       "DEPTH": {
         "value": "0xdc",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_DEPTH).",
         "verified_build": "951-1"
       },
       "SCENE_X": {
         "value": "0xf0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SCENE_X).",
         "verified_build": "951-1"
       },
       "SCENE_Y": {
         "value": "0xf8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SCENE_Y).",
         "verified_build": "951-1"
       },
       "SCENE_Z": {
         "value": "0xf4",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_SCENE_Z).",
         "verified_build": "951-1"
       },
       "FLAGS": {
         "value": "0xfc",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_GRAPHNODE_AABB_DIRTY).",
         "verified_build": "951-1"
       },
       "CHILDREN": {
         "value": "0x138",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_CHILDREN).",
         "verified_build": "951-1"
       },
       "ENTITY": {
         "value": "0x1a0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_ENTITY).",
         "verified_build": "951-1"
       },
       "FRAME_COUNT": {
         "value": "0x1ac",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_FRAME_COUNT).",
         "verified_build": "951-1"
       }
     },
@@ -1859,109 +1859,109 @@
       "GRAPH_NODE": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_GRAPH_NODE).",
         "verified_build": "951-1"
       },
       "ENTITY_TYPE": {
         "value": "0x20",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_TYPE).",
         "verified_build": "951-1"
       },
       "PICK_TYPE": {
         "value": "0x24",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_PICK_TYPE).",
         "verified_build": "951-1"
       },
       "SCREEN_X1": {
         "value": "0x28",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SCREEN_X1).",
         "verified_build": "951-1"
       },
       "SCREEN_Y1": {
         "value": "0x2c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SCREEN_Y1).",
         "verified_build": "951-1"
       },
       "SCREEN_X2": {
         "value": "0x30",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SCREEN_X2).",
         "verified_build": "951-1"
       },
       "SCREEN_Y2": {
         "value": "0x34",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SCREEN_Y2).",
         "verified_build": "951-1"
       },
       "LINE_RADIUS": {
         "value": "0x38",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_LINE_RADIUS).",
         "verified_build": "951-1"
       },
       "SCREEN_CENTER_X": {
         "value": "0x40",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SCREEN_CENTER_X).",
         "verified_build": "951-1"
       },
       "SCREEN_CENTER_Y": {
         "value": "0x44",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SCREEN_CENTER_Y).",
         "verified_build": "951-1"
       },
       "POINT_RADIUS": {
         "value": "0x48",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_POINT_RADIUS).",
         "verified_build": "951-1"
       },
       "ENTITY_PLANE": {
         "value": "0x50",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_PLANE).",
         "verified_build": "951-1"
       },
       "SIZE": {
         "value": "0x18c",
         "confidence": "HIGH",
-        "note": "Moved from 0x184: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x184: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_SIZE).",
         "verified_build": "951-1"
       },
       "ANIMATION_SHARED_PTR": {
         "value": "0xab0",
         "confidence": "HIGH",
-        "note": "Moved from 0xaa0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0xaa0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_ANIMATION_SHARED_PTR).",
         "verified_build": "951-1"
       },
       "RENDER_MODEL": {
         "value": "0xc68",
         "confidence": "HIGH",
-        "note": "Moved from 0xc58: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0xc58: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_RENDER_MODEL).",
         "verified_build": "951-1"
       },
       "ANIM_IDS_BEGIN": {
         "value": "0x2d8",
         "confidence": "HIGH",
-        "note": "Moved from 0x2c8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x2c8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_ANIM_IDS_BEGIN).",
         "verified_build": "951-1"
       },
       "ANIM_IDS_END": {
         "value": "0x2e0",
         "confidence": "HIGH",
-        "note": "Moved from 0x2d0: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x2d0: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_ANIM_IDS_END).",
         "verified_build": "951-1"
       },
       "ANIMATION_ID": {
         "value": "0xa98",
         "confidence": "HIGH",
-        "note": "Moved from 0xa88: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0xa88: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ENTITY_ANIMATION_ID).",
         "verified_build": "951-1"
       }
     },
@@ -2095,71 +2095,71 @@
       "ID": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ANIMATION_ID).",
         "verified_build": "951-1"
       },
       "CURRENT_FRAME": {
         "value": "0x24",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_ANIMATION_CURRENT_FRAME).",
         "verified_build": "951-1"
       }
     },
     "ONPC": {
       "FRAMES_ALIVE": {
         "value": "0x920",
-        "confidence": "MEDIUM",
-        "note": "Moved from 0x910 per the third-party 951-1 table (GS_NPC_FRAMES_ALIVE); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Moved from 0x910 per the third-party 951-1 table (GS_NPC_FRAMES_ALIVE); Windows did not move this field. The third-party 951-4 table agrees (GS_NPC_FRAMES_ALIVE).",
         "verified_build": "951-1"
       },
       "ID": {
         "value": "0x1070",
         "confidence": "HIGH",
-        "note": "Moved from 0x1060: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x1060: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_ID).",
         "verified_build": "951-1"
       },
       "TYPE_ID": {
         "value": "0x1074",
         "confidence": "HIGH",
-        "note": "Moved from 0x1064: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x1064: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_TYPE_ID).",
         "verified_build": "951-1"
       },
       "CURRENT_HP": {
         "value": "0x113c",
         "confidence": "HIGH",
-        "note": "Moved from 0x112c: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x112c: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_CURRENT_HP).",
         "verified_build": "951-1"
       },
       "MAX_HP": {
         "value": "0x1158",
         "confidence": "HIGH",
-        "note": "Moved from 0x1148: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x1148: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_MAX_HP).",
         "verified_build": "951-1"
       },
       "HIDDEN_MENUOP_FLAGS": {
         "value": "0x116c",
         "confidence": "HIGH",
-        "note": "Moved from 0x115c: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x115c: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_HIDDEN_MENUOP_FLAGS).",
         "verified_build": "951-1"
       },
       "SHOW_AS_IMPORTANT": {
         "value": "0x1110",
         "confidence": "HIGH",
-        "note": "Moved from 0x1100: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x1100: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_SHOW_AS_IMPORTANT).",
         "verified_build": "951-1"
       },
       "RENDER_ANIM": {
         "value": "0x968",
         "confidence": "HIGH",
-        "note": "Moved from 0x958: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x958: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_NPC_RENDER_ANIM).",
         "verified_build": "951-1"
       }
     },
     "ONPCType": {
       "ID": {
         "value": "0x4",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_NPCTYPE_ID); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1 per the third-party 951-1 table (GS_NPCTYPE_ID); Windows did not move this field. The third-party 951-4 table agrees (GS_NPCTYPE_ID).",
         "verified_build": "951-1"
       }
     },
@@ -2167,37 +2167,37 @@
       "SERVER_INDEX": {
         "value": "0x88",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PATHINGENTITY_SERVER_INDEX).",
         "verified_build": "951-1"
       },
       "NAME": {
         "value": "0x90",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PATHINGENTITY_NAME).",
         "verified_build": "951-1"
       },
       "INTERACTING_NPC_SID": {
         "value": "0x1c4",
         "confidence": "HIGH",
-        "note": "Moved from 0x1b4: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x1b4: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PATHINGENTITY_INTERACTING_SID).",
         "verified_build": "951-1"
       },
       "ROUTE_WAYPOINT_MANAGER": {
         "value": "0x278",
         "confidence": "HIGH",
-        "note": "Moved from 0x268: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0x268: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PATHINGENTITY_ROUTE_WAYPOINT_MANAGER).",
         "verified_build": "951-1"
       },
       "WAYPOINT_COUNT": {
         "value": "0x30",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PATHINGENTITY_WAYPOINT_COUNT).",
         "verified_build": "951-1"
       },
       "HITMARKS_AND_HEADBARS": {
         "value": "0xf08",
         "confidence": "HIGH",
-        "note": "Moved from 0xef8: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Moved from 0xef8: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_PATHINGENTITY_HNB).",
         "verified_build": "951-1"
       },
       "FINE_POS_X": {
@@ -2241,19 +2241,19 @@
       "HIT_VECTOR": {
         "value": "0x20",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HNB_HIT_VECTOR).",
         "verified_build": "951-1"
       },
       "HEADBAR_LINKEDLIST_VECTOR_START": {
         "value": "0x28",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HITMARKSANDHEADBARS_HEADBAR_LINKEDLIST_VECTOR_START, GS_HNB_HEADBAR_BANDS).",
         "verified_build": "951-1"
       },
       "HEADBAR_STRIDE": {
         "value": "0x1b0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HEADBAR_BAND_STRIDE).",
         "verified_build": "951-1"
       },
       "HEADBAR_VECTOR_END": {
@@ -2267,43 +2267,43 @@
       "TYPE": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HIT_TYPE).",
         "verified_build": "951-1"
       },
       "DAMAGE": {
         "value": "0x4",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HIT_DAMAGE).",
         "verified_build": "951-1"
       },
       "CLIENTCYCLE_CREATED": {
         "value": "0x8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HIT_CREATED).",
         "verified_build": "951-1"
       },
       "UNKNEG1_1": {
         "value": "0xc",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HIT_UNK1).",
         "verified_build": "951-1"
       },
       "UNKNEG1_2": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HIT_UNK2).",
         "verified_build": "951-1"
       },
       "DURATION_CLIENTCYLES": {
         "value": "0x14",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HIT_DURATION).",
         "verified_build": "951-1"
       },
       "STRIDE": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HIT_STRIDE).",
         "verified_build": "951-1"
       }
     },
@@ -2311,49 +2311,49 @@
       "TYPE_PTR": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HEADBAR_TYPE_PTR).",
         "verified_build": "951-1"
       },
       "TYPE_ID": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HEADBAR_TYPE_ID).",
         "verified_build": "951-1"
       },
       "CLIENTCYCLE_CREATED": {
         "value": "0x20",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HEADBAR_CREATED).",
         "verified_build": "951-1"
       },
       "FROM_FILL": {
         "value": "0x24",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HEADBAR_FROM_FILL).",
         "verified_build": "951-1"
       },
       "ZERO": {
         "value": "0x28",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HEADBAR_ZERO).",
         "verified_build": "951-1"
       },
       "TO_FILL": {
         "value": "0x2c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HEADBAR_TO_FILL).",
         "verified_build": "951-1"
       },
       "ZERO2": {
         "value": "0x30",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HEADBAR_ZERO2).",
         "verified_build": "951-1"
       },
       "DURATION_CLIENTCYCLES": {
         "value": "0x34",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HEADBAR_DURATION).",
         "verified_build": "951-1"
       }
     },
@@ -2362,27 +2362,27 @@
       "ID": {
         "value": "0x84",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIM_ID).",
         "verified_build": "951-1"
       },
       "CREATED_CLIENTCYCLE": {
         "value": "0x19c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_SPOTANIM_CREATED_CLIENTCYCLE).",
         "verified_build": "951-1"
       }
     },
     "OHintArrow": {
       "TARGET_ENTITY_SHARED_PTR": {
         "value": "0xc8",
-        "confidence": "MEDIUM",
-        "note": "Moved from 0x98 per the third-party 951-1 table (GS_HINTARROW_TARGET_ENTITY_SHARED_PTR); Windows did not move this field.",
+        "confidence": "HIGH",
+        "note": "Moved from 0x98 per the third-party 951-1 table (GS_HINTARROW_TARGET_ENTITY_SHARED_PTR); Windows did not move this field. The third-party 951-4 table agrees (GS_HINTARROW_TARGET_ENTITY_SHARED_PTR).",
         "verified_build": "951-1"
       },
       "TARGET_POS_VEC3": {
         "value": "0x80",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_HINTARROW_TARGET_POS_VEC3).",
         "verified_build": "951-1"
       }
     },
@@ -2410,37 +2410,37 @@
       "CURRENT_OPCODE": {
         "value": "0x2c",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_OSERVERCONNECTION_CURRENT_OPCODE).",
         "verified_build": "951-1"
       },
       "RESOLVED_SIZE": {
         "value": "0x30",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_OSERVERCONNECTION_RESOLVED_SIZE).",
         "verified_build": "951-1"
       },
       "ISAAC_PTR": {
         "value": "0x2b8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_OSERVERCONNECTION_ISAAC_PTR).",
         "verified_build": "951-1"
       },
       "PACKET_BASE": {
         "value": "0x2c0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_OSERVERCONNECTION_PACKET_BASE).",
         "verified_build": "951-1"
       },
       "BUF_DATA": {
         "value": "0x2d0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_OSERVERCONNECTION_BUF_DATA).",
         "verified_build": "951-1"
       },
       "BUF_POS": {
         "value": "0x2d8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_OSERVERCONNECTION_BUF_POS).",
         "verified_build": "951-1"
       },
       "PENDING_LIST_HEAD": {
@@ -2452,7 +2452,7 @@
       "PENDING_COUNT": {
         "value": "0x88",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_SERVERCONNECTION_OUT_QUEUE_COUNT).",
         "verified_build": "951-1"
       }
     },
@@ -2460,13 +2460,13 @@
       "GAME_CONNECTION": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_CONNECTIONMANAGER_GAME_CONNECTION).",
         "verified_build": "951-1"
       },
       "LOGIN_CONNECTION": {
         "value": "0x28",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CONNECTIONMANAGER_LOBBY_CONNECTION).",
         "verified_build": "951-1"
       },
       "HANDLE_STATE": {
@@ -2512,31 +2512,31 @@
       "FIXED_SIZE": {
         "value": "0x4",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CLIENTMESSAGE_DECL_SIZE).",
         "verified_build": "951-1"
       },
       "BUF_DATA": {
         "value": "0x18",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CLIENTMESSAGE_BUF_PTR).",
         "verified_build": "951-1"
       },
       "BUF_WRITE_POS": {
         "value": "0x20",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CLIENTMESSAGE_LENGTH).",
         "verified_build": "951-1"
       },
       "PAYLOAD_LENGTH": {
         "value": "0x28",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CLIENTMESSAGE_PAYLOAD_SIZE).",
         "verified_build": "951-1"
       },
       "PROT_PTR": {
         "value": "0x30",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_CLIENTMESSAGE_DESC_PTR).",
         "verified_build": "951-1"
       }
     },
@@ -2544,13 +2544,13 @@
       "TYPE_PTR": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_VARINFO_DESC).",
         "verified_build": "951-1"
       },
       "VAR_ID": {
         "value": "0x8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_VARDESC_ID).",
         "verified_build": "951-1"
       }
     },
@@ -2826,271 +2826,271 @@
       "CONNECTIONMANAGER_TCPIN": {
         "value": "0x1405050",
         "confidence": "HIGH",
-        "note": "CONNECTIONMANAGER_TCPIN at 951-4 (951-3: 0x14146f0): 3/3 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CONNECTIONMANAGER_TCPIN at 951-4 (951-3: 0x14146f0): 3/3 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CONNECTIONMANAGER_TCPIN).",
         "verified_build": "951-4"
       },
       "CLIENT_SETMAINSTATE": {
         "value": "0x16e44d0",
         "confidence": "HIGH",
-        "note": "CLIENT_SETMAINSTATE at 951-4 (951-3: 0x16e1fb0): 11/11 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CLIENT_SETMAINSTATE at 951-4 (951-3: 0x16e1fb0): 11/11 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENT_SETMAINSTATE).",
         "verified_build": "951-4"
       },
       "CLIENT_MAINLOGIC": {
         "value": "0x16f75b0",
         "confidence": "HIGH",
-        "note": "CLIENT_MAINLOGIC at 951-4 (951-3: 0x16f50e0): 1/1 identical function paired at this entry from paired functions.",
+        "note": "CLIENT_MAINLOGIC at 951-4 (951-3: 0x16f50e0): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENT_MAINLOGIC).",
         "verified_build": "951-4"
       },
       "CHATHISTORY_ADDCHAT_HOOKABLE": {
         "value": "0x13e2fb0",
         "confidence": "HIGH",
-        "note": "CHATHISTORY_ADDCHAT_HOOKABLE at 951-4 (951-3: 0x13e64f0): 6/6 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CHATHISTORY_ADDCHAT_HOOKABLE at 951-4 (951-3: 0x13e64f0): 6/6 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CHATHISTORY_ADDCHAT_HOOKABLE).",
         "verified_build": "951-4"
       },
       "PLAYERVARDOMAIN_SETVARVALUEFROMSERVER": {
         "value": "0xa4b7f0",
         "confidence": "HIGH",
-        "note": "PLAYERVARDOMAIN_SETVARVALUEFROMSERVER at 951-4 (951-3: 0xa4be90): 5/5 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "PLAYERVARDOMAIN_SETVARVALUEFROMSERVER at 951-4 (951-3: 0xa4be90): 5/5 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_PLAYERVARDOMAIN_SET).",
         "verified_build": "951-4"
       },
       "PLAYERVARDOMAIN_SETVARVALUE": {
         "value": "0xa4c100",
         "confidence": "HIGH",
-        "note": "PLAYERVARDOMAIN_SETVARVALUE at 951-4 (951-3: 0xa4c7a0): 2/2 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "PLAYERVARDOMAIN_SETVARVALUE at 951-4 (951-3: 0xa4c7a0): 2/2 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_PLAYERVARDOMAIN_SETBIT).",
         "verified_build": "951-4"
       },
       "CLIENTVARDOMAIN_SETVARVALUE": {
         "value": "0x13bf7a0",
         "confidence": "HIGH",
-        "note": "CLIENTVARDOMAIN_SETVARVALUE at 951-4 (951-3: 0x13d35b0): 1/1 identical function paired at this entry from paired functions.",
+        "note": "CLIENTVARDOMAIN_SETVARVALUE at 951-4 (951-3: 0x13d35b0): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTVARDOMAIN_SETVARVALUE).",
         "verified_build": "951-4"
       },
       "MINIMENU_DOACTION": {
         "value": "0x1b9ac0",
         "confidence": "HIGH",
-        "note": "MINIMENU_DOACTION at 951-4 (951-3: 0x1b9af0): 6/6 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "MINIMENU_DOACTION at 951-4 (951-3: 0x1b9af0): 6/6 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_MINIMENU_DOACTIONENTRY).",
         "verified_build": "951-4"
       },
       "PROJECTILELIST_ADD": {
         "value": "0x271230",
         "confidence": "HIGH",
-        "note": "PROJECTILELIST_ADD at 951-4 (951-3: 0x271260): 7/7 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "PROJECTILELIST_ADD at 951-4 (951-3: 0x271260): 7/7 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_PROJECTILELIST_ADD).",
         "verified_build": "951-4"
       },
       "ENTITY_ENTITY_DESTRUCT": {
         "value": "0xb1a660",
         "confidence": "HIGH",
-        "note": "ENTITY_ENTITY_DESTRUCT at 951-4 (951-3: 0xb1ad00): 10/10 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "ENTITY_ENTITY_DESTRUCT at 951-4 (951-3: 0xb1ad00): 10/10 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_ENTITY_ENTITY_DESTRUCT).",
         "verified_build": "951-4"
       },
       "INVENTORYMANAGER_GETINVENTORY": {
         "value": "0xa4fc60",
         "confidence": "HIGH",
-        "note": "INVENTORYMANAGER_GETINVENTORY at 951-4 (951-3: 0xa50300): 12/12 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INVENTORYMANAGER_GETINVENTORY at 951-4 (951-3: 0xa50300): 12/12 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INVENTORYMANAGER_GETINVENTORY).",
         "verified_build": "951-4"
       },
       "HITMARKSANDHEADBARS_ADDHEADBAR": {
         "value": "0xac6380",
         "confidence": "HIGH",
-        "note": "HITMARKSANDHEADBARS_ADDHEADBAR at 951-4 (951-3: 0xac6a20): 1/1 identical function paired at this entry from paired functions.",
+        "note": "HITMARKSANDHEADBARS_ADDHEADBAR at 951-4 (951-3: 0xac6a20): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_HITMARKSANDHEADBARS_ADDHEADBAR).",
         "verified_build": "951-4"
       },
       "HITMARKSANDHEADBARS_ADDHITMARK": {
         "value": "0xac71c0",
         "confidence": "HIGH",
-        "note": "HITMARKSANDHEADBARS_ADDHITMARK at 951-4 (951-3: 0xac7860): 1/1 identical function paired at this entry from paired functions.",
+        "note": "HITMARKSANDHEADBARS_ADDHITMARK at 951-4 (951-3: 0xac7860): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_HITMARKSANDHEADBARS_ADDHITMARK).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONKEYDOWNINNER": {
         "value": "0x35d750",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONKEYDOWNINNER at 951-4 (951-3: 0x35dbe0): 2/2 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INPUT_INPUT_ONKEYDOWNINNER at 951-4 (951-3: 0x35dbe0): 2/2 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONKEYDOWNINNER).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONKEYUPINNER": {
         "value": "0x35dcb0",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONKEYUPINNER at 951-4 (951-3: 0x35e140): 2/2 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INPUT_INPUT_ONKEYUPINNER at 951-4 (951-3: 0x35e140): 2/2 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONKEYUPINNER).",
         "verified_build": "951-4"
       },
       "SCRIPTRUNNER_EXECUTESCRIPT": {
         "value": "0x126d850",
         "confidence": "HIGH",
-        "note": "SCRIPTRUNNER_EXECUTESCRIPT at 951-4 (951-3: 0x1248960): 11/11 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "SCRIPTRUNNER_EXECUTESCRIPT at 951-4 (951-3: 0x1248960): 11/11 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SCRIPTRUNNER_EXECUTESCRIPT).",
         "verified_build": "951-4"
       },
       "SCRIPTRUNNER_GETCLIENTSCRIPTSTATE": {
         "value": "0x1248eb0",
         "confidence": "HIGH",
-        "note": "SCRIPTRUNNER_GETCLIENTSCRIPTSTATE at 951-4 (951-3: 0x1227600): 11/11 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "SCRIPTRUNNER_GETCLIENTSCRIPTSTATE at 951-4 (951-3: 0x1227600): 11/11 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SCRIPTRUNNER_GETCLIENTSCRIPTSTATE).",
         "verified_build": "951-4"
       },
       "SCRIPTRUNNER_CONTINUESCRIPT": {
         "value": "0x126d4c0",
         "confidence": "HIGH",
-        "note": "SCRIPTRUNNER_CONTINUESCRIPT at 951-4 (951-3: 0x12485d0): 3/3 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "SCRIPTRUNNER_CONTINUESCRIPT at 951-4 (951-3: 0x12485d0): 3/3 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SCRIPTRUNNER_CONTINUESCRIPT).",
         "verified_build": "951-4"
       },
       "SCRIPTRUNNER_GET_BY_ID": {
         "value": "0x126dc80",
         "confidence": "HIGH",
-        "note": "SCRIPTRUNNER_GET_BY_ID at 951-4 (951-3: 0x12791e0): 4/4 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "SCRIPTRUNNER_GET_BY_ID at 951-4 (951-3: 0x12791e0): 4/4 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SCRIPTRUNNER_GET_BY_ID).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONMOUSEMOTION": {
         "value": "0x379070",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONMOUSEMOTION at 951-4 (951-3: 0x379500): 6/6 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INPUT_INPUT_ONMOUSEMOTION at 951-4 (951-3: 0x379500): 6/6 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONMOUSEMOTION).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONLEFTBUTTONDOWN": {
         "value": "0x37a020",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONLEFTBUTTONDOWN at 951-4 (951-3: 0x37a4b0): 2/2 call-target votes from paired functions.",
+        "note": "INPUT_INPUT_ONLEFTBUTTONDOWN at 951-4 (951-3: 0x37a4b0): 2/2 call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONLEFTBUTTONDOWN).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONLEFTBUTTONUP": {
         "value": "0x379c10",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONLEFTBUTTONUP at 951-4 (951-3: 0x37a0a0): 1/1 call-target votes from paired functions.",
+        "note": "INPUT_INPUT_ONLEFTBUTTONUP at 951-4 (951-3: 0x37a0a0): 1/1 call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONLEFTBUTTONUP).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONSCROLLWHEEL": {
         "value": "0x3787e0",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONSCROLLWHEEL at 951-4 (951-3: 0x378c70): 1/1 identical function paired at this entry from paired functions.",
+        "note": "INPUT_INPUT_ONSCROLLWHEEL at 951-4 (951-3: 0x378c70): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONSCROLLWHEEL).",
         "verified_build": "951-4"
       },
       "INPUT_INPUT_ONKEYCHARINNER": {
         "value": "0x35cee0",
         "confidence": "HIGH",
-        "note": "INPUT_INPUT_ONKEYCHARINNER at 951-4 (951-3: 0x35d370): 1/1 identical function paired at this entry from paired functions.",
+        "note": "INPUT_INPUT_ONKEYCHARINNER at 951-4 (951-3: 0x35d370): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_INPUT_INPUT_ONKEYCHARINNER).",
         "verified_build": "951-4"
       },
       "EVENTLISTENERS_CALLLISTENERS_FF": {
         "value": "0x378320",
         "confidence": "HIGH",
-        "note": "EVENTLISTENERS_CALLLISTENERS_FF at 951-4 (951-3: 0x3787b0): 4/4 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "EVENTLISTENERS_CALLLISTENERS_FF at 951-4 (951-3: 0x3787b0): 4/4 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_EVENTLISTENERS_CALLLISTENERS_FF).",
         "verified_build": "951-4"
       },
       "INPUTSTATE_ISKEYDOWN": {
         "value": "0x378770",
         "confidence": "HIGH",
-        "note": "INPUTSTATE_ISKEYDOWN at 951-4 (951-3: 0x378c00): 41/41 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INPUTSTATE_ISKEYDOWN at 951-4 (951-3: 0x378c00): 41/41 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INPUTSTATE_ISKEYDOWN).",
         "verified_build": "951-4"
       },
       "SENDCLIENTMESSAGE": {
         "value": "0xe4660",
         "confidence": "HIGH",
-        "note": "SENDCLIENTMESSAGE at 951-4 (951-3: 0xe45b0): 75/75 call-target votes from paired functions.",
+        "note": "SENDCLIENTMESSAGE at 951-4 (951-3: 0xe45b0): 75/75 call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SENDCLIENTMESSAGE).",
         "verified_build": "951-4"
       },
       "BUILD_AREA_INIT": {
         "value": "0x844c60",
         "confidence": "HIGH",
-        "note": "BUILD_AREA_INIT at 951-4 (951-3: 0x845280): 3/3 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "BUILD_AREA_INIT at 951-4 (951-3: 0x845280): 3/3 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_BUILD_AREA_INIT).",
         "verified_build": "951-4"
       },
       "CLIENTERROR_REPORTERROR": {
         "value": "0x849230",
         "confidence": "HIGH",
-        "note": "CLIENTERROR_REPORTERROR at 951-4 (951-3: 0x849850): 4/4 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CLIENTERROR_REPORTERROR at 951-4 (951-3: 0x849850): 4/4 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTERROR_REPORTERROR).",
         "verified_build": "951-4"
       },
       "CLIENTSTREAM_READ": {
         "value": "0x5310e0",
         "confidence": "HIGH",
-        "note": "CLIENTSTREAM_READ at 951-4 (951-3: 0x5315c0): 13/13 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CLIENTSTREAM_READ at 951-4 (951-3: 0x5315c0): 13/13 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTSTREAM_READ).",
         "verified_build": "951-4"
       },
       "CLIENTSTREAM_WRITE": {
         "value": "0x530910",
         "confidence": "HIGH",
-        "note": "CLIENTSTREAM_WRITE at 951-4 (951-3: 0x530df0): 20/20 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CLIENTSTREAM_WRITE at 951-4 (951-3: 0x530df0): 20/20 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTSTREAM_WRITE).",
         "verified_build": "951-4"
       },
       "SERVERCONNECTION_FLUSHCLIENTMESSAGES": {
         "value": "0xa44900",
         "confidence": "HIGH",
-        "note": "SERVERCONNECTION_FLUSHCLIENTMESSAGES at 951-4 (951-3: 0xa44fa0): 3/3 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "SERVERCONNECTION_FLUSHCLIENTMESSAGES at 951-4 (951-3: 0xa44fa0): 3/3 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SERVERCONNECTION_FLUSHCLIENTMESSAGES).",
         "verified_build": "951-4"
       },
       "CLIENTPROT_FLUSHMOUSEPROTSENDER": {
         "value": "0x13b7140",
         "confidence": "HIGH",
-        "note": "CLIENTPROT_FLUSHMOUSEPROTSENDER at 951-4 (951-3: 0x13c14d0): 3/3 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "CLIENTPROT_FLUSHMOUSEPROTSENDER at 951-4 (951-3: 0x13c14d0): 3/3 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTPROT_FLUSHMOUSEPROTSENDER).",
         "verified_build": "951-4"
       },
       "SERVERPROT_DECODE_UPDATE_INV_PARTIAL": {
         "value": "0x13bcf60",
         "confidence": "HIGH",
-        "note": "SERVERPROT_DECODE_UPDATE_INV_PARTIAL at 951-4 (951-3: 0x13e1da0): 2/2 identical function paired at this entry and data-reference votes from paired functions.",
+        "note": "SERVERPROT_DECODE_UPDATE_INV_PARTIAL at 951-4 (951-3: 0x13e1da0): 2/2 identical function paired at this entry and data-reference votes from paired functions. The third-party 951-4 table agrees (GS_FN_SERVERPROT_DECODE_UPDATE_INV_PARTIAL).",
         "verified_build": "951-4"
       },
       "SERVERPROT_DECODE_UPDATE_INV_FULL": {
         "value": "0x13e2b80",
         "confidence": "HIGH",
-        "note": "SERVERPROT_DECODE_UPDATE_INV_FULL at 951-4 (951-3: 0x13e60c0): 2/2 identical function paired at this entry and data-reference votes from paired functions.",
+        "note": "SERVERPROT_DECODE_UPDATE_INV_FULL at 951-4 (951-3: 0x13e60c0): 2/2 identical function paired at this entry and data-reference votes from paired functions. The third-party 951-4 table agrees (GS_FN_SERVERPROT_DECODE_UPDATE_INV_FULL).",
         "verified_build": "951-4"
       },
       "REBUILD_NORMAL_HANDLER": {
         "value": "0x14232d0",
         "confidence": "HIGH",
-        "note": "REBUILD_NORMAL_HANDLER at 951-4 (951-3: 0x13fcab0): 2/2 identical function paired at this entry and data-reference votes from paired functions.",
+        "note": "REBUILD_NORMAL_HANDLER at 951-4 (951-3: 0x13fcab0): 2/2 identical function paired at this entry and data-reference votes from paired functions. The third-party 951-4 table agrees (GS_FN_REBUILD_NORMAL_HANDLER).",
         "verified_build": "951-4"
       },
       "CLIENTPROT_SENDEVENTMOUSECLICK": {
         "value": "0x13b4fe0",
         "confidence": "HIGH",
-        "note": "CLIENTPROT_SENDEVENTMOUSECLICK at 951-4 (951-3: 0x13c1c30): 1/1 identical function paired at this entry from paired functions.",
+        "note": "CLIENTPROT_SENDEVENTMOUSECLICK at 951-4 (951-3: 0x13c1c30): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTPROT_SENDEVENTMOUSECLICK).",
         "verified_build": "951-4"
       },
       "CLIENTPROT_SENDNATIVEMOUSECLICK": {
         "value": "0x13b4d90",
         "confidence": "HIGH",
-        "note": "CLIENTPROT_SENDNATIVEMOUSECLICK at 951-4 (951-3: 0x13c19e0): 1/1 identical function paired at this entry from paired functions.",
+        "note": "CLIENTPROT_SENDNATIVEMOUSECLICK at 951-4 (951-3: 0x13c19e0): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTPROT_SENDNATIVEMOUSECLICK).",
         "verified_build": "951-4"
       },
       "CLIENTPROT_FLUSHPERTICK": {
         "value": "0x13c8160",
         "confidence": "HIGH",
-        "note": "CLIENTPROT_FLUSHPERTICK at 951-4 (951-3: 0x13cfff0): 1/1 identical function paired at this entry from paired functions.",
+        "note": "CLIENTPROT_FLUSHPERTICK at 951-4 (951-3: 0x13cfff0): 1/1 identical function paired at this entry from paired functions. The third-party 951-4 table agrees (GS_FN_CLIENTPROT_FLUSHPERTICK).",
         "verified_build": "951-4"
       },
       "STATTABLE_UPDATESTAT": {
         "value": "0x1438130",
         "confidence": "HIGH",
-        "note": "STATTABLE_UPDATESTAT at 951-4 (951-3: 0x140f0f0): 2/2 identical function paired at this entry and data-reference votes from paired functions.",
+        "note": "STATTABLE_UPDATESTAT at 951-4 (951-3: 0x140f0f0): 2/2 identical function paired at this entry and data-reference votes from paired functions. The third-party 951-4 table agrees (GS_FN_STATTABLE_UPDATESTAT).",
         "verified_build": "951-4"
       },
       "INTERFACEMANAGER_IFBUTTONXINNER": {
         "value": "0x12d38c0",
         "confidence": "HIGH",
-        "note": "INTERFACEMANAGER_IFBUTTONXINNER at 951-4 (951-3: 0x12e87f0): 3/3 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INTERFACEMANAGER_IFBUTTONXINNER at 951-4 (951-3: 0x12e87f0): 3/3 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INTERFACEMANAGER_IFBUTTONXINNER).",
         "verified_build": "951-4"
       },
       "ENTITY_ENTITY": {
         "value": "0x15f8db0",
         "confidence": "HIGH",
-        "note": "ENTITY_ENTITY at 951-4 (951-3: 0x15fa5f0): 7/7 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "ENTITY_ENTITY at 951-4 (951-3: 0x15fa5f0): 7/7 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_ENTITY_ENTITY).",
         "verified_build": "951-4"
       },
       "SCRIPTRUNNER_EXECUTEHOOKINNER": {
         "value": "0x126edd0",
         "confidence": "HIGH",
-        "note": "SCRIPTRUNNER_EXECUTEHOOKINNER at 951-4 (951-3: 0x124a470): 19/19 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "SCRIPTRUNNER_EXECUTEHOOKINNER at 951-4 (951-3: 0x124a470): 19/19 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_SCRIPTRUNNER_EXECUTEHOOKINNER).",
         "verified_build": "951-4"
       },
       "INTERFACEMANAGER_DRAWCOMPONENTLIST": {
         "value": "0x1307230",
         "confidence": "HIGH",
-        "note": "INTERFACEMANAGER_DRAWCOMPONENTLIST at 951-4 (951-3: 0x130ae30): 18/18 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "INTERFACEMANAGER_DRAWCOMPONENTLIST at 951-4 (951-3: 0x130ae30): 18/18 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_INTERFACEMANAGER_DRAWSLOTCHILDREN).",
         "verified_build": "951-4"
       },
       "APPLY_LOC_CHANGE": {
         "value": "0x144bdb0",
         "confidence": "HIGH",
-        "note": "APPLY_LOC_CHANGE at 951-4 (951-3: 0x14505b0): 6/6 identical function paired at this entry and call-target votes from paired functions.",
+        "note": "APPLY_LOC_CHANGE at 951-4 (951-3: 0x14505b0): 6/6 identical function paired at this entry and call-target votes from paired functions. The third-party 951-4 table agrees (GS_FN_APPLY_LOC_CHANGE).",
         "verified_build": "951-4"
       }
     },
@@ -3098,20 +3098,20 @@
       "MONOTONIC_CLOCK_MS": {
         "value": "0x1e7d310",
         "confidence": "HIGH",
-        "note": "MONOTONIC_CLOCK_MS at 951-4 (951-3: 0x1e7a310): 210/210 data-reference votes from paired functions.",
+        "note": "MONOTONIC_CLOCK_MS at 951-4 (951-3: 0x1e7a310): 210/210 data-reference votes from paired functions. The third-party 951-4 table agrees (GS_GLOBAL_CLOCK_MS).",
         "verified_build": "951-4"
       },
       "CLIENT": {
         "value": "0x1ed0ca0",
         "confidence": "HIGH",
-        "note": "CLIENT at 951-4 (951-3: 0x1ecdca0): 35/35 data-reference votes from paired functions.",
+        "note": "CLIENT at 951-4 (951-3: 0x1ecdca0): 35/35 data-reference votes from paired functions. The third-party 951-4 table agrees (GS_GLOBAL_CLIENT).",
         "verified_build": "951-4"
       },
       "SERVERPROT_TABLE": {
         "value": "0x1eb45e0",
         "confidence": "HIGH",
         "verified_build": "951-4",
-        "note": "SERVERPROT_TABLE at 951-4 (951-3: 0x1eb15e0): 4/4 data-reference votes from paired functions."
+        "note": "SERVERPROT_TABLE at 951-4 (951-3: 0x1eb15e0): 4/4 data-reference votes from paired functions. The third-party 951-4 table agrees (GS_GLOBAL_SERVERPROT_TABLE)."
       }
     },
     "OInputGlobals": {
@@ -3149,38 +3149,38 @@
     "OComponentPage": {
       "SIZE": {
         "value": "0x68",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFCOMP_PAGE_STRIDE).",
         "verified_build": "951-1"
       },
       "STATIC_CHILDREN": {
         "value": "0x0",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMPONENTPAGE_STATIC_CHILDREN).",
         "verified_build": "951-1"
       },
       "STATIC_CHILDREN_END": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMPONENTPAGE_STATIC_CHILDREN_END).",
         "verified_build": "951-1"
       },
       "DYNAMIC_CHILDREN": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMPONENTPAGE_DYNAMIC_CHILDREN).",
         "verified_build": "951-1"
       },
       "DYNAMIC_CHILDREN_END": {
         "value": "0x20",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMPONENTPAGE_DYNAMIC_CHILDREN_END).",
         "verified_build": "951-1"
       },
       "ENABLED": {
         "value": "0x40",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_COMPONENTPAGE_ENABLED).",
         "verified_build": "951-1"
       }
     },
@@ -3188,25 +3188,25 @@
       "SIZE": {
         "value": "0x18",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFPARENT_SLOT_STRIDE).",
         "verified_build": "951-1"
       },
       "REMOVED": {
         "value": "0x0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_SLOT_FLAG).",
         "verified_build": "951-1"
       },
       "REF_COUNT": {
         "value": "0x8",
         "confidence": "HIGH",
-        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree.",
+        "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFPARENT_SLOT_REFCOUNT).",
         "verified_build": "951-1"
       },
       "COMPONENT": {
         "value": "0x10",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "confidence": "HIGH",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_IFPARENT_SLOT_PTR).",
         "verified_build": "951-1"
       }
     },
@@ -3220,7 +3220,7 @@
       "SOURCE_COMPONENT": {
         "value": "0x140",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_HOOKCTX_COMPONENT).",
         "verified_build": "951-1"
       }
     },
@@ -3229,24 +3229,24 @@
         "value": "0x0",
         "confidence": "HIGH",
         "verified_build": "951-1",
-        "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_OPCODE): equals the descriptor's index in the table."
+        "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_OPCODE): equals the descriptor's index in the table. The third-party 951-4 table agrees (GS_SERVERPROT_DESC_OPCODE)."
       },
       "HANDLER": {
         "value": "0x10",
         "confidence": "HIGH",
         "verified_build": "951-1",
-        "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_FN): the handler std::function; TcpIn passes its address as the invoker's first argument."
+        "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_FN): the handler std::function; TcpIn passes its address as the invoker's first argument. The third-party 951-4 table agrees (GS_SERVERPROT_DESC_FN)."
       },
       "HANDLER_INVOKER": {
         "value": "0x28",
         "confidence": "HIGH",
         "verified_build": "951-1",
-        "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_HANDLER): TcpIn calls through this slot once per incoming packet with the handler, the connection's packet, the size and the ISAAC pointer."
+        "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_HANDLER): TcpIn calls through this slot once per incoming packet with the handler, the connection's packet, the size and the ISAAC pointer. The third-party 951-4 table agrees (GS_SERVERPROT_DESC_HANDLER)."
       }
     }
   },
   "objectNotes": {
-    "doActions": "66 DoActions total, all registered by ONE function on Linux: the jag::MiniMenu ctor FUN_00078b4e installs every sender inline (there is no second component-action registrar as there is on Windows). Action object layout: +0x00 client ctx, +0x10 invoker thunk, +0x18 sender fn (all three written at runtime by the ctor), +0x20 dispatch id, +0x24 kind (both written by the static initializer FUN_000af050). Layout re-derived from this binary and validated by reproducing five already-correct rows exactly before any change: SELECT_NPC 8, WALK 23, DIALOGUE 30, SELECT_TILE 59, and COMPONENT 57 / COMPONENT_SIXPLUS 1007 sharing one sender. LOC FAMILY CORRECTED 2026-07: the loc rows were mis-paired, every name sitting one slot below its true sender, which left OBJECT_4 with no address at all (0x0, so DoActionOpcode.OBJECT_4.fire() was a no-op). True kind-3 mapping is id 1 SELECT_OBJECT 0x162af0, 2 OBJECT_1 0x162bc0, 3 OBJECT_2 0x162ba0, 4 OBJECT_3 0x162b80, 5 OBJECT_4 0x162b60, 1001 OBJECT_5 0x162b40, 1002 OBJECT_6 0x162b20. SELECT_OBJECT's sender was previously absent from the table entirely; it is the only loc sender that branches on jag::g_protocolRevision (descriptor DAT_016844b0 = ClientProt op 9 size 17 below 0x3b5, else DAT_01683e10 = op 116 size 18) and the only one SendOpLoc special-cases to also emit the pending selection state, and FUN_001cdfa0 groups its action object with the other select-family objects (SELECT_TILE, SELECT_NPC, SELECT_GROUND_ITEM, PLAYER_SELECT, COMP_ON_PLAYER, SELECT_COMPONENT_ITEM) and no other loc action. Each of DoOpLoc1..6 dispatches a distinct fixed-size-9 ClientProt op (41, 70, 33, 91, 1, 88), so a wrong pairing would have sent the wrong in-game action rather than failing loudly. ALIAS IDS: Linux has the same alias-copy pattern as Windows - the ctor calls FUN_00cbee00(dst,src) to copy a registered object's callable into a second object under another id, giving loc 1001/1002 also as 6/7 (recorded as OBJECT_5_ALT/OBJECT_6_ALT), npc 2009-2013/3003 also as 9-13/1003, player 44-53 also as 2044-2053. Which id of a pair the client actually dispatches at runtime is UNKNOWN and matters only for DoActionOpcode.getActionById; no existing row's id was flipped between members of a pair. Next lead for that: capture real menu clicks on a 5-op and a 6-op loc and read the dispatched id.",
+    "doActions": "66 DoActions total, all registered by ONE function on Linux: the jag::MiniMenu ctor FUN_00078b4e installs every sender inline (there is no second component-action registrar as there is on Windows). Action object layout: +0x00 client ctx, +0x10 invoker thunk, +0x18 sender fn (all three written at runtime by the ctor), +0x20 dispatch id, +0x24 kind (both written by the static initializer FUN_000af050). Layout re-derived from this binary and validated by reproducing five already-correct rows exactly before any change: SELECT_NPC 8, WALK 23, DIALOGUE 30, SELECT_TILE 59, and COMPONENT 57 / COMPONENT_SIXPLUS 1007 sharing one sender. LOC FAMILY CORRECTED 2026-07: the loc rows were mis-paired, every name sitting one slot below its true sender, which left OBJECT_4 with no address at all (0x0, so DoActionOpcode.OBJECT_4.fire() was a no-op). True kind-3 mapping is id 1 SELECT_OBJECT 0x162af0, 2 OBJECT_1 0x162bc0, 3 OBJECT_2 0x162ba0, 4 OBJECT_3 0x162b80, 5 OBJECT_4 0x162b60, 1001 OBJECT_5 0x162b40, 1002 OBJECT_6 0x162b20. SELECT_OBJECT's sender was previously absent from the table entirely; it is the only loc sender that branches on jag::g_protocolRevision (descriptor DAT_016844b0 = ClientProt op 9 size 17 below 0x3b5, else DAT_01683e10 = op 116 size 18) and the only one SendOpLoc special-cases to also emit the pending selection state, and FUN_001cdfa0 groups its action object with the other select-family objects (SELECT_TILE, SELECT_NPC, SELECT_GROUND_ITEM, PLAYER_SELECT, COMP_ON_PLAYER, SELECT_COMPONENT_ITEM) and no other loc action. Each of DoOpLoc1..6 dispatches a distinct fixed-size-9 ClientProt op (41, 70, 33, 91, 1, 88), so a wrong pairing would have sent the wrong in-game action rather than failing loudly. ALIAS IDS: Linux has the same alias-copy pattern as Windows - the ctor calls FUN_00cbee00(dst,src) to copy a registered object's callable into a second object under another id, giving loc 1001/1002 also as 6/7 (recorded as OBJECT_5_ALT/OBJECT_6_ALT), npc 2009-2013/3003 also as 9-13/1003, player 44-53 also as 2044-2053. Which id of a pair the client actually dispatches at runtime is UNKNOWN and matters only for DoActionOpcode.getActionById; no existing row's id was flipped between members of a pair. Next lead for that: capture real menu clicks on a 5-op and a 6-op loc and read the dispatched id. The third-party 951-4 table agrees on all 47 DoOp addresses it lists.",
     "OInputGlobals": "jag::input::InputState file-scope statics. Y precedes X in memory and both are floats — the same order and type were confirmed independently in the Windows build, so this is a real field order.",
     "OClient": "Client object byte-identical 948-5→949-1 (both constructors alloc size 0x53358 with identical field init), so every OClient offset is unchanged. All //949-1 tags below are direct-verified STABLE, not carried.",
     "OInputHandler": "EventListeners slots on jag::input::InputHandler: slot n at 0x08 + n*0x40, each { begin, end, capacityEnd, mutex }. Middle and right buttons have no Input entry point — the platform adapter writes the OInputGlobals button byte itself and calls CallListeners on these slots directly.",
