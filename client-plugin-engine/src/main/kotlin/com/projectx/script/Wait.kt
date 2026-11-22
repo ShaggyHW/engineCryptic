@@ -352,6 +352,11 @@ sealed class Wait {
         fun captureSerenSpirit(range: Int = 15, onResult: Consumer<Boolean>? = null): Wait =
             call(onResult) { this.captureSerenSpirit(range) }
 
+        /** Perform the named emote from the emote tab; [onResult] gets whether it started. Kotlin: `performEmote`. */
+        @JvmStatic
+        @JvmOverloads
+        fun performEmote(name: String, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.performEmote(name) }
+
         /** Turn [prayer] on or off, then wait for the change. Kotlin: `togglePrayer`. */
         @JvmStatic
         fun togglePrayer(prayer: Prayer, shouldBeActive: Boolean): Wait = call(null) { this.togglePrayer(prayer, shouldBeActive) }
