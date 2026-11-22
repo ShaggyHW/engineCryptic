@@ -94,6 +94,7 @@ object SettingsModel {
 
     private fun reconcileMcp() {
         val desired = UIState.mcpEnabled.value
+        if (Configuration.config.mcpEnabled != desired) Configuration.updateConfig(Configuration.config.copy(mcpEnabled = desired))
         when (McpServer.state) {
             is McpServer.State.Listening -> if (!desired) McpServer.stop()
             McpServer.State.Disabled -> if (desired) McpServer.start().onFailure { UIState.mcpEnabled.value = false }

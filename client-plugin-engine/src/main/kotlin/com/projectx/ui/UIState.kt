@@ -80,7 +80,7 @@ object UIState {
     val varChangeTrackVarc: ImGuiState<Boolean> = setting(true)
     val varChangeTrackVarcbit: ImGuiState<Boolean> = setting(true)
 
-    val mcpEnabled: ImGuiState<Boolean> = setting(false)
+    val mcpEnabled: ImGuiState<Boolean> = setting(Configuration.config.mcpEnabled)
     val varpDebugEnabled: ImGuiState<Boolean> = setting(false)
     val varcDebugEnabled: ImGuiState<Boolean> = setting(false)
     val discordEnabled: ImGuiState<Boolean> = setting(Configuration.config.discordEnabled)

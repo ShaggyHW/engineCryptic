@@ -14,6 +14,7 @@ data class PersistentConfig(
     val discordUsername: String = "Project X",
     val discordAvatarUrl: String = "",
     val uiToggleKey: Int = defaultUiToggleKey,
+    val mcpEnabled: Boolean = false,
     val favoriteScripts: Set<String> = emptySet(),
     /**
      * Class names of the scripts added to the library from the Store. Null until the library is first set up,
