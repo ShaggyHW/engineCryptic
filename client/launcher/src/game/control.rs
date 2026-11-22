@@ -345,9 +345,24 @@ pub fn report_engine_start(pid: u32) {
 
     let deadline = Instant::now() + mapping::grace_window();
     loop {
-        if send_command(pid, "STATUS").is_ok() {
-            log::info!("Project X engine is running in pid {}.", pid);
-            return;
+        if let Ok(reply) = send_command(pid, "STATUS") {
+            let status = parse_status(pid, &reply);
+            match status.state.as_str() {
+                "active" => {
+                    log::info!("Project X engine is running in pid {}.", pid);
+                    return;
+                }
+                "error" => {
+                    log::error!(
+                        "The Project X engine failed to load in pid {}: {}",
+                        pid,
+                        status.detail.as_deref().unwrap_or("the supervisor gave no reason")
+                    );
+                    log_jvm_stderr_tail(pid);
+                    return;
+                }
+                _ => {}
+            }
         }
         if let Some(reason) = bootstrap_failure(pid) {
             log::error!("The Project X engine did not start in pid {}: {}", pid, reason);
@@ -445,7 +460,12 @@ pub fn is_injected(_pid: u32) -> bool {
 /// reply (including `ERR ...`) maps to `"error"`.
 #[cfg(any(all(unix, not(target_os = "macos")), windows))]
 fn parse_status(pid: u32, resp: &str) -> ClientStatus {
-    let mut tokens = resp.split_whitespace();
+    // The supervisor's error is free text with spaces, so it runs to the end of the line.
+    let (fields, error) = match resp.split_once(" error=") {
+        Some((fields, error)) => (fields, Some(error.trim().to_string()).filter(|e| !e.is_empty())),
+        None => (resp, None),
+    };
+    let mut tokens = fields.split_whitespace();
 
     if tokens.next() != Some("OK") {
         return ClientStatus {
@@ -487,7 +507,7 @@ fn parse_status(pid: u32, resp: &str) -> ClientStatus {
         state,
         version,
         reloads,
-        detail: None,
+        detail: error,
     }
 }
 
@@ -518,6 +538,31 @@ mod tests {
                    Using Java 27 from JAVA_HOME: /usr/lib/jvm/java-27-openjdk
 ";
         assert_eq!(failure_in_log(log), None);
+    }
+
+    #[test]
+    fn a_supervisor_error_reaches_the_client_card() {
+        let status = parse_status(
+            7,
+            "OK error pid=7 version=- reloads=0 error=java.lang.ExceptionInInitializerError (caused by java.lang.IllegalStateException: no offset table for linux 951-5)",
+        );
+        assert_eq!(status.state, "error");
+        assert_eq!(status.version, None);
+        assert_eq!(
+            status.detail.as_deref(),
+            Some(
+                "java.lang.ExceptionInInitializerError (caused by java.lang.IllegalStateException: no offset table for linux 951-5)"
+            )
+        );
+    }
+
+    #[test]
+    fn an_active_engine_has_no_detail() {
+        let status = parse_status(7, "OK active pid=7 version=1.8.0 reloads=2");
+        assert_eq!(status.state, "active");
+        assert_eq!(status.version.as_deref(), Some("1.8.0"));
+        assert_eq!(status.reloads, 2);
+        assert_eq!(status.detail, None);
     }
 
     #[test]

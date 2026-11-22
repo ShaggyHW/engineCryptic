@@ -35,17 +35,18 @@ public final class Supervisor {
             baseAddr = baseAddr_;
             engineJarPath = resolveEngineJar(engineHomeDir);
             if (engineJarPath == null) {
-                lastError = "no engine shadow jar found in " + engineHomeDir;
+                lastError = "no engine jar found in " + engineHomeDir;
                 System.err.println("[Supervisor] " + lastError);
-                return;
+            } else {
+                try {
+                    loadEngine();
+                } catch (Throwable t) {
+                    lastError = describe(t);
+                    System.err.println("[Supervisor] initial loadEngine failed: " + t);
+                    t.printStackTrace();
+                }
             }
-            try {
-                loadEngine();
-            } catch (Throwable t) {
-                lastError = String.valueOf(t);
-                System.err.println("[Supervisor] initial loadEngine failed: " + t);
-                t.printStackTrace();
-            }
+            // Bound even when the engine failed, so the launcher can ask why instead of timing out.
             try {
                 control = new ControlSocket(Supervisor::command);
                 control.start();
@@ -137,9 +138,9 @@ public final class Supervisor {
                         return engine.command(raw.trim());
                 }
             } catch (Throwable t) {
-                lastError = String.valueOf(t);
+                lastError = describe(t);
                 t.printStackTrace();
-                return "ERR " + sanitize(String.valueOf(t));
+                return "ERR " + sanitize(lastError);
             }
         }
     }
@@ -198,6 +199,13 @@ public final class Supervisor {
         EngineHandle h = engine;
         if (h == null) return "-";
         try { return h.version(); } catch (Throwable t) { return "?"; }
+    }
+
+    /** The failure and its root cause: what goes wrong inside the engine arrives wrapped. */
+    static String describe(Throwable t) {
+        Throwable root = t;
+        while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+        return root == t ? String.valueOf(t) : t + " (caused by " + root + ")";
     }
 
     private static String sanitize(String s) {
