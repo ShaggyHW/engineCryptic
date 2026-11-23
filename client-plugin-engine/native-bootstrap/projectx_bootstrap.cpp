@@ -288,6 +288,7 @@ static const char *java_home_hint() {
 
     log("Read a JDK hint from %s: %s\n", hint_path, line);
     std::snprintf(resolved, sizeof(resolved), "%s", line);
+    normalize_path(resolved);
     return resolved;
 }
 
@@ -324,11 +325,14 @@ static const char *resolve_java_home() {
     using projectx::forensics::log;
 
     static const char *const ENV_VARS[] = {"JAVA_HOME", "JDK_HOME"};
+    static char from_env[512];
     for (const char *name : ENV_VARS) {
         const char *value = std::getenv(name);
         if (value == nullptr || value[0] == '\0') continue;
-        if (jdk_is_usable(value)) return log_chosen_jdk(name, value);
-        log_rejected_jdk(name, value);
+        std::snprintf(from_env, sizeof(from_env), "%s", value);
+        normalize_path(from_env);
+        if (jdk_is_usable(from_env)) return log_chosen_jdk(name, from_env);
+        log_rejected_jdk(name, from_env);
     }
 
     if (const char *hinted = java_home_hint()) {

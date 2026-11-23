@@ -48,6 +48,8 @@ const char *module_directory() {
 
 const char *temp_dir() { return "/tmp"; }
 
+void normalize_path(char *) {}
+
 uint64_t current_thread_id() { return (uint64_t)syscall(SYS_gettid); }
 
 /// The executable's load address, which is where offset 0 of its image sits. The client's first
@@ -175,7 +177,9 @@ static bool is_port_available(int port) {
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    // Exactly the address the JVM's debug agent binds, so a port another client's agent holds is
+    // never reported free: an agent that fails to bind calls exit() and takes the client with it.
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     int result = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
     close(sock);

@@ -28,6 +28,24 @@ const PROBE_SUFFIX: &str = "__END__";
 /// explicit `JAVA_HOME` still takes precedence over discovery — but a stale or
 /// too-old `JAVA_HOME` no longer blocks an otherwise working install.
 pub fn resolve_home() -> Option<PathBuf> {
+    resolve_home_from_any_source().map(ordinary_path)
+}
+
+/// `std::fs::canonicalize` answers with a `\\?\` verbatim path on Windows. The JVM locates its own
+/// files from wherever jvm.dll was loaded and cannot open them through one: started from such a home
+/// it aborts with "jimage file name is null" and takes the client with it.
+fn ordinary_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", share));
+    }
+    if let Some(local) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(local);
+    }
+    path
+}
+
+fn resolve_home_from_any_source() -> Option<PathBuf> {
     if let Some(home) = env_home().and_then(validated) {
         log::debug!("JDK resolved from JAVA_HOME: {}", home.display());
         return Some(home);
@@ -149,7 +167,7 @@ fn wait_with_timeout(mut child: std::process::Child, timeout: Duration) -> Optio
 /// the link has to be resolved before walking up out of `bin/`.
 fn path_java_home() -> Option<PathBuf> {
     let exe = which_java()?;
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let exe = std::fs::canonicalize(&exe).map(ordinary_path).unwrap_or(exe);
     // <home>/bin/java -> <home>
     exe.parent()?.parent().map(|p| p.to_path_buf())
 }
@@ -435,6 +453,19 @@ mod tests {
     fn sorted(mut entries: Vec<String>) -> Vec<String> {
         entries.sort();
         entries
+    }
+
+    #[test]
+    fn a_jdk_home_is_never_handed_over_as_a_verbatim_path() {
+        assert_eq!(
+            ordinary_path(PathBuf::from(r"\\?\C:\Users\PC\AppData\Local\Programs\Eclipse Adoptium\jdk-25")),
+            PathBuf::from(r"C:\Users\PC\AppData\Local\Programs\Eclipse Adoptium\jdk-25")
+        );
+        assert_eq!(
+            ordinary_path(PathBuf::from(r"\\?\UNC\server\share\jdk-25")),
+            PathBuf::from(r"\\server\share\jdk-25")
+        );
+        assert_eq!(ordinary_path(PathBuf::from("/usr/lib/jvm/java-25")), PathBuf::from("/usr/lib/jvm/java-25"));
     }
 
     #[test]

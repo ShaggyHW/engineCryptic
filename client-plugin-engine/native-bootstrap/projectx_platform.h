@@ -24,6 +24,10 @@ const char *home_dir();
 /// it did not spawn — which POSIX can do via a gdb `setenv` call but Windows cannot.
 const char *module_directory();
 
+/// Rewrites `path` in place into the ordinary form the JVM can work with. On Windows that drops a
+/// `\\?\` verbatim prefix: a JVM loaded from such a path cannot find its own files and aborts.
+void normalize_path(char *path);
+
 /// Directory for scratch logs the launcher and crash tooling look in.
 const char *temp_dir();
 

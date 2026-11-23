@@ -13,7 +13,8 @@ itself runs.
 JAVA_HOME picks the JDK. It is loaded twice: once handed over the way each launcher does it (on Linux
 as JAVA_HOME in the client, which the injector sets with gdb; on Windows as a java-home.txt beside the
 library), and once with nothing handed over and the JDK only on PATH, so the bootstrap's own discovery
-has to find it.
+has to find it. The first process is still running when the second starts, the way two injected
+clients run side by side, and both have to survive it.
 """
 
 import os
@@ -49,7 +50,7 @@ def read(path):
 
 
 def run(bootstrap, supervisor, discovery):
-    """One load of the bootstrap. Returns None on success, else why it failed."""
+    """One load of the bootstrap. Returns (why it failed or None, the still-running host process)."""
     home = tempfile.mkdtemp(prefix="projectx-smoke-")
     library_name = "projectxbootstrap.dll" if os.name == "nt" else "libprojectxbootstrap.so"
     library = os.path.join(home, library_name)
@@ -69,8 +70,10 @@ def run(bootstrap, supervisor, discovery):
         env["PATH"] = os.path.join(java_home, "bin") + os.pathsep + env.get("PATH", "")
         expected_source = "from a scan of this machine"
     elif os.name == "nt":
+        # Verbatim, the way a launcher that canonicalised the JDK's path hands it over: a JVM started
+        # from such a path cannot find its own files, so the bootstrap has to turn it back first.
         with open(os.path.join(home, "java-home.txt"), "w", encoding="utf-8") as hint:
-            hint.write(java_home + "\n")
+            hint.write("\\\\?\\" + os.path.realpath(java_home) + "\n")
         expected_source = "from the launcher's java-home.txt"
     else:
         env["JAVA_HOME"] = java_home
@@ -99,12 +102,8 @@ def run(bootstrap, supervisor, discovery):
         else:
             time.sleep(0.5)
 
-    if child.poll() is None:
-        child.kill()
-        child.wait()
-
     print(f"--- {log_path}\n{read(log_path)}--- {stderr_path}\n{read(stderr_path)}---")
-    return None if outcome == "ok" else outcome
+    return (None if outcome == "ok" else outcome), child
 
 
 def main():
@@ -112,8 +111,18 @@ def main():
         sys.exit(__doc__)
     bootstrap, supervisor = sys.argv[1], sys.argv[2]
 
-    failures = [f"{name}: {why}" for name, discovery in (("hand-over", False), ("discovery", True))
-                if (why := run(bootstrap, supervisor, discovery))]
+    failures, children = [], []
+    for name, discovery in (("hand-over", False), ("discovery", True)):
+        why, child = run(bootstrap, supervisor, discovery)
+        children.append((name, child))
+        if why:
+            failures.append(f"{name}: {why}")
+    for name, child in children:
+        if child.poll() is not None and not any(f.startswith(name) for f in failures):
+            failures.append(f"{name}: exited with code {child.returncode} once the next process started")
+        if child.poll() is None:
+            child.kill()
+            child.wait()
     if failures:
         sys.exit("bootstrap smoke test failed:\n  " + "\n  ".join(failures))
     print("bootstrap smoke test passed: Java started and the supervisor ran, handed over and discovered")

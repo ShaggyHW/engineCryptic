@@ -55,6 +55,8 @@ static void strip_verbatim_prefix(char *path) {
     }
 }
 
+void normalize_path(char *path) { strip_verbatim_prefix(path); }
+
 const char *module_directory() {
     static char resolved[MAX_PATH] = {0};
     if (resolved[0]) return resolved;
@@ -232,30 +234,15 @@ bool start_detached_thread(void *(*entry)(void *), void *arg) {
     return true;
 }
 
-static bool bind_probe(int family, int port) {
-    SOCKET sock = socket(family, SOCK_STREAM, 0);
-    // A family the host does not support cannot be holding the port against us.
-    if (sock == INVALID_SOCKET) return true;
+static bool bind_probe(int port) {
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) return false;
 
-    int result;
-    if (family == AF_INET6) {
-        // Dual-stack, matching how the JVM's agent binds `*`: an IPv6 socket left v6-only would not
-        // collide with an IPv4 holder and the probe would call the port free.
-        DWORD v6_only = 0;
-        setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&v6_only, sizeof(v6_only));
-
-        sockaddr_in6 addr{};
-        addr.sin6_family = AF_INET6;
-        addr.sin6_port = htons((u_short)port);
-        addr.sin6_addr = in6addr_any;
-        result = bind(sock, (sockaddr *)&addr, sizeof(addr));
-    } else {
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons((u_short)port);
-        addr.sin_addr.s_addr = INADDR_ANY;
-        result = bind(sock, (sockaddr *)&addr, sizeof(addr));
-    }
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int result = bind(sock, (sockaddr *)&addr, sizeof(addr));
 
     closesocket(sock);
     return result == 0;
@@ -267,10 +254,10 @@ static bool is_port_available(int port) {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
 
-    // The JVM's agent resolves `*` to an IPv6 socket, which Windows leaves v6-only by default. An
-    // IPv4-only probe cannot see that listener, so it reports a port free that the agent then fails
-    // to bind — and a failed agent aborts VM init from inside JNI_CreateJavaVM.
-    bool available = bind_probe(AF_INET6, port) && bind_probe(AF_INET, port);
+    // The probe binds exactly what the JVM's agent will (127.0.0.1): Windows lets a wildcard bind share
+    // a port with a loopback holder, so a wildcard probe calls a port another client's agent holds
+    // free, and an agent that then fails to bind calls exit() and takes this client down with it.
+    bool available = bind_probe(port);
 
     WSACleanup();
     return available;
