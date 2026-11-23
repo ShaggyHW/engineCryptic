@@ -387,10 +387,9 @@ void *initialize_projectx(void *base_address) {
     // engine shadow jar from PROJECTX_HOME_DIR itself.
     char supervisor_jar[1024];
     std::snprintf(supervisor_jar, sizeof(supervisor_jar), "%s/projectx-supervisor.jar", classpath_dir);
-    if (!file_exists(supervisor_jar)) {
-        fail("%s is missing, so the engine install is incomplete. Reinstall the engine.", supervisor_jar);
-        return nullptr;
-    }
+    // Only a warning: a check that can misread a path must never be what stops the engine, and a jar
+    // that is really missing is reported anyway when Java fails to load the supervisor from it.
+    if (!file_exists(supervisor_jar)) log("WARN: could not open %s; starting Java anyway.\n", supervisor_jar);
     char classpath_option[2048];
     std::snprintf(classpath_option, sizeof(classpath_option), "-Djava.class.path=%s", supervisor_jar);
 

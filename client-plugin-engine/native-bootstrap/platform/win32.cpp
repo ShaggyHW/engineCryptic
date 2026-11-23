@@ -43,6 +43,18 @@ const char *home_dir() {
     return resolved;
 }
 
+/// The launcher injects the library by a canonical `\\?\C:\...` path, which Windows hands back
+/// verbatim, and a verbatim path turns off the `/` handling every "%s/name" join here relies on.
+static void strip_verbatim_prefix(char *path) {
+    static const char VERBATIM_UNC[] = "\\\\?\\UNC\\";
+    static const char VERBATIM[] = "\\\\?\\";
+    if (std::strncmp(path, VERBATIM_UNC, sizeof(VERBATIM_UNC) - 1) == 0) {
+        std::memmove(path + 2, path + sizeof(VERBATIM_UNC) - 1, std::strlen(path + sizeof(VERBATIM_UNC) - 1) + 1);
+    } else if (std::strncmp(path, VERBATIM, sizeof(VERBATIM) - 1) == 0) {
+        std::memmove(path, path + sizeof(VERBATIM) - 1, std::strlen(path + sizeof(VERBATIM) - 1) + 1);
+    }
+}
+
 const char *module_directory() {
     static char resolved[MAX_PATH] = {0};
     if (resolved[0]) return resolved;
@@ -54,6 +66,7 @@ const char *module_directory() {
         char *fwd = std::strrchr(resolved, '/');
         if (fwd > slash) slash = fwd;
         if (slash) *slash = '\0';
+        strip_verbatim_prefix(resolved);
     }
     return resolved;
 }
