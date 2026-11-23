@@ -191,6 +191,47 @@ jobs:
           path: dist/
           retention-days: 3
 
+  # Loads each freshly built bootstrap into a throwaway process the way the launcher injects it, and
+  # requires Java to start and hand over to the supervisor, on the oldest and newest JDK the engine
+  # supports. Nothing is released or published to the launcher unless every combination passes.
+  bootstrap-smoke:
+    needs: [version, engine-jar, bootstrap-linux, bootstrap-windows]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, windows-latest]
+        java: ["25", "27"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          sparse-checkout: .github
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{engine-jar,bootstrap-linux,bootstrap-windows}"
+          path: incoming
+      - name: Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: sh .github/ci/apt-install.sh libsdl2-2.0-0 libegl1 libopengl0
+      - name: Load the bootstrap
+        shell: bash
+        run: |
+          set -eu
+          v='${{ needs.version.outputs.version }}'
+          if [ '${{ runner.os }}' = Windows ]; then
+            lib="incoming/bootstrap-windows/projectxbootstrap-$v.dll"
+          else
+            lib="incoming/bootstrap-linux/libprojectxbootstrap-$v.so"
+          fi
+          py="$(command -v python3 || command -v python)"
+          "$py" .github/ci/bootstrap-smoke.py "$lib" "incoming/engine-jar/projectx-supervisor-$v.jar"
+
   launcher:
     needs: version
     strategy:
@@ -332,7 +373,7 @@ jobs:
           retention-days: 3
 
   release:
-    needs: [version, engine-jar, bootstrap-linux, bootstrap-windows, launcher, bundle]
+    needs: [version, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke, launcher, bundle]
     if: needs.version.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -388,7 +429,7 @@ jobs:
   # distribution repository that holds no source, giving users permanent
   # `releases/latest/download/...` links.
   publish-launcher:
-    needs: [version, bundle, engine-jar, bootstrap-linux, bootstrap-windows]
+    needs: [version, bundle, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke]
     if: needs.version.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
