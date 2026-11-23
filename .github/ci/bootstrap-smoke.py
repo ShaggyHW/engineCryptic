@@ -10,8 +10,10 @@ engine jar: by then the bootstrap has found its own folder and a JDK, started th
 the supervisor, which is everything a revision update or a platform change can break before the engine
 itself runs.
 
-JAVA_HOME picks the JDK, and it reaches the bootstrap the way each launcher hands it over: on Linux as
-JAVA_HOME in the client (the injector sets it with gdb), on Windows as a java-home.txt beside the library.
+JAVA_HOME picks the JDK. It is loaded twice: once handed over the way each launcher does it (on Linux
+as JAVA_HOME in the client, which the injector sets with gdb; on Windows as a java-home.txt beside the
+library), and once with nothing handed over and the JDK only on PATH, so the bootstrap's own discovery
+has to find it.
 """
 
 import os
@@ -46,11 +48,8 @@ def read(path):
         return ""
 
 
-def main():
-    if len(sys.argv) != 3:
-        sys.exit(__doc__)
-    bootstrap, supervisor = sys.argv[1], sys.argv[2]
-
+def run(bootstrap, supervisor, discovery):
+    """One load of the bootstrap. Returns None on success, else why it failed."""
     home = tempfile.mkdtemp(prefix="projectx-smoke-")
     library_name = "projectxbootstrap.dll" if os.name == "nt" else "libprojectxbootstrap.so"
     library = os.path.join(home, library_name)
@@ -63,21 +62,26 @@ def main():
 
     java_home = os.environ["JAVA_HOME"]
     env = dict(os.environ)
-    env.pop("PROJECTX_HOME_DIR", None)
-    if os.name == "nt":
-        env.pop("JAVA_HOME", None)
-        env.pop("JDK_HOME", None)
+    for name in ("PROJECTX_HOME_DIR", "JAVA_HOME", "JDK_HOME"):
+        env.pop(name, None)
+    if discovery:
+        # Nothing handed over: the bootstrap has to find the JDK itself, here through PATH.
+        env["PATH"] = os.path.join(java_home, "bin") + os.pathsep + env.get("PATH", "")
+        expected_source = "from a scan of this machine"
+    elif os.name == "nt":
         with open(os.path.join(home, "java-home.txt"), "w", encoding="utf-8") as hint:
             hint.write(java_home + "\n")
         expected_source = "from the launcher's java-home.txt"
     else:
+        env["JAVA_HOME"] = java_home
         expected_source = "from JAVA_HOME"
     child = subprocess.Popen([sys.executable, "-c", LOADER, load_path], env=env)
 
     temp = bootstrap_temp_dir()
     log_path = os.path.join(temp, f"projectx_log_{child.pid}.txt")
     stderr_path = os.path.join(temp, f"projectx_stderr_{child.pid}.txt")
-    print(f"loaded {load_path} into pid {child.pid} with Java {java_home}")
+    how = "found by the bootstrap" if discovery else "handed over like the launcher does"
+    print(f"loaded {load_path} into pid {child.pid}, Java {java_home} {how}")
 
     outcome = None
     deadline = time.monotonic() + TIMEOUT_SECONDS
@@ -100,9 +104,19 @@ def main():
         child.wait()
 
     print(f"--- {log_path}\n{read(log_path)}--- {stderr_path}\n{read(stderr_path)}---")
-    if outcome != "ok":
-        sys.exit(f"bootstrap smoke test failed: {outcome}")
-    print("bootstrap smoke test passed: Java started and the supervisor ran")
+    return None if outcome == "ok" else outcome
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    bootstrap, supervisor = sys.argv[1], sys.argv[2]
+
+    failures = [f"{name}: {why}" for name, discovery in (("hand-over", False), ("discovery", True))
+                if (why := run(bootstrap, supervisor, discovery))]
+    if failures:
+        sys.exit("bootstrap smoke test failed:\n  " + "\n  ".join(failures))
+    print("bootstrap smoke test passed: Java started and the supervisor ran, handed over and discovered")
 
 
 if __name__ == "__main__":

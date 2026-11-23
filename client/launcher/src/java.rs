@@ -210,53 +210,66 @@ fn candidate_homes(dir: &Path) -> Vec<PathBuf> {
     homes
 }
 
+// The bootstrap runs its own scan inside the client (`native-bootstrap/platform/posix.cpp` and
+// `win32.cpp`) and the two must agree: a JDK this list finds and the bootstrap cannot is reported
+// present and then never starts, and one only the bootstrap finds makes the launcher refuse to inject.
+// `install_roots_match_the_bootstrap` reads both C++ files to hold the lists together.
+
+/// Version managers and IDE-managed toolchains, under the user's home on every platform.
+const HOME_ROOTS: &[&str] = &[".sdkman/candidates/java", ".jdks", ".gradle/jdks", ".asdf/installs/java"];
+
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+const LINUX_ROOTS: &[&str] = &["/usr/lib/jvm", "/usr/lib64/jvm", "/usr/java", "/opt/java", "/opt/jdk"];
+
+/// 64-bit install locations only: `Program Files (x86)` holds 32-bit JDKs, which a 64-bit client
+/// cannot load.
+#[cfg_attr(not(windows), allow(dead_code))]
+const WINDOWS_BASES: &[&str] = &["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"];
+
+#[cfg_attr(not(windows), allow(dead_code))]
+const WINDOWS_VENDORS: &[&str] = &[
+    "Java",
+    "Eclipse Adoptium",
+    "Microsoft",
+    "Zulu",
+    "Amazon Corretto",
+    "BellSoft",
+    "SapMachine",
+    "Semeru",
+    "Programs/Eclipse Adoptium",
+];
+
+fn join_relative(base: &Path, relative: &str) -> PathBuf {
+    relative.split('/').fold(base.to_path_buf(), |path, part| path.join(part))
+}
+
 fn install_roots() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
     if let Some(home) = home_dir() {
-        // Version managers and IDE-managed toolchains.
-        roots.push(home.join(".sdkman").join("candidates").join("java"));
-        roots.push(home.join(".jdks"));
-        roots.push(home.join(".gradle").join("jdks"));
-        roots.push(home.join(".asdf").join("installs").join("java"));
+        roots.extend(HOME_ROOTS.iter().map(|root| join_relative(&home, root)));
         if cfg!(target_os = "macos") {
-            roots.push(
-                home.join("Library")
-                    .join("Java")
-                    .join("JavaVirtualMachines"),
-            );
+            roots.push(join_relative(&home, "Library/Java/JavaVirtualMachines"));
         }
     }
 
     #[cfg(target_os = "macos")]
-    {
-        roots.push(PathBuf::from("/Library/Java/JavaVirtualMachines"));
-    }
+    roots.push(PathBuf::from("/Library/Java/JavaVirtualMachines"));
 
     #[cfg(windows)]
-    {
-        for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-            if let Some(base) = std::env::var_os(var) {
-                let base = PathBuf::from(base);
-                roots.push(base.join("Java"));
-                roots.push(base.join("Eclipse Adoptium"));
-                roots.push(base.join("Microsoft"));
-                roots.push(base.join("Amazon Corretto"));
-                roots.push(base.join("Zulu"));
-                roots.push(base.join("Programs").join("Eclipse Adoptium"));
-            }
+    for var in WINDOWS_BASES {
+        if let Some(base) = std::env::var_os(var) {
+            let base = PathBuf::from(base);
+            roots.extend(WINDOWS_VENDORS.iter().map(|vendor| join_relative(&base, vendor)));
         }
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        roots.push(PathBuf::from("/usr/lib/jvm"));
-        roots.push(PathBuf::from("/usr/lib64/jvm"));
-        roots.push(PathBuf::from("/usr/java"));
-        roots.push(PathBuf::from("/opt/java"));
-        roots.push(PathBuf::from("/opt/jdk"));
-    }
+    roots.extend(LINUX_ROOTS.iter().map(PathBuf::from));
 
+    // ProgramFiles and ProgramW6432 name the same folder in a 64-bit process.
+    let mut seen = std::collections::HashSet::new();
+    roots.retain(|root| seen.insert(root.clone()));
     roots
 }
 
@@ -399,6 +412,47 @@ mod tests {
         println!("resolved: {}", home.display());
         println!("version:  {:?}", feature_version(&home));
         assert!(home.join("bin").join(java_exe_name()).is_file());
+    }
+
+    const POSIX_BOOTSTRAP: &str =
+        include_str!("../../../client-plugin-engine/native-bootstrap/platform/posix.cpp");
+    const WIN32_BOOTSTRAP: &str =
+        include_str!("../../../client-plugin-engine/native-bootstrap/platform/win32.cpp");
+
+    /// The quoted entries of the C++ array `name[] = { ... };` in `source`, unescaped.
+    fn cpp_string_array(source: &str, name: &str) -> Vec<String> {
+        let start = source
+            .find(&format!("{}[] = {{", name))
+            .unwrap_or_else(|| panic!("no `{}` array in the bootstrap source", name));
+        let body = &source[start..start + source[start..].find("};").unwrap()];
+        body.split('"')
+            .skip(1)
+            .step_by(2)
+            .map(|entry| entry.replace("\\\\", "\\"))
+            .collect()
+    }
+
+    fn sorted(mut entries: Vec<String>) -> Vec<String> {
+        entries.sort();
+        entries
+    }
+
+    #[test]
+    fn install_roots_match_the_bootstrap() {
+        let owned = |roots: &[&str]| roots.iter().map(|r| r.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(sorted(cpp_string_array(POSIX_BOOTSTRAP, "system_roots")), sorted(owned(LINUX_ROOTS)));
+        assert_eq!(sorted(cpp_string_array(POSIX_BOOTSTRAP, "home_roots")), sorted(owned(HOME_ROOTS)));
+
+        let mut windows_dirs = owned(WINDOWS_VENDORS);
+        windows_dirs.extend(owned(HOME_ROOTS));
+        let windows_dirs = windows_dirs.into_iter().map(|d| d.replace('/', "\\")).collect();
+        assert_eq!(sorted(cpp_string_array(WIN32_BOOTSTRAP, "vendors")), sorted(windows_dirs));
+
+        // The bootstrap also looks under USERPROFILE, which is where this side's HOME_ROOTS live.
+        let mut bases = owned(WINDOWS_BASES);
+        bases.push("USERPROFILE".to_string());
+        assert_eq!(sorted(cpp_string_array(WIN32_BOOTSTRAP, "bases")), sorted(bases));
     }
 
     #[test]
