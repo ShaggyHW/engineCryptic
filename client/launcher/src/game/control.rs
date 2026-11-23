@@ -145,7 +145,14 @@ pub fn send_command(pid: u32, cmd: &str) -> anyhow::Result<String> {
 #[cfg(any(all(unix, not(target_os = "macos")), windows))]
 pub fn discover_clients() -> Vec<ClientStatus> {
     let pids = live_client_pids();
-    mapping::forget_exited(&pids);
+    let reports: Vec<(u32, String)> = mapping::forget_exited(&pids)
+        .into_iter()
+        .filter_map(|pid| exit_report(pid).map(|report| (pid, report)))
+        .collect();
+    for (pid, report) in &reports {
+        log::warn!("Client {}: {}", pid, report);
+    }
+    exit_reports().lock().unwrap().extend(reports);
     let mut clients: Vec<ClientStatus> = pids.into_iter().map(classify).collect();
     clients.sort_by_key(|c| c.pid);
     clients
@@ -197,11 +204,17 @@ mod mapping {
             .or_insert_with(Instant::now)
     }
 
-    pub fn forget_exited(live: &[u32]) {
-        first_seen()
-            .lock()
-            .unwrap()
-            .retain(|pid, _| live.contains(pid));
+    /// Drops the pids that are no longer running and returns them: each one carried the engine.
+    pub fn forget_exited(live: &[u32]) -> Vec<u32> {
+        let mut gone = Vec::new();
+        first_seen().lock().unwrap().retain(|pid, _| {
+            let alive = live.contains(pid);
+            if !alive {
+                gone.push(*pid);
+            }
+            alive
+        });
+        gone
     }
 
     pub fn still_starting(since: Instant) -> bool {
@@ -330,6 +343,108 @@ fn failure_in_log(text: &str) -> Option<String> {
         .rev()
         .find_map(|line| line.trim().strip_prefix(FAILURE_MARKER))
         .map(|reason| reason.trim().to_string())
+}
+
+/// Crash and exit reports for injected clients that have gone, waiting for the UI to collect them.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+fn exit_reports() -> &'static std::sync::Mutex<Vec<(u32, String)>> {
+    static REPORTS: std::sync::OnceLock<std::sync::Mutex<Vec<(u32, String)>>> = std::sync::OnceLock::new();
+    REPORTS.get_or_init(Default::default)
+}
+
+/// Takes the reports for injected clients that crashed or exited abnormally since the last call.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+pub fn take_exit_reports() -> Vec<(u32, String)> {
+    std::mem::take(&mut *exit_reports().lock().unwrap())
+}
+
+#[cfg(not(any(all(unix, not(target_os = "macos")), windows)))]
+pub fn take_exit_reports() -> Vec<(u32, String)> {
+    Vec::new()
+}
+
+/// What the bootstrap's forensics say about how an injected client ended, or `None` for a clean
+/// close. The bootstrap writes them under the real home, not the one the launcher gives the client.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+fn exit_report(pid: u32) -> Option<String> {
+    let logs = crate::plugins::home_dir().ok()?.join(".projectx").join("logs");
+    let read = |name: &str| std::fs::read_to_string(logs.join(name)).ok();
+    describe_exit(
+        pid,
+        read("last-crash.txt").as_deref(),
+        read("last-exit.txt").as_deref(),
+        read(&format!("hs_err_pid{}.log", pid)).as_deref(),
+        &logs,
+    )
+}
+
+/// `key: value` from a forensics file.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+fn forensics_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix(": ")).map(str::trim)
+}
+
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+fn describe_exit(
+    pid: u32,
+    crash: Option<&str>,
+    exit: Option<&str>,
+    hs_err: Option<&str>,
+    logs: &std::path::Path,
+) -> Option<String> {
+    let pid_text = pid.to_string();
+    let belongs = |text: &&str| forensics_field(text, "pid") == Some(pid_text.as_str());
+    let crash = crash.filter(belongs);
+    let exit_code = exit.filter(belongs).and_then(|text| forensics_field(text, "exit_code"));
+
+    if let Some(report) = hs_err {
+        let frame = report
+            .lines()
+            .skip_while(|line| !line.starts_with("# Problematic frame:"))
+            .nth(1)
+            .map(|line| format!(" in {}", line.trim_start_matches('#').trim()))
+            .unwrap_or_default();
+        let path = logs.join(format!("hs_err_pid{}.log", pid));
+        return Some(format!("the client crashed in Java{}. Report: {}", frame, path.display()));
+    }
+
+    if let Some(crash) = crash.filter(|_| exit_code != Some("0")) {
+        let kind = forensics_field(crash, "exception")
+            .or_else(|| forensics_field(crash, "signal"))
+            .unwrap_or("a fatal fault");
+        let access = forensics_field(crash, "access").map(|a| format!(", {}", a)).unwrap_or_default();
+        let location = crash
+            .lines()
+            .skip_while(|line| !line.starts_with("=== Native backtrace"))
+            .nth(1)
+            .map(|frame| frame.trim().rsplit(['\\', '/']).next().unwrap_or(frame).to_string())
+            .filter(|frame| !frame.is_empty() && !frame.starts_with('?'))
+            .map(|frame| format!(" in {}", frame))
+            .unwrap_or_default();
+        return Some(format!(
+            "the client crashed: {}{}{}. Details: {}",
+            kind,
+            access,
+            location,
+            logs.join("last-crash.txt").display()
+        ));
+    }
+
+    match exit_code {
+        Some("0") => None,
+        Some(code) => Some(format!(
+            "the client exited with code {}. Details: {}",
+            code,
+            logs.join("last-exit.txt").display()
+        )),
+        // An exit file from a bootstrap too old to record its pid says nothing either way.
+        None if exit.is_some_and(|text| forensics_field(text, "pid").is_none()) => None,
+        None => Some(
+            "the client closed without leaving a crash or exit record: it was killed, or died \
+             before the engine could record why."
+                .to_string(),
+        ),
+    }
 }
 
 /// Lines of the JVM's own stderr to copy into the launcher log when the engine fails to start.
@@ -563,6 +678,50 @@ mod tests {
         assert_eq!(status.version.as_deref(), Some("1.8.0"));
         assert_eq!(status.reloads, 2);
         assert_eq!(status.detail, None);
+    }
+
+    const WINDOWS_CRASH: &str = "=== PROJECT X CRASH FORENSICS ===\npid: 4242\nexception: 0xc0000005 (EXCEPTION_ACCESS_VIOLATION)\nfault_addr: 0x7ff6aa0012ab\naccess: read of 0x18\ntid: 9\n\n=== Native backtrace ===\n  C:\\ProgramData\\Jagex\\launcher\\rs2client.exe+0x12ab\n=== END ===\n";
+
+    fn logs() -> std::path::PathBuf {
+        std::path::PathBuf::from("logs")
+    }
+
+    #[test]
+    fn a_crash_names_the_fault_and_where_it_happened() {
+        let report = describe_exit(4242, Some(WINDOWS_CRASH), None, None, &logs()).unwrap();
+        assert!(report.starts_with(
+            "the client crashed: 0xc0000005 (EXCEPTION_ACCESS_VIOLATION), read of 0x18 in rs2client.exe+0x12ab."
+        ), "{}", report);
+    }
+
+    #[test]
+    fn a_handled_fault_before_a_clean_close_is_not_a_crash() {
+        let exit = "=== PROJECT X EXIT FORENSICS ===\npid: 4242\nvia: ExitProcess()\nexit_code: 0\n";
+        assert_eq!(describe_exit(4242, Some(WINDOWS_CRASH), Some(exit), None, &logs()), None);
+    }
+
+    #[test]
+    fn another_clients_records_are_ignored() {
+        let exit = "=== PROJECT X EXIT FORENSICS ===\npid: 7\nvia: ExitProcess()\nexit_code: 0\n";
+        let report = describe_exit(4242, Some(WINDOWS_CRASH), Some(exit), None, &logs());
+        assert!(report.unwrap().starts_with("the client crashed"));
+        let report = describe_exit(99, Some(WINDOWS_CRASH), Some(exit), None, &logs()).unwrap();
+        assert!(report.starts_with("the client closed without leaving"), "{}", report);
+    }
+
+    #[test]
+    fn a_java_crash_points_at_its_hs_err_report() {
+        let hs_err = "# A fatal error has been detected\n# Problematic frame:\n# C  [jvm.dll+0x1234]\n";
+        let report = describe_exit(4242, None, None, Some(hs_err), &logs()).unwrap();
+        assert!(report.starts_with("the client crashed in Java in C  [jvm.dll+0x1234]."), "{}", report);
+    }
+
+    #[test]
+    fn a_nonzero_exit_is_reported_and_a_clean_one_is_not() {
+        let failed = "=== PROJECT X EXIT FORENSICS ===\npid: 5\nvia: TerminateProcess(self)\nexit_code: 3221225477\n";
+        assert!(describe_exit(5, None, Some(failed), None, &logs()).unwrap().contains("code 3221225477"));
+        let old_format = "=== PROJECT X EXIT FORENSICS ===\nvia: exit()\nexit_code: 0\n";
+        assert_eq!(describe_exit(5, None, Some(old_format), None, &logs()), None);
     }
 
     #[test]

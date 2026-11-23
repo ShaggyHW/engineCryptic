@@ -163,7 +163,8 @@ const char *discover_java_home() {
                                     // Version managers and IDE-managed toolchains, under the profile.
                                     ".jdks",
                                     ".gradle\\jdks",
-                                    ".sdkman\\candidates\\java"};
+                                    ".sdkman\\candidates\\java",
+                                    ".asdf\\installs\\java"};
     int best_score = 0;
     for (const char *base : bases) {
         const char *prefix = std::getenv(base);
@@ -340,9 +341,8 @@ static const char *exception_name(DWORD code) {
     }
 }
 
-/// Only genuinely fatal faults are reported. The JVM raises benign exceptions constantly (implicit
-/// null checks, safepoint polls, and 0x406D1388 thread-naming), and reporting those would both spam
-/// the log and destroy the value of last-crash.txt.
+/// Only fault kinds that can be fatal are considered at all; 0x406D1388 thread-naming and the like
+/// never are.
 static bool is_fatal(DWORD code) {
     switch (code) {
         case EXCEPTION_ACCESS_VIOLATION:
@@ -391,15 +391,34 @@ static void write_native_backtrace(int fd, CONTEXT *context) {
     }
 }
 
+static HMODULE g_jvm_module = nullptr;
+
+/// The JVM faults on purpose, in its compiled code (implicit null checks, safepoint polls, stack
+/// banging) and in jvm.dll itself, and handles every one of those after this handler declines them.
+/// Compiled code lives outside any module. Recording those would fill last-crash.txt with the first
+/// routine fault of every session and, since only one fault is ever recorded, hide the real crash.
+static bool jvm_handles(void *ip) {
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            static_cast<LPCSTR>(ip), &module)) {
+        return true;
+    }
+    if (g_jvm_module == nullptr) g_jvm_module = GetModuleHandleA("jvm.dll");
+    return module == g_jvm_module;
+}
+
 static LONG CALLBACK crash_exception_handler(EXCEPTION_POINTERS *info) {
     DWORD code = info->ExceptionRecord->ExceptionCode;
     if (!is_fatal(code)) return EXCEPTION_CONTINUE_SEARCH;
+    if (jvm_handles(info->ExceptionRecord->ExceptionAddress)) return EXCEPTION_CONTINUE_SEARCH;
 
     if (crash_handler_reentry.fetch_add(1) > 0) return EXCEPTION_CONTINUE_SEARCH;
 
     int fd = open_truncating(g_crash_log_path);
     if (fd >= 0) {
-        write_str(fd, "=== PROJECT X CRASH FORENSICS ===\nexception: 0x");
+        write_str(fd, "=== PROJECT X CRASH FORENSICS ===\npid: ");
+        write_dec(fd, (uint64_t)GetCurrentProcessId());
+        write_str(fd, "\nexception: 0x");
         write_hex(fd, (uint64_t)code);
         write_str(fd, " (");
         write_str(fd, exception_name(code));
@@ -455,7 +474,9 @@ static void write_exit_forensics(const char *via, uint64_t code) {
     if (exit_forensics_done.fetch_add(1) > 0) return;
     int fd = open_truncating(g_exit_log_path);
     if (fd < 0) return;
-    write_str(fd, "=== PROJECT X EXIT FORENSICS ===\nvia: ");
+    write_str(fd, "=== PROJECT X EXIT FORENSICS ===\npid: ");
+    write_dec(fd, (uint64_t)GetCurrentProcessId());
+    write_str(fd, "\nvia: ");
     write_str(fd, via);
     write_str(fd, "\nexit_code: ");
     write_dec(fd, code);

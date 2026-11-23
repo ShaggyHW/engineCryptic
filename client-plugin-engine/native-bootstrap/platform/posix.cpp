@@ -94,35 +94,60 @@ static void consider_java_root(const char *root, char *best, size_t best_size, i
     closedir(dir);
 }
 
+/// `<home>/bin/java` -> `<home>`, after following every symlink, the way version managers and distro
+/// alternatives link the launcher.
+static bool home_of_launcher(const char *launcher, char *out, size_t out_size) {
+    char resolved[PATH_MAX];
+    if (!realpath(launcher, resolved)) return false;
+    char *bin = std::strrchr(resolved, '/');
+    if (!bin) return false;
+    *bin = 0;
+    char *home = std::strrchr(resolved, '/');
+    if (!home) return false;
+    *home = 0;
+    std::snprintf(out, out_size, "%s", resolved);
+    return true;
+}
+
+static bool accept_launcher(const char *launcher, char *resolved, size_t resolved_size) {
+    char home[PATH_MAX];
+    if (!home_of_launcher(launcher, home, sizeof(home)) || !jdk_is_usable(home)) return false;
+    std::snprintf(resolved, resolved_size, "%s", home);
+    return true;
+}
+
 const char *discover_java_home() {
     static char resolved[512] = {0};
     static bool searched = false;
     if (searched) return resolved[0] ? resolved : nullptr;
     searched = true;
 
-    // The JDK the user actually runs outranks anything a version scan picks, so resolve `java` on
-    // PATH through its symlinks first and walk up out of bin/.
-    char launcher[PATH_MAX];
-    if (realpath("/usr/bin/java", launcher)) {
-        char *bin = std::strrchr(launcher, '/');
-        char *home = bin ? (*bin = 0, std::strrchr(launcher, '/')) : nullptr;
-        if (home) {
-            *home = 0;
-            if (jdk_is_usable(launcher)) {
-                std::snprintf(resolved, sizeof(resolved), "%s", launcher);
-                return resolved;
-            }
+    // The JDK the user actually runs outranks anything a version scan picks: `java` on PATH first,
+    // then /usr/bin/java, which the PATH a desktop session hands the client may not include.
+    if (const char *path = std::getenv("PATH")) {
+        char dirs[4096];
+        std::snprintf(dirs, sizeof(dirs), "%s", path);
+        char *saveptr = nullptr;
+        for (char *dir = strtok_r(dirs, ":", &saveptr); dir; dir = strtok_r(nullptr, ":", &saveptr)) {
+            char launcher[PATH_MAX];
+            std::snprintf(launcher, sizeof(launcher), "%s/java", dir);
+            if (accept_launcher(launcher, resolved, sizeof(resolved))) return resolved;
         }
     }
+    if (accept_launcher("/usr/bin/java", resolved, sizeof(resolved))) return resolved;
 
-    // Kept in step with the launcher's own `install_roots` (client/launcher/src/java.rs), which is
-    // the list that decides whether a JDK is reported as present at all. A root the launcher knows
-    // and this scan does not is the worst combination available: the launcher clears the injection
-    // and the client then finds nothing to run on.
-    static const char *roots[] = {"/usr/lib/jvm", "/usr/lib64/jvm", "/usr/java", "/opt/java",
-                                  "/opt/jdk", "/Library/Java/JavaVirtualMachines"};
+    // Kept in step with the launcher's `install_roots` (client/launcher/src/java.rs), and a launcher
+    // test reads this file to hold them together: a root the launcher knows and this scan does not
+    // means the launcher clears the injection and the client then finds nothing to run on.
+    static const char *system_roots[] = {"/usr/lib/jvm", "/usr/lib64/jvm", "/usr/java", "/opt/java", "/opt/jdk"};
+    static const char *home_roots[] = {".sdkman/candidates/java", ".jdks", ".gradle/jdks", ".asdf/installs/java"};
     int best_score = 0;
-    for (const char *root : roots) consider_java_root(root, resolved, sizeof(resolved), &best_score);
+    for (const char *root : system_roots) consider_java_root(root, resolved, sizeof(resolved), &best_score);
+    for (const char *root : home_roots) {
+        char under_home[512];
+        std::snprintf(under_home, sizeof(under_home), "%s/%s", home_dir(), root);
+        consider_java_root(under_home, resolved, sizeof(resolved), &best_score);
+    }
     return resolved[0] ? resolved : nullptr;
 }
 
@@ -249,7 +274,9 @@ static void crash_signal_handler(int sig, siginfo_t *info, void *ctx) {
 
     int fd = open_truncating(g_crash_log_path);
     if (fd >= 0) {
-        write_str(fd, "=== PROJECT X CRASH FORENSICS ===\nsignal: ");
+        write_str(fd, "=== PROJECT X CRASH FORENSICS ===\npid: ");
+        write_dec(fd, (uint64_t)getpid());
+        write_str(fd, "\nsignal: ");
         write_dec(fd, (uint64_t)sig);
         write_str(fd, " (");
         write_str(fd, signal_name(sig));
@@ -333,7 +360,9 @@ static void write_exit_forensics(const char *via, int code) {
     if (exit_forensics_done.fetch_add(1) > 0) return;
     int fd = open_truncating(g_exit_log_path);
     if (fd < 0) return;
-    write_str(fd, "=== PROJECT X EXIT FORENSICS ===\nvia: ");
+    write_str(fd, "=== PROJECT X EXIT FORENSICS ===\npid: ");
+    write_dec(fd, (uint64_t)getpid());
+    write_str(fd, "\nvia: ");
     write_str(fd, via);
     write_str(fd, "\nexit_code: ");
     write_dec(fd, (uint64_t)(unsigned)code);

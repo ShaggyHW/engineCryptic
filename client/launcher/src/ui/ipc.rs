@@ -980,6 +980,9 @@ impl IpcState {
         tokio::task::spawn_blocking(move || {
             let clients = crate::game::control::discover_clients();
             send_webview_event(&cmd_tx, &IpcEvent::ClientsList { clients });
+            for (pid, message) in crate::game::control::take_exit_reports() {
+                send_webview_event(&cmd_tx, &IpcEvent::ClientControlResult { pid, ok: false, message });
+            }
         });
     }
 
