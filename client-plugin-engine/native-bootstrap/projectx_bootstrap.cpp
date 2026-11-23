@@ -424,7 +424,7 @@ void *initialize_projectx(void *base_address) {
     jdwp_agent_path(jdwp_agent, sizeof(jdwp_agent), java_home);
     if (file_exists(jdwp_agent)) {
         std::snprintf(debug_option, sizeof(debug_option),
-                      "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:%d",
+                      "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:%d",
                       find_available_port(5005));
         options[option_count++].optionString = debug_option;
     } else {
