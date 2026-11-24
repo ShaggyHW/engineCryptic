@@ -1,7 +1,7 @@
 {
  "source": "Converted from ShaggyHW/navpathService worldReachableTiles.db, used with the author's permission.",
  "upstream": "https://github.com/ShaggyHW/navpathService",
- "generated": "2026-11-22",
+ "generated": "2026-11-24",
  "costUnit": "costTiles is in walked tiles; upstream costs are milliseconds at 600 ms per tile.",
  "requirements": {
   "1": {
@@ -3697,6 +3697,144 @@
   "615": {
    "about": "Kharazi Jungle fairy ring unlocked",
    "key": "varbit_36856",
+   "value": "1",
+   "comparison": ">="
+  },
+  "638": {
+   "about": "MaxGuild_inside",
+   "key": "varbit_25913",
+   "value": "1",
+   "comparison": "="
+  },
+  "616": {
+   "about": "MaxGuild_Outside",
+   "key": "varbit_25913",
+   "value": "0",
+   "comparison": "="
+  },
+  "617": {
+   "about": "Arc journal Waiko charges",
+   "key": "arcJournalWaiko",
+   "value": "1",
+   "comparison": ">="
+  },
+  "618": {
+   "about": "Arc journal Whale's Maw charges",
+   "key": "arcJournalWhalesMaw",
+   "value": "1",
+   "comparison": ">="
+  },
+  "619": {
+   "about": "Arc journal Aminishi charges",
+   "key": "arcJournalAminishi",
+   "value": "1",
+   "comparison": ">="
+  },
+  "620": {
+   "about": "Arc journal Cyclosis charges",
+   "key": "arcJournalCyclosis",
+   "value": "1",
+   "comparison": ">="
+  },
+  "621": {
+   "about": "Arc journal Tuai Leit charges",
+   "key": "arcJournalTuaiLeit",
+   "value": "1",
+   "comparison": ">="
+  },
+  "622": {
+   "about": "Arc journal The Islands That Once Were Turtles charges",
+   "key": "arcJournalTurtles",
+   "value": "1",
+   "comparison": ">="
+  },
+  "623": {
+   "about": "Arc journal Goshima charges",
+   "key": "arcJournalGoshima",
+   "value": "1",
+   "comparison": ">="
+  },
+  "624": {
+   "about": "Wicked hood Air altar charges, own pool varbit 14834 or omni 27089",
+   "key": "hasWickedHoodAirCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "625": {
+   "about": "Wicked hood Mind altar charges, own pool varbit 14835 or omni 27089",
+   "key": "hasWickedHoodMindCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "626": {
+   "about": "Wicked hood Water altar charges, own pool varbit 14836 or omni 27089",
+   "key": "hasWickedHoodWaterCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "627": {
+   "about": "Wicked hood Earth altar charges, own pool varbit 14837 or omni 27089",
+   "key": "hasWickedHoodEarthCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "628": {
+   "about": "Wicked hood Fire altar charges, own pool varbit 14838 or omni 27089",
+   "key": "hasWickedHoodFireCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "629": {
+   "about": "Wicked hood Body altar charges, own pool varbit 14839 or omni 27089",
+   "key": "hasWickedHoodBodyCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "630": {
+   "about": "Wicked hood Cosmic altar charges, own pool varbit 14840 or omni 27089",
+   "key": "hasWickedHoodCosmicCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "631": {
+   "about": "Wicked hood Chaos altar charges, own pool varbit 14841 or omni 27089",
+   "key": "hasWickedHoodChaosCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "632": {
+   "about": "Wicked hood Astral altar charges, own pool varbit 14842 or omni 27089",
+   "key": "hasWickedHoodAstralCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "633": {
+   "about": "Wicked hood Nature altar charges, own pool varbit 14843 or omni 27089",
+   "key": "hasWickedHoodNatureCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "634": {
+   "about": "Wicked hood Law altar charges, own pool varbit 14844 or omni 27089",
+   "key": "hasWickedHoodLawCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "635": {
+   "about": "Wicked hood Death altar charges, own pool varbit 14845 or omni 27089",
+   "key": "hasWickedHoodDeathCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "636": {
+   "about": "Wicked hood Blood altar charges, own pool varbit 14846 or omni 27089",
+   "key": "hasWickedHoodBloodCharges",
+   "value": "1",
+   "comparison": ">="
+  },
+  "637": {
+   "about": "questHeraldsOfCrimson",
+   "key": "questHeraldsOfCrimson",
    "value": "1",
    "comparison": ">="
   }
@@ -61359,7 +61497,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    269
+    269,
+    287
    ]
   },
   {
@@ -61377,7 +61516,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    270
+    270,
+    288
    ]
   },
   {
@@ -61395,7 +61535,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    271
+    271,
+    289
    ]
   },
   {
@@ -61413,7 +61554,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    272
+    272,
+    290
    ]
   },
   {
@@ -61431,7 +61573,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    273
+    273,
+    291
    ]
   },
   {
@@ -61449,7 +61592,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    274
+    274,
+    292
    ]
   },
   {
@@ -61467,7 +61611,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    275
+    275,
+    293
    ]
   },
   {
@@ -61485,7 +61630,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    276
+    276,
+    294
    ]
   },
   {
@@ -61503,7 +61649,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    277
+    277,
+    295
    ]
   },
   {
@@ -61521,7 +61668,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    278
+    278,
+    296
    ]
   },
   {
@@ -61539,7 +61687,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    279
+    279,
+    297
    ]
   },
   {
@@ -61557,7 +61706,8 @@
    "toPlane": 2,
    "requirements": [
     267,
-    280
+    280,
+    298
    ]
   },
   {
@@ -61575,7 +61725,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    281
+    281,
+    299
    ]
   },
   {
@@ -61593,7 +61744,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    282
+    282,
+    300
    ]
   },
   {
@@ -61611,7 +61763,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    283
+    283,
+    301
    ]
   },
   {
@@ -61629,7 +61782,8 @@
    "toPlane": 0,
    "requirements": [
     267,
-    284
+    284,
+    302
    ]
   },
   {
@@ -62882,7 +63036,8 @@
    "requirements": [
     60,
     390,
-    397
+    397,
+    630
    ],
    "steps": [
     [
@@ -62909,7 +63064,8 @@
    "requirements": [
     60,
     390,
-    398
+    398,
+    631
    ],
    "steps": [
     [
@@ -62936,7 +63092,8 @@
    "requirements": [
     60,
     390,
-    399
+    399,
+    632
    ],
    "steps": [
     [
@@ -62963,7 +63120,8 @@
    "requirements": [
     60,
     390,
-    400
+    400,
+    633
    ],
    "steps": [
     [
@@ -62990,7 +63148,8 @@
    "requirements": [
     60,
     390,
-    401
+    401,
+    634
    ],
    "steps": [
     [
@@ -63017,7 +63176,8 @@
    "requirements": [
     60,
     390,
-    402
+    402,
+    635
    ],
    "steps": [
     [
@@ -63044,7 +63204,8 @@
    "requirements": [
     60,
     390,
-    403
+    403,
+    636
    ],
    "steps": [
     [
@@ -64403,6 +64564,422 @@
    "requirements": [
     314
    ]
+  },
+  {
+   "kind": "OBJECT",
+   "action": "Climb over",
+   "objectId": 141015,
+   "searchRadius": 20,
+   "costTiles": 2,
+   "fromMinX": 3761,
+   "fromMaxX": 3761,
+   "fromMinY": 1562,
+   "fromMaxY": 1562,
+   "fromPlane": 0,
+   "toMinX": 3763,
+   "toMaxX": 3763,
+   "toMinY": 1560,
+   "toMaxY": 1560,
+   "toPlane": 0,
+   "requirements": [
+    637
+   ]
+  },
+  {
+   "kind": "OBJECT",
+   "action": "Pass through",
+   "objectId": 140944,
+   "searchRadius": 20,
+   "costTiles": 3,
+   "fromMinX": 3806,
+   "fromMaxX": 3806,
+   "fromMinY": 1513,
+   "fromMaxY": 1513,
+   "fromPlane": 0,
+   "toMinX": 3832,
+   "toMaxX": 3832,
+   "toMinY": 1433,
+   "toMaxY": 1433,
+   "toPlane": 0,
+   "requirements": null,
+   "steps": [
+    [
+     1188,
+     8,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "OBJECT",
+   "action": "Pass through",
+   "objectId": 140944,
+   "searchRadius": 20,
+   "costTiles": 3,
+   "fromMinX": 3832,
+   "fromMaxX": 3832,
+   "fromMinY": 1433,
+   "fromMaxY": 1433,
+   "fromPlane": 0,
+   "toMinX": 3806,
+   "toMaxX": 3806,
+   "toMinY": 1513,
+   "toMaxY": 1513,
+   "toPlane": 0,
+   "requirements": null,
+   "steps": [
+    [
+     1188,
+     8,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Activate",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 23,
+   "global": true,
+   "itemId": 22332,
+   "toMinX": 3128,
+   "toMaxX": 3128,
+   "toMinY": 3407,
+   "toMaxY": 3407,
+   "toPlane": 0,
+   "requirements": [
+    60,
+    391,
+    624
+   ],
+   "steps": [
+    [
+     1153,
+     23,
+     -1,
+     3
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Activate",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 22,
+   "global": true,
+   "itemId": 22332,
+   "toMinX": 2980,
+   "toMaxX": 2980,
+   "toMinY": 3511,
+   "toMaxY": 3511,
+   "toPlane": 0,
+   "requirements": [
+    60,
+    392,
+    625
+   ],
+   "steps": [
+    [
+     1153,
+     24,
+     -1,
+     3
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Activate",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 22,
+   "global": true,
+   "itemId": 22332,
+   "toMinX": 3183,
+   "toMaxX": 3183,
+   "toMinY": 3156,
+   "toMaxY": 3156,
+   "toPlane": 0,
+   "requirements": [
+    60,
+    393,
+    626
+   ],
+   "steps": [
+    [
+     1153,
+     26,
+     -1,
+     3
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Activate",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 22,
+   "global": true,
+   "itemId": 22332,
+   "toMinX": 3302,
+   "toMaxX": 3302,
+   "toMinY": 3477,
+   "toMaxY": 3477,
+   "toPlane": 0,
+   "requirements": [
+    60,
+    394,
+    627
+   ],
+   "steps": [
+    [
+     1153,
+     28,
+     -1,
+     3
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Activate",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 22,
+   "global": true,
+   "itemId": 22332,
+   "toMinX": 3310,
+   "toMaxX": 3310,
+   "toMinY": 3252,
+   "toMaxY": 3252,
+   "toPlane": 0,
+   "requirements": [
+    60,
+    395,
+    628
+   ],
+   "steps": [
+    [
+     1153,
+     30,
+     -1,
+     3
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Activate",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 22,
+   "global": true,
+   "itemId": 22332,
+   "toMinX": 3050,
+   "toMaxX": 3050,
+   "toMinY": 3442,
+   "toMaxY": 3442,
+   "toPlane": 0,
+   "requirements": [
+    60,
+    396,
+    629
+   ],
+   "steps": [
+    [
+     1153,
+     32,
+     -1,
+     3
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 1820,
+   "toMaxX": 1820,
+   "toMinY": 11614,
+   "toMaxY": 11614,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    617
+   ],
+   "steps": [
+    [
+     720,
+     20,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 2059,
+   "toMaxX": 2059,
+   "toMinY": 11798,
+   "toMaxY": 11798,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    618
+   ],
+   "steps": [
+    [
+     720,
+     23,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 2086,
+   "toMaxX": 2086,
+   "toMinY": 11274,
+   "toMaxY": 11274,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    619
+   ],
+   "steps": [
+    [
+     720,
+     26,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 2314,
+   "toMaxX": 2314,
+   "toMinY": 11225,
+   "toMaxY": 11225,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    620
+   ],
+   "steps": [
+    [
+     720,
+     29,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 1799,
+   "toMaxX": 1799,
+   "toMinY": 11962,
+   "toMaxY": 11962,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    621
+   ],
+   "steps": [
+    [
+     720,
+     32,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 2278,
+   "toMaxX": 2278,
+   "toMinY": 11501,
+   "toMaxY": 11501,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    622
+   ],
+   "steps": [
+    [
+     720,
+     35,
+     -1,
+     0
+    ]
+   ]
+  },
+  {
+   "kind": "ITEM",
+   "action": "Teleport",
+   "objectId": -1,
+   "searchRadius": 0,
+   "costTiles": 6,
+   "global": true,
+   "itemId": 37729,
+   "toMinX": 2461,
+   "toMaxX": 2461,
+   "toMinY": 11546,
+   "toMaxY": 11546,
+   "toPlane": 0,
+   "requirements": [
+    211,
+    623
+   ],
+   "steps": [
+    [
+     720,
+     38,
+     -1,
+     0
+    ]
+   ]
   }
  ],
  "fairyRings": [
@@ -65505,6 +66082,19 @@
    "action": "Configure",
    "costTiles": 12,
    "requirements": [
+    380
+   ]
+  },
+  {
+   "objectId": 109513,
+   "x": 2901,
+   "y": 2930,
+   "plane": 0,
+   "code": "cjs",
+   "action": "Configure",
+   "costTiles": 12,
+   "requirements": [
+    115,
     380
    ]
   }
