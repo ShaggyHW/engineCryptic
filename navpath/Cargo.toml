@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "rust/navpath-service",
+    "rust/navpath-core",
+    "rust/navpath-builder",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3
+
+# Release codegen with symbols kept for perf/flamegraph/samply.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+# criterion benches: panic=abort is incompatible with the bench harness.
+[profile.bench]
+inherits = "release"
+panic = "unwind"
+strip = "none"
+
+# Engine iteration speed (roadmap 9.8): examples/benches are usable in the dev profile
+# because the engine crate itself is optimized, without paying the release profile's
+# fat-LTO + codegen-units=1 link on every edit. Test/debug code stays unoptimized.
+[profile.dev.package.navpath-core]
+opt-level = 3

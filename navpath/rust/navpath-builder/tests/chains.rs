@@ -1,0 +1,523 @@
+use navpath_builder::build::chains::{flatten_chains, flatten_global_chains};
+use navpath_builder::build::graph::NodeIndex;
+use navpath_builder::build::load_sqlite::{Tile, load_fairy_rings};
+use rusqlite::{Connection, OpenFlags};
+
+fn mem_conn() -> Connection {
+    Connection::open_in_memory_with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap()
+}
+
+fn create_schema(conn: &Connection) {
+    // Minimal schemas with only the columns we use
+    conn.execute_batch(
+        r#"
+        CREATE TABLE teleports_door_nodes (
+            id INTEGER PRIMARY KEY,
+            tile_outside_x INTEGER, tile_outside_y INTEGER, tile_outside_plane INTEGER,
+            tile_inside_x INTEGER, tile_inside_y INTEGER, tile_inside_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost REAL, requirements TEXT
+        );
+        CREATE TABLE teleports_lodestone_nodes (
+            id INTEGER PRIMARY KEY,
+            dest_x INTEGER, dest_y INTEGER, dest_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost REAL, requirements TEXT
+        );
+        CREATE TABLE teleports_npc_nodes (
+            id INTEGER PRIMARY KEY,
+            orig_min_x INTEGER, orig_min_y INTEGER, orig_plane INTEGER,
+            dest_min_x INTEGER, dest_min_y INTEGER, dest_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost REAL, requirements TEXT
+        );
+        CREATE TABLE teleports_object_nodes (
+            id INTEGER PRIMARY KEY,
+            orig_min_x INTEGER, orig_min_y INTEGER, orig_plane INTEGER,
+            dest_min_x INTEGER, dest_min_y INTEGER, dest_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost REAL, requirements TEXT
+        );
+        CREATE TABLE teleports_item_nodes (
+            id INTEGER PRIMARY KEY,
+            dest_min_x INTEGER, dest_min_y INTEGER, dest_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost REAL, requirements TEXT
+        );
+        CREATE TABLE teleports_ifslot_nodes (
+            id INTEGER PRIMARY KEY,
+            dest_min_x INTEGER, dest_min_y INTEGER, dest_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost REAL, requirements TEXT
+        );
+        CREATE TABLE teleports_useOn_nodes (
+            id INTEGER PRIMARY KEY,
+            item_id INTEGER, object_id INTEGER,
+            orig_min_x INTEGER, orig_min_y INTEGER, orig_plane INTEGER,
+            dest_min_x INTEGER, dest_min_y INTEGER, dest_plane INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            cost INTEGER, requirements TEXT
+        );
+        CREATE TABLE teleports_fairy_rings_nodes (
+            id INTEGER PRIMARY KEY,
+            object_id INTEGER,
+            x INTEGER, y INTEGER, plane INTEGER,
+            cost REAL,
+            code TEXT,
+            action TEXT,
+            next_node_type TEXT, next_node_id INTEGER,
+            requirements TEXT
+        );
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn two_step_door_to_lodestone() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // door(1) -> lodestone(2)
+    conn.execute(
+        "INSERT INTO teleports_door_nodes (id, tile_outside_x, tile_outside_y, tile_outside_plane, tile_inside_x, tile_inside_y, tile_inside_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (1, 0, 0, 0, 1, 1, 0, 'lodestone', 2, 1.0, '100')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_lodestone_nodes (id, dest_x, dest_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (2, 10, 10, 0, NULL, NULL, 3.5, '200')",
+        [],
+    )
+    .unwrap();
+
+    let tiles: Vec<Tile> = vec![]; // not used by flatten_chains
+    let node_id_of = NodeIndex::from_coords(&[((0, 0, 0), 0), ((10, 10, 0), 1)]);
+
+    let metas = flatten_chains(&conn, &tiles, &node_id_of).unwrap();
+    assert_eq!(metas.len(), 1);
+    let m = &metas[0];
+    assert_eq!(m.src, 0);
+    assert_eq!(m.dst, 1);
+    assert!((m.cost - 4.5).abs() < 1e-5);
+    assert_eq!(m.steps.len(), 2);
+    assert_eq!(m.requirement_ids, vec![100, 200]);
+}
+
+#[test]
+fn four_step_chain_door_npc_object_lodestone() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // door(1) -> npc(10) -> object(20) -> lodestone(2)
+    conn.execute(
+        "INSERT INTO teleports_door_nodes (id, tile_outside_x, tile_outside_y, tile_outside_plane, tile_inside_x, tile_inside_y, tile_inside_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (1, 5, 5, 0, NULL, NULL, NULL, 'npc', 10, 1.0, '101')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_npc_nodes (id, orig_min_x, orig_min_y, orig_plane, dest_min_x, dest_min_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (10, 5, 5, 0, NULL, NULL, NULL, 'object', 20, 2.0, '102')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_object_nodes (id, orig_min_x, orig_min_y, orig_plane, dest_min_x, dest_min_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (20, 5, 5, 0, NULL, NULL, NULL, 'lodestone', 2, 3.0, '103')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_lodestone_nodes (id, dest_x, dest_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (2, 100, 200, 0, NULL, NULL, 4.0, '104')",
+        [],
+    )
+    .unwrap();
+
+    let tiles: Vec<Tile> = vec![];
+    let node_id_of = NodeIndex::from_coords(&[((5, 5, 0), 0), ((100, 200, 0), 77)]);
+
+    let metas = flatten_chains(&conn, &tiles, &node_id_of).unwrap();
+    assert_eq!(metas.len(), 1);
+    let m = &metas[0];
+    assert_eq!(m.src, 0);
+    assert_eq!(m.dst, 77);
+    assert!((m.cost - 10.0).abs() < 1e-5);
+    assert_eq!(m.steps.len(), 4);
+    let mut reqs = m.requirement_ids.clone();
+    reqs.sort();
+    assert_eq!(reqs, vec![101, 102, 103, 104]);
+}
+
+#[test]
+fn cycle_is_dropped() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // door(1) -> door(1) cycle
+    conn.execute(
+        "INSERT INTO teleports_door_nodes (id, tile_outside_x, tile_outside_y, tile_outside_plane, tile_inside_x, tile_inside_y, tile_inside_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (1, 9, 9, 0, NULL, NULL, NULL, 'door', 1, 1.0, '201')",
+        [],
+    )
+    .unwrap();
+
+    let tiles: Vec<Tile> = vec![];
+    let node_id_of = NodeIndex::from_coords(&[((9, 9, 0), 9)]);
+
+    let metas = flatten_chains(&conn, &tiles, &node_id_of).unwrap();
+    assert!(metas.is_empty());
+}
+
+#[test]
+fn use_on_node_becomes_macro_edge() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // "Use rope (954) on object 1996": orig tile -> dest tile, no chaining.
+    conn.execute(
+        "INSERT INTO teleports_useOn_nodes (id, item_id, object_id, orig_min_x, orig_min_y, orig_plane, dest_min_x, dest_min_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (1, 954, 1996, 3, 3, 0, 44, 44, 0, NULL, NULL, 10000, '179')",
+        [],
+    )
+    .unwrap();
+
+    let tiles: Vec<Tile> = vec![];
+    let node_id_of = NodeIndex::from_coords(&[((3, 3, 0), 4), ((44, 44, 0), 5)]);
+
+    let metas = flatten_chains(&conn, &tiles, &node_id_of).unwrap();
+    assert_eq!(metas.len(), 1);
+    let m = &metas[0];
+    assert_eq!(m.src, 4);
+    assert_eq!(m.dst, 5);
+    assert!((m.cost - 10000.0).abs() < 1e-5);
+    assert_eq!(m.requirement_ids, vec![179]);
+    assert_eq!(m.steps.len(), 1);
+    assert_eq!(m.steps[0].kind, "use_on");
+    assert_eq!(m.steps[0].id, 1);
+}
+
+#[test]
+fn use_on_chains_and_is_chained_into() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // object(20) -> useOn(1) -> lodestone(2): the useOn node has an incoming edge, so it
+    // must not also be emitted as a chain start of its own.
+    conn.execute(
+        "INSERT INTO teleports_object_nodes (id, orig_min_x, orig_min_y, orig_plane, dest_min_x, dest_min_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (20, 7, 7, 0, NULL, NULL, NULL, 'useOn', 1, 1.0, '103')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_useOn_nodes (id, item_id, object_id, orig_min_x, orig_min_y, orig_plane, dest_min_x, dest_min_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (1, 954, 1996, 7, 7, 0, NULL, NULL, NULL, 'lodestone', 2, 2.0, '179')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_lodestone_nodes (id, dest_x, dest_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (2, 60, 60, 0, NULL, NULL, 3.0, '104')",
+        [],
+    )
+    .unwrap();
+
+    let tiles: Vec<Tile> = vec![];
+    let node_id_of = NodeIndex::from_coords(&[((7, 7, 0), 0), ((60, 60, 0), 9)]);
+
+    let metas = flatten_chains(&conn, &tiles, &node_id_of).unwrap();
+    assert_eq!(metas.len(), 1);
+    let m = &metas[0];
+    assert_eq!(m.src, 0);
+    assert_eq!(m.dst, 9);
+    assert!((m.cost - 6.0).abs() < 1e-5);
+    let kinds: Vec<&str> = m.steps.iter().map(|s| s.kind).collect();
+    assert_eq!(kinds, vec!["object", "use_on", "lodestone"]);
+    assert_eq!(m.requirement_ids, vec![103, 104, 179]);
+}
+
+#[test]
+fn missing_use_on_table_is_tolerated() {
+    let conn = mem_conn();
+    create_schema(&conn);
+    // A pre-useOn DB must still build.
+    conn.execute_batch("DROP TABLE teleports_useOn_nodes").unwrap();
+
+    conn.execute(
+        "INSERT INTO teleports_door_nodes (id, tile_outside_x, tile_outside_y, tile_outside_plane, tile_inside_x, tile_inside_y, tile_inside_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (1, 0, 0, 0, 1, 1, 0, NULL, NULL, 1.0, '100')",
+        [],
+    )
+    .unwrap();
+
+    let tiles: Vec<Tile> = vec![];
+    let node_id_of = NodeIndex::from_coords(&[((0, 0, 0), 0), ((1, 1, 0), 1)]);
+
+    let metas = flatten_chains(&conn, &tiles, &node_id_of).unwrap();
+    // Forward outside->inside plus the door's reverse edge.
+    assert_eq!(metas.len(), 2);
+}
+
+#[test]
+fn load_fairy_rings_basic() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // Insert two fairy ring nodes
+    conn.execute(
+        "INSERT INTO teleports_fairy_rings_nodes (id, object_id, x, y, plane, cost, code, action, next_node_type, next_node_id, requirements)
+         VALUES (1, 12345, 3200, 3200, 0, 600.0, 'ALS', 'Ring-configure', NULL, NULL, '50;51')",
+        [],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO teleports_fairy_rings_nodes (id, object_id, x, y, plane, cost, code, action, next_node_type, next_node_id, requirements)
+         VALUES (2, 12346, 3250, 3250, 0, 650.0, 'DKS', 'Ring-dial', NULL, NULL, '52')",
+        [],
+    ).unwrap();
+
+    let node_id_of = NodeIndex::from_coords(&[((3200, 3200, 0), 100), ((3250, 3250, 0), 101)]);
+
+    let rings = load_fairy_rings(&conn, &node_id_of).unwrap();
+    assert_eq!(rings.len(), 2);
+
+    // First ring
+    assert_eq!(rings[0].id, 1);
+    assert_eq!(rings[0].node_id, 100);
+    assert_eq!(rings[0].object_id, 12345);
+    assert_eq!(rings[0].x, 3200);
+    assert_eq!(rings[0].y, 3200);
+    assert_eq!(rings[0].plane, 0);
+    assert!((rings[0].cost - 600.0).abs() < 1e-5);
+    assert_eq!(rings[0].code, "ALS");
+    assert_eq!(rings[0].action, Some("Ring-configure".to_string()));
+    assert_eq!(rings[0].requirements, vec![50, 51]);
+
+    // Second ring
+    assert_eq!(rings[1].id, 2);
+    assert_eq!(rings[1].node_id, 101);
+    assert_eq!(rings[1].object_id, 12346);
+    assert_eq!(rings[1].code, "DKS");
+    assert_eq!(rings[1].requirements, vec![52]);
+}
+
+#[test]
+fn load_fairy_rings_skips_missing_tiles() {
+    let conn = mem_conn();
+    create_schema(&conn);
+
+    // Insert a fairy ring at coordinates not in node_id_of
+    conn.execute(
+        "INSERT INTO teleports_fairy_rings_nodes (id, object_id, x, y, plane, cost, code, action, next_node_type, next_node_id, requirements)
+         VALUES (1, 99999, 9999, 9999, 0, 500.0, 'XXX', NULL, NULL, NULL, NULL)",
+        [],
+    ).unwrap();
+    // Insert one that exists
+    conn.execute(
+        "INSERT INTO teleports_fairy_rings_nodes (id, object_id, x, y, plane, cost, code, action, next_node_type, next_node_id, requirements)
+         VALUES (2, 11111, 1000, 1000, 0, 500.0, 'CKS', NULL, NULL, NULL, NULL)",
+        [],
+    ).unwrap();
+
+    let node_id_of = NodeIndex::from_coords(&[((1000, 1000, 0), 200)]);
+    // (9999, 9999, 0) not in the index
+
+    let rings = load_fairy_rings(&conn, &node_id_of).unwrap();
+    assert_eq!(rings.len(), 1);
+    assert_eq!(rings[0].code, "CKS");
+    assert_eq!(rings[0].node_id, 200);
+}
+
+// ---- Destination boxes (dest_min/max_*) -------------------------------------------
+
+/// The production box columns on top of the minimal schema, plus the POA table the
+/// global flatten scans.
+fn create_box_schema(conn: &Connection) {
+    create_schema(conn);
+    conn.execute_batch(
+        r#"
+        ALTER TABLE teleports_item_nodes ADD COLUMN dest_max_x INTEGER;
+        ALTER TABLE teleports_item_nodes ADD COLUMN dest_max_y INTEGER;
+        ALTER TABLE teleports_object_nodes ADD COLUMN dest_max_x INTEGER;
+        ALTER TABLE teleports_object_nodes ADD COLUMN dest_max_y INTEGER;
+        CREATE TABLE teleports_POA_nodes (
+            id INTEGER PRIMARY KEY,
+            dest_min_x INTEGER, dest_max_x INTEGER, dest_min_y INTEGER, dest_max_y INTEGER,
+            dest_plane INTEGER, cost REAL, requirements TEXT
+        );
+        "#,
+    )
+    .unwrap();
+}
+
+fn insert_item_box(conn: &Connection, id: i64, min: (i32, i32), max: (i32, i32)) {
+    conn.execute(
+        "INSERT INTO teleports_item_nodes (id, dest_min_x, dest_min_y, dest_max_x, dest_max_y, dest_plane, cost, requirements)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 1.0, NULL)",
+        rusqlite::params![id, min.0, min.1, max.0, max.1],
+    )
+    .unwrap();
+}
+
+/// Node-ordered fixture: node id = position, so `tiles[id].walk_mask` lines up.
+fn fixture(coords: &[((i32, i32), u32)]) -> (NodeIndex<'static>, Vec<Tile>) {
+    let pairs: Vec<((i32, i32, i32), u32)> =
+        coords.iter().enumerate().map(|(i, &((x, y), _))| ((x, y, 0), i as u32)).collect();
+    let tiles = coords
+        .iter()
+        .map(|&((x, y), walk_mask)| Tile { x, y, plane: 0, walk_mask })
+        .collect();
+    (NodeIndex::from_coords(&pairs), tiles)
+}
+
+#[test]
+fn global_box_lands_on_walkable_tile_nearest_centre_when_min_corner_is_off_graph() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    // Box 10..=14 x 20..=24, centre (12, 22). The min corner (10, 20) is not a tile —
+    // the Dwarven Outpost case that used to drop the teleport silently.
+    insert_item_box(&conn, 169, (10, 20), (14, 24));
+    let (index, tiles) = fixture(&[((11, 20), 255), ((12, 23), 255), ((14, 24), 255)]);
+
+    let g = flatten_global_chains(&conn, &tiles, &index).unwrap();
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].dst, 1, "(12, 23) is nearest the centre");
+    assert_eq!((g[0].steps[0].kind, g[0].steps[0].id), ("item", 169));
+}
+
+#[test]
+fn landing_prefers_walkable_tiles_and_breaks_ties_by_lowest_y_then_x() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    insert_item_box(&conn, 1, (0, 0), (4, 4)); // centre (2, 2)
+    // The centre itself has walk_mask 0; the four orthogonal neighbours tie.
+    let (index, tiles) = fixture(&[
+        ((2, 2), 0),
+        ((2, 3), 255),
+        ((3, 2), 255),
+        ((1, 2), 255),
+        ((2, 1), 255),
+    ]);
+
+    let g = flatten_global_chains(&conn, &tiles, &index).unwrap();
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].dst, 4, "(2, 1): walkable, nearest, lowest y");
+}
+
+#[test]
+fn box_without_walkable_tile_keeps_min_corner_node_else_drops() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    // Item 1: its only tile is the min corner, walk_mask 0 — kept, as before the fix
+    // (single-tile hand-offs onto mask-0 tiles must not disappear).
+    insert_item_box(&conn, 1, (0, 0), (0, 0));
+    // Item 2: a mask-0 tile that is not the corner — nothing to land on.
+    insert_item_box(&conn, 2, (10, 10), (12, 12));
+    // Item 3: no tile in the box at all.
+    insert_item_box(&conn, 3, (50, 50), (52, 52));
+    let (index, tiles) = fixture(&[((0, 0), 0), ((11, 11), 0)]);
+
+    let g = flatten_global_chains(&conn, &tiles, &index).unwrap();
+    let ids: Vec<i64> = g.iter().map(|m| m.steps[0].id).collect();
+    assert_eq!(ids, vec![1]);
+    assert_eq!(g[0].dst, 0);
+}
+
+#[test]
+fn positional_object_box_dest_resolves_the_same_way() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    conn.execute(
+        "INSERT INTO teleports_object_nodes (id, orig_min_x, orig_min_y, orig_plane, dest_min_x, dest_min_y, dest_max_x, dest_max_y, dest_plane, next_node_type, next_node_id, cost, requirements)
+         VALUES (5, 0, 0, 0, 100, 100, 102, 102, 0, NULL, NULL, 2.0, NULL)",
+        [],
+    )
+    .unwrap();
+    let (index, tiles) = fixture(&[((0, 0), 255), ((101, 101), 255), ((102, 100), 255)]);
+
+    let metas = flatten_chains(&conn, &tiles, &index).unwrap();
+    assert_eq!(metas.len(), 1);
+    assert_eq!((metas[0].src, metas[0].dst), (0, 1));
+}
+
+// ---- Spell teleports (teleports_spell_nodes) --------------------------------------
+
+fn create_spell_table(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE teleports_spell_nodes (
+            id INTEGER PRIMARY KEY,
+            spell_id INTEGER,
+            dest_min_x INTEGER, dest_max_x INTEGER, dest_min_y INTEGER, dest_max_y INTEGER,
+            dest_plane INTEGER, cost INTEGER,
+            next_node_type TEXT, next_node_id INTEGER,
+            requirements TEXT
+        );
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn spell_is_a_global_teleport_landing_in_its_box() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    create_spell_table(&conn);
+    // Trollheim-style box 0..=4 x 0..=4, centre (2, 2).
+    conn.execute(
+        "INSERT INTO teleports_spell_nodes (id, spell_id, dest_min_x, dest_max_x, dest_min_y, dest_max_y, dest_plane, cost, requirements)
+         VALUES (1, 57, 0, 4, 0, 4, 0, 3150, '304')",
+        [],
+    )
+    .unwrap();
+    let (index, tiles) = fixture(&[((0, 0), 255), ((2, 2), 255)]);
+
+    // Global only: no positional macro edge.
+    assert!(flatten_chains(&conn, &tiles, &index).unwrap().is_empty());
+    let g = flatten_global_chains(&conn, &tiles, &index).unwrap();
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].dst, 1, "(2, 2) is the box centre");
+    assert_eq!(g[0].cost, 3150.0);
+    assert_eq!(g[0].requirement_ids, vec![304]);
+    assert_eq!((g[0].steps[0].kind, g[0].steps[0].id), ("spell", 1));
+}
+
+#[test]
+fn spell_chains_onward_and_its_continuation_is_not_a_global_start() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    create_spell_table(&conn);
+    // spell(1) -> ifslot(7): the ifslot row is a continuation, not its own global.
+    conn.execute(
+        "INSERT INTO teleports_spell_nodes (id, spell_id, cost, next_node_type, next_node_id, requirements)
+         VALUES (1, 205, 1000, 'ifslot', 7, '305')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO teleports_ifslot_nodes (id, dest_min_x, dest_min_y, dest_plane, cost, requirements)
+         VALUES (7, 2, 2, 0, 500, '9')",
+        [],
+    )
+    .unwrap();
+    let (index, tiles) = fixture(&[((0, 0), 255), ((2, 2), 255)]);
+
+    let g = flatten_global_chains(&conn, &tiles, &index).unwrap();
+    assert_eq!(g.len(), 1);
+    let kinds: Vec<_> = g[0].steps.iter().map(|s| s.kind).collect();
+    assert_eq!(kinds, vec!["spell", "ifslot"]);
+    assert_eq!(g[0].dst, 1);
+    assert_eq!(g[0].cost, 1500.0);
+    assert_eq!(g[0].requirement_ids, vec![9, 305]);
+}
+
+#[test]
+fn missing_spell_table_is_tolerated() {
+    let conn = mem_conn();
+    create_box_schema(&conn);
+    insert_item_box(&conn, 1, (0, 0), (0, 0));
+    let (index, tiles) = fixture(&[((0, 0), 255)]);
+    assert_eq!(flatten_global_chains(&conn, &tiles, &index).unwrap().len(), 1);
+}

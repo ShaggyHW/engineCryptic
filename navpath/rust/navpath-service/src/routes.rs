@@ -1,0 +1,3150 @@
+use std::sync::Arc;
+use std::sync::OnceLock;
+
+use axum::{extract::{Query, State}, http::StatusCode, Json};
+use serde::{Deserialize, Serialize};
+use tracing::{info, warn};
+use navpath_core::eligibility::{build_mask_from_u32, ClientValue};
+
+use crate::{engine_adapter, AppState, SnapshotState};
+
+/// Optional path to dump each route response as pretty JSON, controlled by the
+/// `NAVPATH_DUMP_RESULT` env var. Disabled unless the var is set to a non-empty path.
+/// Cached once so the hot path never performs an env lookup.
+fn result_dump_path() -> Option<&'static std::path::Path> {
+    static DUMP_PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    DUMP_PATH
+        .get_or_init(|| match std::env::var("NAVPATH_DUMP_RESULT") {
+            Ok(p) if !p.trim().is_empty() => Some(std::path::PathBuf::from(p)),
+            _ => None,
+        })
+        .as_deref()
+}
+
+/// Per-request wall-clock deadline from `NAVPATH_ROUTE_TIMEOUT_MS` (default 10s, 0
+/// disables by using a very large timeout). Cached once.
+fn route_deadline() -> std::time::Duration {
+    static DL: OnceLock<std::time::Duration> = OnceLock::new();
+    *DL.get_or_init(|| {
+        let ms = std::env::var("NAVPATH_ROUTE_TIMEOUT_MS").ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(10_000);
+        if ms == 0 { std::time::Duration::from_secs(24 * 3600) } else { std::time::Duration::from_millis(ms) }
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RequirementKV {
+    pub key: String,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct Profile {
+    #[serde(default)]
+    pub requirements: Vec<RequirementKV>,
+}
+
+fn req_has_quick_tele(reqs: &[RequirementKV]) -> bool {
+    req_flag(reqs, "hasQuickTele")
+}
+
+/// The client carries the portable fairy ring (`hasPortableFairyRing=1`): every eligible
+/// fairy ring becomes an origin teleport. Read straight from the profile like
+/// `hasQuickTele` — no requirement row, so no snapshot rebuild.
+fn req_has_portable_fairy(reqs: &[RequirementKV]) -> bool {
+    req_flag(reqs, "hasPortableFairyRing")
+}
+
+/// `avoidDangerAreas`: route around the configured danger areas (see
+/// [`crate::danger`]). Defaults to ON; only an explicit 0 / false / "0" / "false"
+/// turns it off.
+fn req_avoid_danger(reqs: &[RequirementKV]) -> bool {
+    for r in reqs {
+        if r.key.trim().eq_ignore_ascii_case("avoidDangerAreas") {
+            let off = r.value.as_i64() == Some(0)
+                || r.value.as_u64() == Some(0)
+                || r.value.as_f64() == Some(0.0)
+                || r.value.as_bool() == Some(false)
+                || r.value.as_str().is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "0" | "false"));
+            return !off;
+        }
+    }
+    true
+}
+
+/// A profile flag set to 1 / true / "1".
+fn req_flag(reqs: &[RequirementKV], key: &str) -> bool {
+    for r in reqs {
+        if r.key.trim().eq_ignore_ascii_case(key) {
+            if r.value.as_i64() == Some(1) || r.value.as_u64() == Some(1) {
+                return true;
+            }
+            if r.value.as_bool() == Some(true) {
+                return true;
+            }
+            if r.value.as_str().map(|s| s.trim()) == Some("1") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// One `exclude_macros` entry, shaped like an action's `macro` block. Entries naming no
+/// macro in the snapshot (unknown kind, id, or a malformed value) are ignored.
+#[derive(Debug, Deserialize, Default)]
+pub struct ExcludeMacro {
+    #[serde(default)]
+    pub kind: serde_json::Value,
+    #[serde(default)]
+    pub id: serde_json::Value,
+}
+
+/// The request's `exclude_macros` resolved against this snapshot; None when absent,
+/// empty, or naming nothing here, so such requests take the normal cached path.
+fn request_exclusions(
+    cur: &SnapshotState,
+    snap: &navpath_core::Snapshot,
+    list: Option<&[ExcludeMacro]>,
+) -> Option<Arc<engine_adapter::Exclusions>> {
+    let list = list.filter(|l| !l.is_empty())?;
+    let refs: Vec<(u32, u32)> = list
+        .iter()
+        .filter_map(|e| {
+            let kind = engine_adapter::parse_kind(e.kind.as_str()?)?;
+            let id = u32::try_from(e.id.as_u64()?).ok()?;
+            Some((kind, id))
+        })
+        .collect();
+    engine_adapter::Exclusions::resolve(snap, &cur.globals, &cur.fairy_rings, &refs).map(Arc::new)
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct RouteOptions {
+    #[serde(default)]
+    pub return_geometry: bool,
+    #[serde(default)]
+    pub only_actions: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SurgeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub charges: u32,
+    #[serde(default = "default_cooldown_ms")]
+    pub cooldown_ms: f64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DiveConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub available_in_ms: f64,
+    #[serde(default = "default_cooldown_ms")]
+    pub cooldown_ms: f64,
+}
+
+fn default_cooldown_ms() -> f64 {
+    20400.0
+}
+
+impl Default for SurgeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            charges: 0,
+            cooldown_ms: default_cooldown_ms(),
+        }
+    }
+}
+
+impl Default for DiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            available_in_ms: 0.0,
+            cooldown_ms: default_cooldown_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct MinMax {
+    pub min: [i32; 3],
+    pub max: [i32; 3],
+}
+
+impl MinMax {
+    fn point(x: i32, y: i32, p: i32) -> Self {
+        Self { min: [x, y, p], max: [x, y, p] }
+    }
+}
+
+/// `macro` block on every action taken through a macro edge, global teleport or fairy
+/// ring: the kind name and the database row id of the chain's first node, which is what
+/// `exclude_macros` takes back.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct MacroId {
+    pub kind: &'static str,
+    pub id: u32,
+}
+
+impl MacroId {
+    fn global(g: &engine_adapter::GlobalTeleport) -> Self {
+        MacroId { kind: engine_adapter::kind_name(g.kind_first), id: g.id_first }
+    }
+
+    fn fairy_ring(ring: &engine_adapter::FairyRing) -> Self {
+        MacroId { kind: "fairy_ring", id: engine_adapter::fairy_ring_id(&ring.code) }
+    }
+}
+
+/// `node` block on macro actions: the edge kind and its snapshot id.
+#[derive(Debug, Serialize)]
+pub struct NodeRef {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub id: u32,
+}
+
+/// One walked tile.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct MoveAction {
+    #[serde(rename = "type")]
+    pub kind: &'static str, // "move"
+    pub to: [i32; 3],
+    pub cost_ms: f64,
+}
+
+impl MoveAction {
+    #[inline]
+    fn dest(&self) -> (i32, i32, i32) {
+        (self.to[0], self.to[1], self.to[2])
+    }
+}
+
+/// Surge/dive inserted by [`optimize_with_surge_dive`]. `cost_ms` is the hop's real
+/// time (one tick, [`crate::hops::HOP_MS`]); it serializes as an integer, as it always
+/// has.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct AbilityAction {
+    #[serde(rename = "type")]
+    pub kind: &'static str, // "surge" | "dive"
+    pub from: [i32; 3],
+    pub to: [i32; 3],
+    pub cost_ms: u32,
+    /// Route tiles (walk steps) the hop replaces.
+    pub tiles_covered: usize,
+}
+
+/// A macro edge step (door/lodestone/npc/object/item/ifslot/use_on/spell/teleport).
+#[derive(Debug, Serialize)]
+pub struct MacroAction {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub from: MinMax,
+    pub to: MinMax,
+    pub cost_ms: f64,
+    pub node: NodeRef,
+    #[serde(rename = "macro")]
+    pub macro_id: MacroId,
+    /// Owned because this subtree is MUTATED per action (door_direction insertion,
+    /// db_row removal); it is parsed fresh from the snapshot's metadata bytes.
+    pub metadata: serde_json::Value,
+    /// The client's key for the first interaction of this step (`NpcNode:Charter`),
+    /// which names the landing hold learned for it. Set only when learned times are
+    /// loaded; never serialized.
+    #[serde(skip)]
+    pub client_key: Option<String>,
+}
+
+/// Serialize an `Arc<Value>` by reading through it (serde's blanket `Arc` impl is
+/// behind the `rc` feature, which this crate doesn't enable).
+fn serialize_arc_value<S: serde::Serializer>(
+    v: &Arc<serde_json::Value>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    v.as_ref().serialize(s)
+}
+
+/// A global teleport step taken from the on-graph origin.
+#[derive(Debug, Serialize)]
+pub struct GlobalAction {
+    #[serde(rename = "type")]
+    pub kind: String, // steps[0].kind from the metadata, or "global_teleport"
+    pub from: MinMax,
+    pub to: MinMax,
+    pub cost_ms: f64,
+    #[serde(rename = "macro")]
+    pub macro_id: MacroId,
+    /// Pass-through of the teleport's load-time-parsed metadata — serialized straight
+    /// from the shared Arc, never deep-cloned.
+    #[serde(serialize_with = "serialize_arc_value")]
+    pub metadata: Arc<serde_json::Value>,
+}
+
+/// `from` block of a fairy ring action (carries the source ring's object id; none for
+/// a portable fairy ring hop, which opens the dial from the item instead).
+#[derive(Debug, Serialize)]
+pub struct FairyFrom {
+    pub min: [i32; 3],
+    pub max: [i32; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<u64>,
+}
+
+/// A fairy ring hop.
+#[derive(Debug, Serialize)]
+pub struct FairyAction {
+    #[serde(rename = "type")]
+    pub kind: &'static str, // "fairy_ring"
+    pub from: FairyFrom,
+    pub to: MinMax,
+    pub code: String,
+    pub cost_ms: f64,
+    /// The destination ring.
+    #[serde(rename = "macro")]
+    pub macro_id: MacroId,
+    pub metadata: serde_json::Value,
+}
+
+/// Fallback for a path edge of unknown kind: generic teleport, integer zero cost
+/// (matching the old `json!` literal), no node/metadata.
+#[derive(Debug, Serialize)]
+pub struct TeleportAction {
+    #[serde(rename = "type")]
+    pub kind: &'static str, // "teleport"
+    pub from: MinMax,
+    pub to: MinMax,
+    pub cost_ms: u32, // always 0
+}
+
+/// Synthetic first action when the requested start coordinate is off-graph and the
+/// route enters through a global teleport. `cost_ms` is `serde_json::Number` because
+/// it is the integer `0` until a winning entry teleport supplies an f64 cost — the
+/// old code emitted exactly those two shapes.
+#[derive(Debug, Serialize)]
+pub struct VirtualStartAction {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub from: MinMax,
+    pub to: MinMax,
+    pub cost_ms: serde_json::Number,
+    #[serde(rename = "macro", skip_serializing_if = "Option::is_none")]
+    pub macro_id: Option<MacroId>,
+    pub metadata: serde_json::Value,
+}
+
+/// Typed response actions (roadmap 5.3): every shape `build_route_payload` and
+/// `optimize_with_surge_dive` emit, serialized directly instead of assembling
+/// per-action `serde_json::Value` trees. Untagged: each variant carries its own
+/// `type` field (the tag value is dynamic for macro/global actions).
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Action {
+    Move(MoveAction),
+    Ability(AbilityAction),
+    Macro(Box<MacroAction>),
+    Global(Box<GlobalAction>),
+    Fairy(Box<FairyAction>),
+    Teleport(TeleportAction),
+    VirtualStart(Box<VirtualStartAction>),
+}
+
+impl Action {
+    /// The action's cost in ms (0.0 where the serialized form is the integer 0),
+    /// mirroring the old `get("cost_ms").as_f64().unwrap_or(0.0)`.
+    fn cost_ms_f64(&self) -> f64 {
+        match self {
+            Action::Move(a) => a.cost_ms,
+            Action::Ability(a) => a.cost_ms as f64,
+            Action::Macro(a) => a.cost_ms,
+            Action::Global(a) => a.cost_ms,
+            Action::Fairy(a) => a.cost_ms,
+            Action::Teleport(a) => a.cost_ms as f64,
+            Action::VirtualStart(a) => a.cost_ms.as_f64().unwrap_or(0.0),
+        }
+    }
+
+    /// What the client calls the interaction that sent the player here (its arrival key,
+    /// `RouteWalker.arrivalKey`): the landing hold learned for it applies after it.
+    fn arrival_key(&self) -> Option<String> {
+        use crate::hop_knowledge::client_key;
+        match self {
+            Action::Move(_) | Action::Ability(_) => None,
+            Action::Macro(a) => a.client_key.clone(),
+            Action::Global(a) => client_key(&a.kind, None).map(|k| k.0).or_else(|| Some("teleport".into())),
+            Action::Fairy(_) => Some("FairyRingNode".into()),
+            Action::Teleport(_) => Some("teleport".into()),
+            Action::VirtualStart(a) => client_key(&a.kind, None).map(|k| k.0).or_else(|| Some("teleport".into())),
+        }
+    }
+
+    /// Destination tile: the `to` array for moves/abilities, `to.min` for the
+    /// min/max-block actions — the same lookup the old code did on JSON values.
+    fn to_coords(&self) -> (i32, i32, i32) {
+        let a = match self {
+            Action::Move(a) => &a.to,
+            Action::Ability(a) => &a.to,
+            Action::Macro(a) => &a.to.min,
+            Action::Global(a) => &a.to.min,
+            Action::Fairy(a) => &a.to.min,
+            Action::Teleport(a) => &a.to.min,
+            Action::VirtualStart(a) => &a.to.min,
+        };
+        (a[0], a[1], a[2])
+    }
+}
+
+/// Insert Surge and Dive into a route's action list, by the game's hop trajectory and a
+/// simple cast schedule (see [`crate::hops`]). Consumes the action list: non-move
+/// actions are moved (never cloned) into the output, walked tiles are `Copy` structs.
+///
+/// Every walk run (consecutive moves) is planned on one route clock that also advances
+/// through the macro / teleport actions between runs (each a landing: no hop for
+/// [`crate::hops::LANDING_HOLD_MS`], facing unknown). A hop replaces the moves it skips
+/// and costs [`crate::hops::HOP_MS`]; the remaining moves keep their 300 ms. The action
+/// costs therefore add up to the route's travel time, which is what the response's
+/// `cost` reports.
+///
+/// After a run of non-walk actions the hop hold is the landing hold the clients learned
+/// for the run's first interaction (`lock:<key>`, [`crate::hop_knowledge`]), at least
+/// [`crate::hops::LANDING_HOLD_MS`].
+///
+/// `route_origin` is the tile the character actually stands on before the first action
+/// (`path[0]`). It is REQUIRED for correctness whenever the route opens with walk steps:
+/// actions only carry their destination (`to`), so the first move's origin exists nowhere
+/// in the list. `rule` decides which single steps a hop may take (the snapshot's walk
+/// graph in production).
+fn optimize_with_surge_dive<R: crate::hops::StepRule + ?Sized>(
+    actions: Vec<Action>,
+    surge_config: &SurgeConfig,
+    dive_config: &DiveConfig,
+    route_origin: Option<(i32, i32, i32)>,
+    rule: &mut R,
+    learned: &crate::hop_knowledge::HopKnowledge,
+) -> Vec<Action> {
+    use crate::hops::{Abilities, HopKind, HopState, HOP_MS, LANDING_HOLD_MS};
+    let abilities = Abilities {
+        surge: surge_config.enabled,
+        surge_charges: surge_config.charges,
+        surge_cooldown_ms: surge_config.cooldown_ms,
+        dive: dive_config.enabled,
+        dive_available_in_ms: dive_config.available_in_ms,
+        dive_cooldown_ms: dive_config.cooldown_ms,
+    };
+    if !abilities.any() {
+        return actions;
+    }
+    let mut state = HopState::new(abilities);
+    let mut result: Vec<Action> = Vec::with_capacity(actions.len());
+    let mut moves: Vec<MoveAction> = Vec::new();
+    let mut tiles: Vec<(i32, i32, i32)> = Vec::new();
+    let mut iter = actions.into_iter().peekable();
+    // The landing hold of the current run of non-walk actions (its first one's).
+    let mut run_hold: Option<f64> = None;
+
+    while let Some(action) = iter.next() {
+        let Action::Move(first_move) = action else {
+            let hold = *run_hold.get_or_insert_with(|| {
+                action.arrival_key().and_then(|k| learned.landing_hold_ms(&k)).unwrap_or(LANDING_HOLD_MS)
+            });
+            state.other_action(action.cost_ms_f64(), hold);
+            result.push(action);
+            continue;
+        };
+        run_hold = None;
+        // Where the character stands before this run: the previous action's destination,
+        // or — at the head of the route — the caller-supplied origin tile. (Last-resort
+        // fallback when neither exists: the first move's own tile, a zero-length step.)
+        let start_pos = result.last().map(Action::to_coords).or(route_origin).unwrap_or_else(|| first_move.dest());
+        moves.clear();
+        moves.push(first_move);
+        while let Some(Action::Move(m)) = iter.peek() {
+            moves.push(*m);
+            iter.next();
+        }
+        tiles.clear();
+        tiles.push(start_pos);
+        tiles.extend(moves.iter().map(MoveAction::dest));
+
+        let mut walked = 0usize;
+        for hop in state.plan_walk(rule, &tiles) {
+            result.extend(moves[walked..hop.from].iter().copied().map(Action::Move));
+            let (f, t) = (tiles[hop.from], tiles[hop.to]);
+            result.push(Action::Ability(AbilityAction {
+                kind: match hop.kind {
+                    HopKind::Surge => "surge",
+                    HopKind::Dive => "dive",
+                },
+                from: [f.0, f.1, f.2],
+                to: [t.0, t.1, t.2],
+                cost_ms: HOP_MS as u32,
+                tiles_covered: hop.to - hop.from,
+            }));
+            walked = hop.to;
+        }
+        result.extend(moves[walked..].iter().copied().map(Action::Move));
+    }
+
+    result
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct NodeTile { pub wx: i32, pub wy: i32, pub plane: i32 }
+
+#[derive(Debug, Deserialize)]
+pub struct RouteRequest {
+    // Back-compat: allow direct ids
+    #[serde(default)] pub start_id: Option<u32>,
+    #[serde(default)] pub goal_id: Option<u32>,
+    // Spec format: coordinates
+    #[serde(default)] pub start: Option<NodeTile>,
+    #[serde(default)] pub goal: Option<NodeTile>,
+    #[serde(default)] pub profile: Profile,
+    #[serde(default)] pub options: RouteOptions,
+    // Surge and Dive abilities
+    #[serde(default)] pub surge: SurgeConfig,
+    #[serde(default)] pub dive: DiveConfig,
+    /// Optional seed for path randomization. Same seed = same path. Different seeds = potentially different paths.
+    #[serde(default)] pub seed: Option<u64>,
+    /// Macros (as an action's `macro` block names them) this request must route around.
+    #[serde(default)] pub exclude_macros: Option<Vec<ExcludeMacro>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HealthResponse {
+    /// False while the startup warm-up runs (HTTP 503 as well); see `AppState::ready`.
+    pub ready: bool,
+    pub version: u32,
+    pub snapshot_hash: Option<String>,
+    pub loaded_at: u64,
+    pub counts: Option<Counts>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Counts {
+    pub nodes: u32,
+    pub walk_edges: u32,
+    pub macro_edges: u32,
+    pub req_tags: u32,
+    pub landmarks: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RouteResponse {
+    pub found: bool,
+    pub cost: f32,
+    /// The node-id path, pre-serialized with the payload (T3.13). Absent when empty or
+    /// with `only_actions` — exactly where the old `Vec<u32>` field was skipped.
+    #[serde(skip_serializing_if = "Option::is_none")] pub path: Option<Box<serde_json::value::RawValue>>,
+    pub length_tiles: usize,
+    pub duration_ms: u128,
+    /// Same clock as `duration_ms`, in microseconds (sub-ms routes read as 0 there).
+    pub duration_us: u64,
+    /// Present when the search gave up rather than proving its answer
+    /// ("budget_exceeded" or "cancelled"). With found=false the goal may still be
+    /// reachable; with found=true the returned path is valid but was not proven
+    /// optimal (the search was truncated mid-proof). Absent on proven outcomes.
+    #[serde(skip_serializing_if = "Option::is_none")] pub reason: Option<&'static str>,
+    /// Present when a request-level guarantee was traded for an answer: "seed_dropped"
+    /// (the request sent a seed, both seeded attempts exhausted their budgets, and the
+    /// served route is the deterministic unseeded optimum) or "seed_ignored" (the
+    /// server runs with `--no-seed`).
+    #[serde(skip_serializing_if = "Option::is_none")] pub degraded: Option<&'static str>,
+    /// Pre-serialized off the reactor (`RawValue` embeds verbatim), so the multi-KB
+    /// action list / geometry never serialize on the reactor thread. Bytes are identical
+    /// to serializing the typed values here — same serializer, same values.
+    #[serde(skip_serializing_if = "Option::is_none")] pub actions: Option<Box<serde_json::value::RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")] pub geometry: Option<Box<serde_json::value::RawValue>>,
+}
+
+/// Serialize a response body ONCE into a buffer sized up front (T3.13), with the
+/// headers and error handling of axum's `Json` responder — the bytes on the wire are
+/// identical, but the pre-serialized multi-KB parts are copied a single time instead of
+/// into a 128-byte buffer that grows by doubling.
+fn json_response<T: Serialize>(value: &T, size_hint: usize) -> axum::response::Response {
+    use axum::http::{header, HeaderValue};
+    use axum::response::IntoResponse;
+    let mut buf = Vec::with_capacity(size_hint);
+    match serde_json::to_writer(&mut buf, value) {
+        Ok(()) => ([(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))], buf).into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"))],
+            err.to_string(),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TileExistsQuery {
+    pub x: i32,
+    pub y: i32,
+    pub plane: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TileExistsResponse {
+    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub walk_mask: Option<u8>,
+}
+
+pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
+    let ready = state.ready.load(std::sync::atomic::Ordering::Acquire);
+    let cur = state.current.load();
+    let counts = cur.snapshot.as_ref().map(|s| s.counts()).map(|c| Counts {
+        nodes: c.nodes,
+        walk_edges: c.walk_edges,
+        macro_edges: c.macro_edges,
+        req_tags: c.req_tags,
+        landmarks: c.landmarks,
+    });
+    let version = cur.snapshot.as_ref().map(|s| s.manifest().version).unwrap_or(0);
+    let body = Json(HealthResponse {
+        ready,
+        version,
+        snapshot_hash: cur.snapshot_hash_hex.clone(),
+        loaded_at: cur.loaded_at_unix,
+        counts,
+    });
+    (if ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE }, body)
+}
+
+pub async fn tile_exists(
+    State(state): State<AppState>,
+    Query(params): Query<TileExistsQuery>,
+) -> Result<Json<TileExistsResponse>, (StatusCode, String)> {
+    let cur = state.current.load();
+
+    let Some(snap) = cur.snapshot.as_ref() else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "snapshot not loaded".into(),
+        ));
+    };
+
+    match snap.find_node(params.x, params.y, params.plane) {
+        Some(node_id) => {
+            Ok(Json(TileExistsResponse {
+                exists: true,
+                node_id: Some(node_id),
+                walk_mask: None, // tiles.bin not currently loaded into state
+            }))
+        }
+        None => Ok(Json(TileExistsResponse {
+            exists: false,
+            node_id: None,
+            walk_mask: None,
+        })),
+    }
+}
+
+/// Maximum start->goal range for `/reachable` (Chebyshev tiles, i.e. the in-game
+/// "within N tiles" square).
+const REACHABLE_RANGE_TILES: i32 = 20;
+
+#[derive(Debug, Deserialize)]
+pub struct ReachableQuery {
+    pub sx: i32,
+    pub sy: i32,
+    pub splane: i32,
+    pub gx: i32,
+    pub gy: i32,
+    pub gplane: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReachableResponse {
+    pub reachable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'static str>,
+}
+
+/// Walk-only proximity check: true iff the goal is within
+/// [`REACHABLE_RANGE_TILES`] of the start AND a pure walk path connects them —
+/// no macro edges (doors, stairs, teleports) allowed — without leaving the
+/// endpoints' 20-tile neighbourhood.
+///
+/// Two-stage answer, both stages exact for their claim:
+/// 1. Walk-component ids (built over walk edges ONLY — see the builder's
+///    `walk_component_ids`) decide "connected by walks at all" in O(1). A goal
+///    behind a closed door/fence is a different component and rejects here.
+/// 2. A BFS over the walk CSR, restricted to tiles within range of either
+///    endpoint (union keeps the answer symmetric), confirms the path is local.
+///    Same component but only connected around a long detour (river bank,
+///    cliff) rejects here. The region is at most ~61x61 tiles, so the whole
+///    check is microseconds — no blocking task or search permit needed.
+pub async fn reachable(
+    State(state): State<AppState>,
+    Query(q): Query<ReachableQuery>,
+) -> Result<Json<ReachableResponse>, (StatusCode, String)> {
+    let cur = state.current.load();
+    let Some(snap) = cur.snapshot.as_ref() else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "snapshot not loaded".into()));
+    };
+
+    let deny = |reason: &'static str| {
+        Ok(Json(ReachableResponse { reachable: false, reason: Some(reason) }))
+    };
+
+    // Walk edges never change plane; a cross-plane pair can't be walk-reachable.
+    if q.splane != q.gplane {
+        return deny("different_plane");
+    }
+    let cheb = (q.sx - q.gx).abs().max((q.sy - q.gy).abs());
+    if cheb > REACHABLE_RANGE_TILES {
+        return deny("out_of_range");
+    }
+
+    let Some(sid) = snap.find_node(q.sx, q.sy, q.splane) else {
+        return deny("start_tile_not_found");
+    };
+    let Some(gid) = snap.find_node(q.gx, q.gy, q.gplane) else {
+        return deny("goal_tile_not_found");
+    };
+    if sid == gid {
+        return Ok(Json(ReachableResponse { reachable: true, reason: None }));
+    }
+
+    // Stage 1: no walk path exists AT ALL (the goal is only reachable through a
+    // door/teleport, if at all) — reject without touching the grid.
+    let comps = snap.comp_ids();
+    if comps[sid as usize] != comps[gid as usize] {
+        return deny("not_connected");
+    }
+
+    // Stage 2: BFS over walk edges, confined to tiles within range of either
+    // endpoint. `visited` is a dense bitmap over the region's bounding box
+    // (endpoints are <= range apart, so at most (3*range+1)^2 slots).
+    let r = REACHABLE_RANGE_TILES;
+    let (x0, y0) = (q.sx.min(q.gx) - r, q.sy.min(q.gy) - r);
+    let width = (q.sx.max(q.gx) + r - x0 + 1) as usize;
+    let height = (q.sy.max(q.gy) + r - y0 + 1) as usize;
+    let idx = |x: i32, y: i32| (y - y0) as usize * width + (x - x0) as usize;
+    let in_region = |x: i32, y: i32| {
+        (x - q.sx).abs().max((y - q.sy).abs()) <= r
+            || (x - q.gx).abs().max((y - q.gy).abs()) <= r
+    };
+
+    let offs = snap.walk_offsets();
+    let dst = snap.walk_dst();
+    let mut visited = vec![false; width * height];
+    let mut queue = std::collections::VecDeque::with_capacity(64);
+    visited[idx(q.sx, q.sy)] = true;
+    queue.push_back(sid);
+    while let Some(u) = queue.pop_front() {
+        let (s, e) = (offs[u as usize] as usize, offs[u as usize + 1] as usize);
+        for &v in &dst[s..e] {
+            if v == gid {
+                return Ok(Json(ReachableResponse { reachable: true, reason: None }));
+            }
+            let (vx, vy, vp) = snap.node_coord(v);
+            if vp != q.splane || !in_region(vx, vy) {
+                continue;
+            }
+            let i = idx(vx, vy);
+            if !visited[i] {
+                visited[i] = true;
+                queue.push_back(v);
+            }
+        }
+    }
+
+    // A walk path exists (same component) but every one leaves the 20-tile
+    // neighbourhood — e.g. the far bank of a river whose bridge is 50 tiles away.
+    deny("no_path_in_range")
+}
+
+/// `steps[0].kind` from a global teleport's metadata (e.g. "lodestone", "npc"),
+/// falling back to the generic tag.
+fn global_step_kind(meta: &serde_json::Value) -> &str {
+    meta.get("steps")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|s| s.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("global_teleport")
+}
+
+/// The eligible global teleport landing on `dst` with the lowest effective cost
+/// (quick-tele lodestones at `QUICK_TELE_LODESTONE_MS`), with its load-time-parsed metadata. Ties keep the
+/// first teleport in snapshot order — the strict `<` replacement rule of the per-payload
+/// maps this lookup replaces (T3.8). Called only for the rare path steps that are neither
+/// walk nor macro edges, and for a virtual start's entry, so a scan over the ~124
+/// globals beats building two hash maps on every payload.
+fn eligible_global_to<'g>(
+    globals: &'g [engine_adapter::GlobalTeleport],
+    mask: &navpath_core::eligibility::EligibilityMask,
+    quick_tele: bool,
+    exclusions: Option<&engine_adapter::Exclusions>,
+    dst: u32,
+) -> Option<(f32, &'g engine_adapter::GlobalTeleport)> {
+    let mut best: Option<(f32, &'g engine_adapter::GlobalTeleport)> = None;
+    for (i, g) in globals.iter().enumerate() {
+        if g.dst != dst
+            || g.reqs.iter().any(|&idx| !mask.is_satisfied(idx))
+            || exclusions.is_some_and(|e| e.global(i))
+        {
+            continue;
+        }
+        let cost = if quick_tele && g.kind_first == 2 { navpath_core::QUICK_TELE_LODESTONE_MS } else { g.cost };
+        if best.is_none_or(|(c, _)| cost < c) {
+            best = Some((cost, g));
+        }
+    }
+    best
+}
+
+/// How the route's origin reaches `dst` without walking: an eligible global teleport, or
+/// (portable fairy ring) dialling `dst`'s ring from wherever the player stands.
+enum OriginHop<'g> {
+    Global(f32, &'g engine_adapter::GlobalTeleport),
+    /// Index into the snapshot's fairy rings, and the hop's cost (open + charge surcharge + ring).
+    Portable(usize, f32),
+}
+
+impl OriginHop<'_> {
+    fn cost(&self) -> f32 {
+        match self {
+            OriginHop::Global(c, _) | OriginHop::Portable(_, c) => *c,
+        }
+    }
+}
+
+/// The cheapest [`OriginHop`] landing on `dst` — the same candidates
+/// `build_profile_artifacts` handed the engine as `eligible_globals`. Ties keep the global.
+fn origin_hop_to<'g>(job: &'g RouteJob, dst: u32) -> Option<OriginHop<'g>> {
+    let exclusions = job.exclusions.as_deref();
+    let global = eligible_global_to(&job.cur.globals, &job.mask, job.quick_tele, exclusions, dst)
+        .map(|(c, g)| OriginHop::Global(c, g));
+    let portable = if job.portable_fairy {
+        job.cur.node_to_fairy_ring.get(&dst).and_then(|&i| {
+            let ring = &job.cur.fairy_rings[i];
+            (ring.req_tag_idxs.iter().all(|&idx| job.mask.is_satisfied(idx))
+                && !exclusions.is_some_and(|e| e.fairy_ring(i)))
+                .then(|| OriginHop::Portable(i, engine_adapter::PORTABLE_FAIRY_EXTRA_MS + ring.cost_ms))
+        })
+    } else {
+        None
+    };
+    match (global, portable) {
+        (Some(g), Some(p)) => Some(if p.cost() < g.cost() { p } else { g }),
+        (g, p) => g.or(p),
+    }
+}
+
+/// A fairy ring action landing on `dst_ring`, dialled at the ring `src` (an object id to
+/// click) or, with `src = None`, from the portable fairy ring item.
+fn fairy_action(
+    src: Option<&engine_adapter::FairyRing>,
+    dst_ring: &engine_adapter::FairyRing,
+    from: (i32, i32, i32),
+    to: (i32, i32, i32),
+    cost_ms: f64,
+) -> Action {
+    let mut meta = serde_json::Map::new();
+    if let Some(src_ring) = src {
+        meta.insert("source_code".to_string(), serde_json::Value::String(src_ring.code.clone()));
+    } else {
+        meta.insert("portable".to_string(), serde_json::Value::Bool(true));
+    }
+    meta.insert("destination_code".to_string(), serde_json::Value::String(dst_ring.code.clone()));
+    if let Some(ref action) = dst_ring.action {
+        meta.insert("action".to_string(), serde_json::Value::String(action.clone()));
+    }
+    Action::Fairy(Box::new(FairyAction {
+        kind: "fairy_ring",
+        from: FairyFrom {
+            min: [from.0, from.1, from.2],
+            max: [from.0, from.1, from.2],
+            object_id: src.map(|r| r.object_id),
+        },
+        to: MinMax::point(to.0, to.1, to.2),
+        code: dst_ring.code.clone(),
+        cost_ms,
+        macro_id: MacroId::fairy_ring(dst_ring),
+        metadata: serde_json::Value::Object(meta),
+    }))
+}
+
+/// Build a route's actions (and optional geometry). Runs in the request's blocking task
+/// (or inline for small cache hits) so thousands of per-step constructions never stall
+/// the async reactor threads. Emits typed [`Action`]s serialized directly by serde
+/// (roadmap 5.3) — no per-tile/per-action `serde_json::Value` assembly. `path` may be a
+/// slice of a cached path.
+///
+/// The actions are built for EVERY found route, requested or not: their costs add up to
+/// the response's `cost` (walk steps at 300 ms, Surge/Dive hops, macro steps). When the
+/// caller asked for no actions/geometry they are only priced, not serialized, and macro
+/// metadata is not parsed for them.
+fn build_route_payload(
+    job: &RouteJob,
+    found: bool,
+    path: &[u32],
+    virtual_entry: Option<u32>,
+) -> (Option<Vec<Action>>, Option<Vec<[i32; 3]>>) {
+    if !found {
+        return (None, None);
+    }
+    let snap: &navpath_core::Snapshot = job.snap();
+    let globals: &[engine_adapter::GlobalTeleport] = &job.cur.globals;
+    let macro_lookup: &engine_adapter::MacroLookup = &job.cur.macro_lookup;
+    let fairy_rings: &[engine_adapter::FairyRing] = &job.cur.fairy_rings;
+    let node_to_fairy_ring = &job.cur.node_to_fairy_ring;
+    let mask = &job.mask;
+    let quick_tele = job.quick_tele;
+    let exclusions = job.exclusions.as_deref();
+    // What the launcher's clients learned (empty unless NAVPATH_HOP_KNOWLEDGE_DIR is set).
+    let learned = crate::hop_knowledge::current();
+    let learned_times = learned.timing_keys() > 0;
+
+    let coord = |id: u32| -> (i32, i32, i32) { snap.node_coord(id) };
+
+    let want_actions = job.only_actions || job.return_geometry;
+    let mut geometry: Option<Vec<[i32; 3]>> = None;
+    if job.return_geometry {
+        let mut geom: Vec<[i32; 3]> = Vec::with_capacity(path.len());
+        for &id in path {
+            let (x, y, p) = coord(id);
+            geom.push([x, y, p]);
+        }
+        geometry = Some(geom);
+    }
+
+    // If we used a virtual start (non-existent start coordinate), the synthetic teleport
+    // action goes first; it is completed after the loop from the winning entry teleport.
+    let mut virtual_start_action: Option<VirtualStartAction> = None;
+    if let Some((vsx, vsy, vsp)) = job.virtual_start_from {
+        let entry_id = virtual_entry.unwrap_or(job.sid);
+        let (actual_x, actual_y, actual_p) = coord(entry_id);
+        virtual_start_action = Some(VirtualStartAction {
+            kind: "global_teleport".to_string(),
+            from: MinMax::point(vsx, vsy, vsp),
+            to: MinMax::point(actual_x, actual_y, actual_p),
+            cost_ms: serde_json::Number::from(0),
+            macro_id: None,
+            metadata: serde_json::json!({"reason": "start_coordinate_not_found"}),
+        });
+    }
+
+    let mut acts: Vec<Action> =
+        Vec::with_capacity(path.len().saturating_sub(1) + usize::from(virtual_start_action.is_some()));
+    if virtual_start_action.is_some() {
+        // Placeholder for slot 0, overwritten below (no `insert(0, ..)` shift).
+        acts.push(Action::Teleport(TeleportAction {
+            kind: "teleport",
+            from: MinMax::point(0, 0, 0),
+            to: MinMax::point(0, 0, 0),
+            cost_ms: 0,
+        }));
+    }
+
+    for (step, w) in path.windows(2).enumerate() {
+        let (u, v) = (w[0], w[1]);
+        let (x1, y1, p1) = coord(u);
+        let (x2, y2, p2) = coord(v);
+
+        if let Some(idxs) = macro_lookup.get(&(u, v)) {
+            // Cheapest parallel edge the profile may use; requirement lists were decoded
+            // at load (T3.7), so no candidate's metadata is parsed here.
+            let mut chosen: Option<(usize, f32)> = None;
+            for &idx_u32 in idxs {
+                let idx = idx_u32 as usize;
+                if !macro_lookup.allowed(idx, mask) || exclusions.is_some_and(|e| e.macro_edge(idx)) {
+                    continue;
+                }
+                let mut cost_ms = snap.macro_w().get(idx).copied().unwrap_or(0.0);
+                let k = snap.macro_kind_first().get(idx).copied().unwrap_or(0);
+                if quick_tele && k == 2 {
+                    cost_ms = navpath_core::QUICK_TELE_LODESTONE_MS;
+                }
+                if chosen.is_none_or(|(_, best_cost)| cost_ms < best_cost) {
+                    chosen = Some((idx, cost_ms));
+                }
+            }
+            let (idx, mut cost_ms) = chosen.unwrap_or_else(|| {
+                let idx = idxs.first().copied().unwrap_or(0) as usize;
+                (idx, snap.macro_w().get(idx).copied().unwrap_or(0.0))
+            });
+            let mut meta = if want_actions { macro_lookup.meta_value(snap, idx) } else { serde_json::Value::Null };
+
+            let k = snap.macro_kind_first().get(idx).copied().unwrap_or(0);
+            let kid = snap.macro_id_first().get(idx).copied().unwrap_or(0);
+            let kstr = match k {
+                1 => "door",
+                2 => "lodestone",
+                3 => "npc",
+                4 => "object",
+                5 => "item",
+                6 => "ifslot",
+                7 => "poa_item",
+                8 => "use_on",
+                9 => "spell",
+                _ => "teleport",
+            };
+            if quick_tele && kstr == "lodestone" {
+                cost_ms = navpath_core::QUICK_TELE_LODESTONE_MS;
+            }
+
+            // For doors, compute dynamic approach direction (IN/OUT) using db_row tile_inside/tile_outside
+            if kstr == "door" {
+                // helper to extract [x,y,p] to tuple
+                fn arr_to_tuple(v: &serde_json::Value) -> Option<(i32,i32,i32)> {
+                    let a = v.as_array()?;
+                    if a.len() != 3 { return None; }
+                    let x = a[0].as_i64()? as i32;
+                    let y = a[1].as_i64()? as i32;
+                    let p = a[2].as_i64()? as i32;
+                    Some((x,y,p))
+                }
+                if let Some(db_row) = meta.get("db_row") {
+                    let tin = db_row.get("tile_inside").and_then(arr_to_tuple);
+                    let tout = db_row.get("tile_outside").and_then(arr_to_tuple);
+                    let from = (x1,y1,p1);
+                    let to = (x2,y2,p2);
+                    let dir = if tout.is_some() && Some(from) == tout { Some("IN") }
+                              else if tin.is_some() && Some(from) == tin { Some("OUT") }
+                              else if tin.is_some() && Some(to) == tin { Some("IN") }
+                              else if tout.is_some() && Some(to) == tout { Some("OUT") }
+                              else { None };
+                    if let Some(d) = dir {
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("door_direction".to_string(), serde_json::Value::String(d.to_string()));
+                        }
+                    }
+                }
+            }
+            // The clients' measured interaction times replace the snapshot's per-step
+            // placeholders (see `learned_macro_cost`).
+            let mut cost_ms = cost_ms as f64;
+            let mut client_key = None;
+            if learned_times {
+                let parsed;
+                let m = if want_actions {
+                    &meta
+                } else {
+                    parsed = macro_lookup.meta_value(snap, idx);
+                    &parsed
+                };
+                (cost_ms, client_key) = learned_macro_cost(kstr, m, cost_ms, &learned, quick_tele);
+            }
+            // Remove duplicated top-level db_row; it exists inside per-step entries already
+            if let Some(obj) = meta.as_object_mut() {
+                obj.remove("db_row");
+            }
+            acts.push(Action::Macro(Box::new(MacroAction {
+                kind: kstr,
+                from: MinMax::point(x1, y1, p1),
+                to: MinMax::point(x2, y2, p2),
+                cost_ms,
+                node: NodeRef { kind: kstr, id: kid },
+                macro_id: MacroId { kind: kstr, id: kid },
+                metadata: meta,
+                client_key,
+            })));
+        } else {
+            // Walk edge or unknown: check the snapshot's walk CSR directly (degree <= 8).
+            // Every walk step takes 300 ms, diagonal or not; the search's sub-ms diagonal
+            // tie-break is not travel time.
+            //
+            // On the first edge of an on-graph start the engine may have taken a global
+            // (or portable fairy ring) hop onto a walk NEIGHBOUR because it is cheaper than
+            // the step; emit that hop then, so the actions — and the cost they add up
+            // to — describe the route the engine priced.
+            let cheaper_origin_hop = if step == 0 && job.virtual_start_from.is_none() {
+                origin_hop_to(job, v).filter(|o| (o.cost() as f64) < navpath_core::snapshot::WALK_CARDINAL_MS as f64)
+            } else {
+                None
+            };
+            if let Some(o) = cheaper_origin_hop {
+                acts.push(match o {
+                    OriginHop::Global(gc, g) => global_action(g, quick_tele, gc, (x1, y1, p1), (x2, y2, p2)),
+                    OriginHop::Portable(d, cost) => {
+                        fairy_action(None, &fairy_rings[d], (x1, y1, p1), (x2, y2, p2), cost as f64)
+                    }
+                });
+            } else if snap.walk_edge_weight(u, v).is_some() {
+                acts.push(Action::Move(MoveAction {
+                    kind: "move",
+                    to: [x2, y2, p2],
+                    cost_ms: navpath_core::snapshot::WALK_CARDINAL_MS as f64,
+                }));
+            } else {
+                // A teleport edge: a ring-to-ring hop (u and v both fairy ring nodes), or —
+                // on the FIRST edge of an on-graph start only, since the engine relaxes
+                // globals from the start node and nowhere else — a global teleport or a
+                // portable fairy ring hop. Each is labelled by the cheapest candidate, so a
+                // ring hop whose destination also has a global (Zanaris via Grace of the
+                // elves) is no longer emitted as that global.
+                let ring_ok = |i: usize| !exclusions.is_some_and(|e| e.fairy_ring(i));
+                let ring_hop = match (node_to_fairy_ring.get(&u), node_to_fairy_ring.get(&v)) {
+                    (Some(&s), Some(&d)) if ring_ok(s) && ring_ok(d) => Some((s, d)),
+                    _ => None,
+                };
+                let origin = if step == 0 && job.virtual_start_from.is_none() { origin_hop_to(job, v) } else { None };
+                let origin = match (origin, ring_hop) {
+                    (Some(o), Some((_, d))) if o.cost() >= fairy_rings[d].cost_ms => None,
+                    (o, _) => o,
+                };
+                if let Some(o) = origin {
+                    acts.push(match o {
+                        OriginHop::Global(gc, g) => global_action(g, quick_tele, gc, (x1, y1, p1), (x2, y2, p2)),
+                        OriginHop::Portable(d, cost) => {
+                            fairy_action(None, &fairy_rings[d], (x1, y1, p1), (x2, y2, p2), cost as f64)
+                        }
+                    });
+                } else if let Some((s, d)) = ring_hop {
+                    let dst_ring = &fairy_rings[d];
+                    acts.push(fairy_action(Some(&fairy_rings[s]), dst_ring, (x1, y1, p1), (x2, y2, p2), dst_ring.cost_ms as f64));
+                } else if let Some((gc, g)) = eligible_global_to(globals, mask, quick_tele, exclusions, v) {
+                    acts.push(global_action(g, quick_tele, gc, (x1, y1, p1), (x2, y2, p2)));
+                } else {
+                    // Fallback: unknown edge kind; emit as generic teleport with zero cost
+                    acts.push(Action::Teleport(TeleportAction {
+                        kind: "teleport",
+                        from: MinMax::point(x1, y1, p1),
+                        to: MinMax::point(x2, y2, p2),
+                        cost_ms: 0,
+                    }));
+                }
+            }
+        }
+    }
+
+    // If we had a virtual start, fill slot 0 with the synthetic first action, derived from
+    // the selected global teleport's metadata/cost.
+    if let Some(mut virtual_action) = virtual_start_action {
+        let mut entry_fairy: Option<Action> = None;
+        if let Some(entry_id) = virtual_entry {
+            match origin_hop_to(job, entry_id) {
+                Some(OriginHop::Global(gc, g)) => {
+                    virtual_action.cost_ms = serde_json::Number::from_f64(gc as f64)
+                        .unwrap_or_else(|| serde_json::Number::from(0));
+                    virtual_action.kind = global_step_kind(&g.meta).to_string();
+                    virtual_action.macro_id = Some(MacroId::global(g));
+                    if let Some(obj) = virtual_action.metadata.as_object_mut() {
+                        obj.insert("teleport".to_string(), (*g.meta).clone());
+                    }
+                }
+                Some(OriginHop::Portable(d, cost)) => {
+                    // Entered by dialling a ring from the off-graph start: a portable fairy
+                    // ring action from the requested coordinate, in the virtual start's slot.
+                    let f = virtual_action.from.min;
+                    let t = virtual_action.to.min;
+                    entry_fairy = Some(fairy_action(None, &fairy_rings[d], (f[0], f[1], f[2]), (t[0], t[1], t[2]), cost as f64));
+                }
+                None => {}
+            }
+        }
+        acts[0] = entry_fairy.unwrap_or_else(|| Action::VirtualStart(Box::new(virtual_action)));
+    }
+
+    // The tile the character stands on before the first action. For a virtual start the
+    // synthetic teleport action already occupies index 0 and carries it, but on the normal
+    // path nothing in `acts` records it — see `optimize_with_surge_dive`.
+    let route_origin = path.first().map(|&id| coord(id));
+
+    // A ring walked into and dialled: the clients' measured time (a portable ring opens
+    // from an item, which the client times as another node).
+    if learned_times {
+        if let Some(ms) = learned.interaction_ms("FairyRingNode", "FairyRingNode") {
+            for a in acts.iter_mut() {
+                if let Action::Fairy(f) = a {
+                    if f.from.object_id.is_some() {
+                        f.cost_ms = ms;
+                    }
+                }
+            }
+        }
+    }
+
+    // Insert Surge/Dive along the walks, by the game's hop model on this snapshot plus the
+    // hop edges the clients learned.
+    let mut steps = crate::hops::SnapshotSteps::with_knowledge(snap, learned.clone());
+    (Some(optimize_with_surge_dive(acts, &job.surge, &job.dive, route_origin, &mut steps, &learned)), geometry)
+}
+
+/// A global teleport action; `gc` is its effective cost (quick-tele lodestones `QUICK_TELE_LODESTONE_MS`).
+/// A macro step priced by what the clients measured (`dead:` times,
+/// [`crate::hop_knowledge`]): each interaction in the step's metadata chain whose time was
+/// learned replaces its own snapshot cost; the rest keep theirs. Lodestones are left alone
+/// with quick-tele (its own fixed cost). Returns the cost and the client's key of the
+/// chain's first interaction (the arrival key of the landing hold).
+fn learned_macro_cost(
+    kind: &str,
+    meta: &serde_json::Value,
+    cost_ms: f64,
+    learned: &crate::hop_knowledge::HopKnowledge,
+    quick_tele: bool,
+) -> (f64, Option<String>) {
+    use crate::hop_knowledge::client_key;
+    fn action_of<'a>(kind: &str, holder: Option<&'a serde_json::Value>) -> Option<&'a str> {
+        let field = if kind == "door" { "open_action" } else { "action" };
+        holder?.get(field).and_then(serde_json::Value::as_str)
+    }
+    // (client key and node type, the step's own snapshot cost)
+    type Step = (Option<(String, &'static str)>, Option<f64>);
+    let mut chain: Vec<Step> = Vec::new();
+    match meta.get("steps").and_then(serde_json::Value::as_array).filter(|a| !a.is_empty()) {
+        Some(steps) => {
+            let single = steps.len() == 1;
+            for st in steps {
+                let k = st.get("kind").and_then(serde_json::Value::as_str).unwrap_or(kind);
+                let action = action_of(k, st.get("db_row")).or_else(|| st.get("action").and_then(serde_json::Value::as_str));
+                let own = st.get("cost_ms").and_then(serde_json::Value::as_f64).or(single.then_some(cost_ms));
+                chain.push((client_key(k, action), own));
+            }
+        }
+        None => {
+            let action = meta
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| action_of(kind, meta.get("db_row")));
+            chain.push((client_key(kind, action), Some(cost_ms)));
+        }
+    }
+    let arrival = chain.first().and_then(|(k, _)| k.as_ref()).map(|(key, _)| key.clone());
+    let mut total = cost_ms;
+    for (key, own) in &chain {
+        let (Some((key, node_type)), Some(own)) = (key, own) else { continue };
+        if quick_tele && *node_type == "LodestoneNode" {
+            continue;
+        }
+        if let Some(ms) = learned.interaction_ms(key, node_type) {
+            total += ms - own;
+        }
+    }
+    (total.max(0.0), arrival)
+}
+
+fn global_action(
+    g: &engine_adapter::GlobalTeleport,
+    quick_tele: bool,
+    gc: f32,
+    from: (i32, i32, i32),
+    to: (i32, i32, i32),
+) -> Action {
+    // Metadata stays behind the shared Arc — serialization reads through it.
+    let meta = g.meta.clone();
+    // Prefer the specific step kind (e.g., "lodestone", "npc") if present in metadata
+    let kstr = global_step_kind(&meta);
+    let cost_ms = if quick_tele && kstr == "lodestone" { navpath_core::QUICK_TELE_LODESTONE_MS as f64 } else { gc as f64 };
+    Action::Global(Box::new(GlobalAction {
+        kind: kstr.to_string(),
+        from: MinMax::point(from.0, from.1, from.2),
+        to: MinMax::point(to.0, to.1, to.2),
+        cost_ms,
+        macro_id: MacroId::global(g),
+        metadata: meta,
+    }))
+}
+
+/// Everything one route's search and payload work needs, shared by its blocking tasks
+/// behind ONE `Arc` (T3.15: the handler used to clone ~15 separate Arcs and the
+/// eligibility mask twice per request).
+struct RouteJob {
+    /// The snapshot generation this request resolved against (its snapshot is loaded).
+    cur: Arc<SnapshotState>,
+    /// Per-profile search artifacts; None on cache/sub-path hits (no search runs).
+    artifacts: Option<Arc<engine_adapter::ProfileArtifacts>>,
+    mask: navpath_core::eligibility::EligibilityMask,
+    sid: u32,
+    gid: u32,
+    /// `/route_area`: the goal set (`gid` is its representative); None on `/route`.
+    goals: Option<Arc<navpath_core::GoalSet>>,
+    used_virtual_start: bool,
+    seed: Option<u64>,
+    quick_tele: bool,
+    portable_fairy: bool,
+    return_geometry: bool,
+    only_actions: bool,
+    surge: SurgeConfig,
+    dive: DiveConfig,
+    virtual_start_from: Option<(i32, i32, i32)>,
+    /// Fresh proven results are indexed for the sub-path cache (unseeded, on-graph start,
+    /// cache enabled) — in the blocking task, off the reactor (T3.6).
+    index_subpath: bool,
+    /// Danger areas this request routes around (`avoidDangerAreas` on and the snapshot
+    /// has some); None = plain routing.
+    danger: Option<Arc<crate::danger::DangerAreas>>,
+    /// `exclude_macros` that named something in this snapshot; None = route as normal.
+    exclusions: Option<Arc<engine_adapter::Exclusions>>,
+}
+
+/// The pre-serialized halves of a response (T3.13), and the route's cost.
+struct Payload {
+    /// Sum of the actions' `cost_ms` — the route's travel time with walk steps at
+    /// 300 ms and the Surge/Dive hops the actions contain. None when not found.
+    cost: Option<f64>,
+    path: Option<Box<serde_json::value::RawValue>>,
+    actions: Option<Box<serde_json::value::RawValue>>,
+    geometry: Option<Box<serde_json::value::RawValue>>,
+    payload_us: u64,
+}
+
+impl Payload {
+    fn len(&self) -> usize {
+        [&self.path, &self.actions, &self.geometry]
+            .iter()
+            .map(|p| p.as_ref().map_or(0, |r| r.get().len()))
+            .sum()
+    }
+}
+
+impl RouteJob {
+    fn snap(&self) -> &Arc<navpath_core::Snapshot> {
+        self.cur.snapshot.as_ref().expect("route jobs are only built for a loaded snapshot")
+    }
+
+    /// Build and serialize the payload for `path` (a full result or a cached slice).
+    fn payload(&self, found: bool, path: &[u32], virtual_entry: Option<u32>) -> Payload {
+        let t_payload = std::time::Instant::now();
+        let (actions, geometry) = build_route_payload(self, found, path, virtual_entry);
+        let cost = actions.as_ref().map(|a| a.iter().map(Action::cost_ms_f64).sum::<f64>());
+        let want_actions = self.only_actions || self.return_geometry;
+        let actions = actions
+            .filter(|_| want_actions)
+            .map(|a| serde_json::value::to_raw_value(&a).expect("actions serialize"));
+        let geometry = geometry.map(|g| serde_json::value::to_raw_value(&g).expect("geometry serialize"));
+        // only_actions means exactly that: skip the duplicate node-id path in the payload.
+        let path = if self.only_actions || path.is_empty() {
+            None
+        } else {
+            Some(serde_json::value::to_raw_value(path).expect("path serialize"))
+        };
+        Payload { cost, path, actions, geometry, payload_us: t_payload.elapsed().as_micros() as u64 }
+    }
+
+    /// One fresh search on `engine`, observing `cancel`. The contexts return to the pool
+    /// when this returns, before payload building.
+    ///
+    /// Danger avoidance runs the normal search FIRST: penalties only ever add cost, so
+    /// an optimal path that enters no danger tile is also optimal with the penalties —
+    /// served as-is, at full speed (JPS / bidir / race). Only when it does enter one
+    /// does the penalized search run (see [`engine_adapter::run_penalized_route`]).
+    fn run_search(
+        &self,
+        engine: engine_adapter::EngineChoice,
+        cancel: &std::sync::atomic::AtomicBool,
+        pool: &Arc<crate::ContextPool>,
+    ) -> (engine_adapter::SearchOutcome, Option<u32>) {
+        let (outcome, entry) = self.run_search_plain(engine, cancel, pool);
+        let Some(danger) = self.danger.as_deref() else { return (outcome, entry) };
+        if !outcome.res.found
+            || !danger.path_enters(&outcome.res.path, !self.used_virtual_start)
+            || cancel.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return (outcome, entry);
+        }
+        let arts = self.artifacts.as_ref().expect("profile artifacts resolved for fresh searches");
+        let neighbors = self.cur.neighbors.clone().expect("neighbors are loaded with the snapshot");
+        let mut lease = pool.checkout();
+        let (avoid, avoid_entry) = engine_adapter::run_penalized_route(
+            self.snap().clone(),
+            neighbors,
+            (!self.used_virtual_start).then_some(self.sid),
+            self.gid,
+            self.goals.as_deref(),
+            self.seed,
+            Some(cancel),
+            arts,
+            danger.penalty(),
+            &mut lease,
+        );
+        if !avoid.res.found {
+            // Only a budget/cancel truncation gets here (same graph, so the plain
+            // search's path exists): keep the plain route rather than none.
+            warn!(sid = self.sid, gid = self.gid, status = ?avoid.res.status, pops = avoid.res.pops,
+                  "danger-avoiding search gave up; serving the unpenalized route");
+            return (outcome, entry);
+        }
+        (avoid, avoid_entry)
+    }
+
+    fn run_search_plain(
+        &self,
+        engine: engine_adapter::EngineChoice,
+        cancel: &std::sync::atomic::AtomicBool,
+        pool: &Arc<crate::ContextPool>,
+    ) -> (engine_adapter::SearchOutcome, Option<u32>) {
+        let arts = self.artifacts.as_ref().expect("profile artifacts resolved for fresh searches");
+        let cur = &self.cur;
+        let neighbors = cur.neighbors.clone().expect("neighbors are loaded with the snapshot");
+        let mut lease = pool.checkout();
+        if let Some(goals) = self.goals.as_deref() {
+            return if self.used_virtual_start {
+                engine_adapter::run_area_route_virtual_start(
+                    self.snap().clone(),
+                    neighbors,
+                    cur.neighbors_rev.clone(),
+                    goals,
+                    self.gid,
+                    self.seed,
+                    Some(cancel),
+                    arts,
+                    cur.canonical_grid.clone(),
+                    engine,
+                    &mut lease,
+                )
+            } else {
+                (
+                    engine_adapter::run_area_route(
+                        self.snap().clone(),
+                        neighbors,
+                        cur.neighbors_rev.clone(),
+                        self.sid,
+                        goals,
+                        self.gid,
+                        &self.mask,
+                        self.seed,
+                        Some(cancel),
+                        arts,
+                        cur.canonical_grid.clone(),
+                        engine,
+                        &mut lease,
+                    ),
+                    None,
+                )
+            };
+        }
+        if self.used_virtual_start {
+            engine_adapter::run_route_with_requirements_virtual_start(
+                self.snap().clone(),
+                neighbors,
+                cur.neighbors_rev.clone(),
+                self.gid,
+                self.seed,
+                Some(cancel),
+                arts,
+                cur.canonical_grid.clone(),
+                engine,
+                &mut lease,
+            )
+        } else {
+            (
+                engine_adapter::run_route_with_requirements_and_fairy_rings(
+                    self.snap().clone(),
+                    neighbors,
+                    cur.neighbors_rev.clone(),
+                    self.sid,
+                    self.gid,
+                    &self.mask,
+                    self.seed,
+                    Some(cancel),
+                    arts,
+                    cur.canonical_grid.clone(),
+                    engine,
+                    &mut lease,
+                ),
+                None,
+            )
+        }
+    }
+
+    /// Wrap a search outcome for the handler: share the result (one allocation for the
+    /// response, the route cache and the sub-path cache), index it for sub-path reuse,
+    /// and build + serialize the payload — all on the calling blocking thread.
+    fn finish(&self, outcome: engine_adapter::SearchOutcome, virtual_entry: Option<u32>, search_us: u64) -> RouteTaskOut {
+        let res = Arc::new(outcome.res);
+        let payload = self.payload(res.found, &res.path, virtual_entry);
+        // With danger areas configured, only PLAIN (unpenalized) optima that enter no
+        // danger tile are indexed: they (and every slice of them) are optimal with AND
+        // without avoidance, so the sub-path cache stays valid for both kinds of
+        // request. A penalized result is never indexed — its detour is not the plain
+        // optimum an `avoidDangerAreas=0` request must get.
+        let subpath_ok = self.index_subpath
+            && outcome.engine != engine_adapter::PENALIZED_ENGINE
+            && !self.cur.active_danger().is_some_and(|d| d.path_enters(&res.path, false));
+        let subpath_rec = if subpath_ok { crate::PathRecord::new(res.clone()) } else { None };
+        RouteTaskOut {
+            res,
+            virtual_entry,
+            payload,
+            subpath_rec,
+            retried: outcome.retried,
+            attempts_pops: outcome.attempts_pops,
+            seed_dropped: outcome.seed_dropped,
+            engine: outcome.engine,
+            search_us,
+        }
+    }
+}
+
+/// Everything the blocking task computes for one fresh search; carried back to the
+/// handler for the caches, the response, metrics, and the log line.
+struct RouteTaskOut {
+    res: Arc<navpath_core::SearchResult>,
+    virtual_entry: Option<u32>,
+    payload: Payload,
+    subpath_rec: Option<Arc<crate::PathRecord>>,
+    retried: bool,
+    attempts_pops: [u32; 3],
+    seed_dropped: bool,
+    engine: &'static str,
+    search_us: u64,
+}
+
+/// A request answered without a search: a route-cache entry or a slice of a cached
+/// optimal path.
+enum Hit {
+    Cached(crate::RouteCacheEntry),
+    Subpath(crate::SubpathHit),
+}
+
+impl Hit {
+    fn path(&self) -> &[u32] {
+        match self {
+            Hit::Cached(e) => &e.res.path,
+            Hit::Subpath(h) => h.path(),
+        }
+    }
+}
+
+/// What the response, the metrics and the log line need from a finished request.
+struct Served {
+    found: bool,
+    status: navpath_core::SearchStatus,
+    /// The response cost: the actions' sum (see [`Payload::cost`]).
+    cost: f32,
+    /// The search's own path cost (diagonal tie-break, seed jitter, no hops) — logged.
+    engine_cost: f32,
+    length_tiles: usize,
+    pops: u32,
+    pops_f: u32,
+    pops_b: u32,
+    retried: bool,
+    attempts_pops: [u32; 3],
+    seed_dropped: bool,
+    engine: &'static str,
+    search_us: u64,
+    payload: Payload,
+}
+
+impl Served {
+    fn from_hit(hit: &Hit, payload: Payload) -> Self {
+        match hit {
+            Hit::Cached(e) => Served {
+                found: e.res.found,
+                status: e.res.status,
+                cost: payload.cost.map_or(e.res.cost, |c| c as f32),
+                engine_cost: e.res.cost,
+                length_tiles: e.res.path.len(),
+                pops: e.res.pops,
+                pops_f: e.res.pops_f,
+                pops_b: e.res.pops_b,
+                retried: false,
+                attempts_pops: [0, 0, 0],
+                seed_dropped: e.seed_dropped,
+                engine: "cache",
+                search_us: 0,
+                payload,
+            },
+            Hit::Subpath(h) => Served {
+                found: true,
+                status: navpath_core::SearchStatus::Found,
+                cost: payload.cost.map_or(h.cost(), |c| c as f32),
+                engine_cost: h.cost(),
+                length_tiles: h.pg - h.ps + 1,
+                pops: 0,
+                pops_f: 0,
+                pops_b: 0,
+                retried: false,
+                attempts_pops: [0, 0, 0],
+                seed_dropped: false,
+                engine: "cache",
+                search_us: 0,
+                payload,
+            },
+        }
+    }
+
+    fn from_search(out: RouteTaskOut) -> Self {
+        Served {
+            found: out.res.found,
+            status: out.res.status,
+            cost: out.payload.cost.map_or(out.res.cost, |c| c as f32),
+            engine_cost: out.res.cost,
+            length_tiles: out.res.path.len(),
+            pops: out.res.pops,
+            pops_f: out.res.pops_f,
+            pops_b: out.res.pops_b,
+            retried: out.retried,
+            attempts_pops: out.attempts_pops,
+            seed_dropped: out.seed_dropped,
+            engine: out.engine,
+            search_us: out.search_us,
+            payload: out.payload,
+        }
+    }
+}
+
+/// Cache hits whose path is at most this many nodes are answered on the reactor
+/// (T3.11): building (and pricing) their actions is
+/// microseconds, less than the `spawn_blocking` round trip it used to take.
+const INLINE_HIT_PAYLOAD_NODES: usize = 256;
+
+/// Process-lifetime service counters (see [`crate::Metrics`]) plus the live route-cache
+/// state and the policy in force — so a zero hit rate can be diagnosed from one call:
+/// `cache_miss_seed` is how many requests `NAVPATH_CACHE_IGNORE_SEED=1` would convert
+/// into hits, `cache_miss_cold` is how many no cache policy can help.
+pub async fn stats(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let cur = state.current.load();
+    let mut out = state.metrics.snapshot_json();
+    let (entries, capacity) = cur
+        .route_cache
+        .as_ref()
+        .and_then(|c| c.lock().ok().map(|c| (c.len(), c.cap().get())))
+        .unwrap_or((0, 0));
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert(
+            "route_cache".to_string(),
+            serde_json::json!({
+                "enabled": cur.route_cache.is_some(),
+                "entries": entries,
+                "capacity": capacity,
+                "ignore_seed": crate::cache_ignore_seed(),
+            }),
+        );
+        obj.insert("subpath_cache".to_string(), serde_json::json!({
+            "enabled": cur.subpath_cache.is_some(),
+            "paths_per_profile": crate::subpath_cache_paths(),
+        }));
+        obj.insert("seeding_disabled".to_string(), serde_json::json!(seeding_disabled()));
+        obj.insert("race_enabled".to_string(), serde_json::json!(race_enabled()));
+        obj.insert("race".to_string(), serde_json::json!({
+            "primary": race_primary().as_str(),
+            "hedge_ms": race_hedge_delay().as_secs_f64() * 1000.0,
+            "gate": race_gate(),
+        }));
+        obj.insert("search_permits".to_string(), serde_json::json!({
+            "total": state.search_permits.total(),
+            "available": state.search_permits.available(),
+        }));
+        obj.insert("ctx_pool".to_string(), serde_json::json!({
+            "idle": state.ctx_pool.idle(),
+            "fresh_allocations": state.ctx_pool.fresh_allocations(),
+        }));
+        obj.insert("ready".to_string(), serde_json::json!(state.ready.load(std::sync::atomic::Ordering::Acquire)));
+    }
+    Json(out)
+}
+
+/// `NAVPATH_RACE=1`: hedged engine race (uni and bidir, first stable result wins, loser
+/// cancelled). Default off. The second engine (the hedge) needs a spare search permit
+/// (see [`crate::SearchPermits::try_acquire_hedge`]); without one the request runs the
+/// primary engine alone. See [`race_hedge_delay`], [`race_gate`] and
+/// [`race_primary`] for when the hedge starts.
+pub fn race_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        matches!(std::env::var("NAVPATH_RACE").ok().as_deref().map(str::trim), Some("1") | Some("true"))
+    })
+}
+
+/// `NAVPATH_RACE_HEDGE_MS` (T3.2a, default 0): start the hedge engine only if the
+/// primary has not finished within this many milliseconds; `0` starts both engines
+/// together. Applies to the misses the gate lets race. Tokio's timer has 1 ms
+/// granularity, so a delay of `D` starts the hedge between `D` and `D+1` ms in.
+/// Default 0 because a delay only pays where the gate is off: over the same sweeps a
+/// 1 ms delay saved 6-11% CPU for +0-11% latency sum (long searches dominate CPU and
+/// still hedge), while the gate removes most hedges with no latency cost.
+pub fn race_hedge_delay() -> std::time::Duration {
+    static D: OnceLock<std::time::Duration> = OnceLock::new();
+    *D.get_or_init(|| {
+        let ms = std::env::var("NAVPATH_RACE_HEDGE_MS").ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(RACE_HEDGE_MS_DEFAULT);
+        std::time::Duration::from_secs_f64(ms / 1000.0)
+    })
+}
+const RACE_HEDGE_MS_DEFAULT: f64 = 0.0;
+
+/// `NAVPATH_RACE_GATE` (T3.2b, default on; `0` races every miss): hedge only routes the
+/// [`engine_adapter::RaceHint`] predicts the second engine can win — for a bidir
+/// primary, teleport-dominated routes or `h(start)` >= 20 s; for a JPS/uni primary,
+/// heuristic-blind routes (`h = 0`). Every other miss runs the primary engine alone.
+/// Measured (examples/race_sweep, see `RaceHint`): latency sum within 0-2% of racing
+/// every miss with identical p99/max, 4-49% less race CPU, and with a JPS primary the
+/// hedge (second permit, second context lease, second blocking thread) runs on 2-3% of
+/// misses instead of all of them.
+pub fn race_gate() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| !matches!(std::env::var("NAVPATH_RACE_GATE").ok().as_deref().map(str::trim), Some("0") | Some("false")))
+}
+
+/// Which engine a race starts first; the other one is the hedge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RacePrimary {
+    /// The engine expected to win: the unidirectional engine when jump-point expansion
+    /// applies to the search (`NAVPATH_JPS=1`, canonical grid loaded, unseeded), else
+    /// bidirectional. Measured with `examples/race_sweep` (2026-09-25, 300-400 LCG pairs
+    /// per config): JPS beats bidir on 383-386/400 all-eligible pairs and 294/300 gated
+    /// ones; without JPS (seeded, or `NAVPATH_JPS=0`) bidir is the better single engine
+    /// (sum of per-pair times ~0.5-0.6x of plain uni).
+    Auto,
+    Uni,
+    Bidir,
+}
+
+impl RacePrimary {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RacePrimary::Auto => "auto",
+            RacePrimary::Uni => "uni",
+            RacePrimary::Bidir => "bidir",
+        }
+    }
+}
+
+/// `NAVPATH_RACE_PRIMARY=auto|uni|bidir` (default `auto`, see [`RacePrimary`]). The
+/// primary is also the engine a race-eligible miss runs alone when the hedge does not
+/// start (gated, finished inside the delay, or no spare permit).
+pub fn race_primary() -> RacePrimary {
+    static P: OnceLock<RacePrimary> = OnceLock::new();
+    *P.get_or_init(|| match std::env::var("NAVPATH_RACE_PRIMARY").ok().as_deref().map(str::trim) {
+        Some("uni") | Some("jps") => RacePrimary::Uni,
+        Some("bidir") => RacePrimary::Bidir,
+        _ => RacePrimary::Auto,
+    })
+}
+
+/// Resolve the race primary for one request.
+fn primary_is_uni(seed: Option<u64>, canonical_loaded: bool) -> bool {
+    match race_primary() {
+        RacePrimary::Uni => true,
+        RacePrimary::Bidir => false,
+        RacePrimary::Auto => seed.is_none() && canonical_loaded && navpath_core::engine::search::jps_enabled(),
+    }
+}
+
+/// Server-side seed kill switch (`--no-seed` / `NAVPATH_IGNORE_SEED=1`, default off —
+/// plan v3 §3b): every request is treated as unseeded even when the client sends a
+/// seed. The seed is cleared at ingestion, so everything downstream — search engine,
+/// retry ladder, cache keys, miss attribution — sees an unseeded request: no edge
+/// jitter, canonical pruning engages, the seeded retry rungs never run. Responses to
+/// requests that DID send a seed carry `degraded: "seed_ignored"` (contract rewrites
+/// must be visible — same rule as `seed_dropped`).
+pub fn seeding_disabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        matches!(std::env::var("NAVPATH_IGNORE_SEED").ok().as_deref().map(str::trim), Some("1") | Some("true"))
+    })
+}
+
+/// The request profile's eligibility mask over the snapshot's requirement tags.
+fn request_mask(snap: &navpath_core::Snapshot, profile: &Profile) -> navpath_core::eligibility::EligibilityMask {
+    build_mask_from_u32(
+        snap.req_tags(),
+        profile.requirements.iter().filter_map(|kv| {
+            let (k, v) = (&kv.key, &kv.value);
+            if let Some(n) = v.as_i64() {
+                Some((k.as_str(), ClientValue::Num(n)))
+            } else if let Some(u) = v.as_u64() {
+                Some((k.as_str(), ClientValue::Num(u as i64)))
+            } else if let Some(b) = v.as_bool() {
+                Some((k.as_str(), ClientValue::Num(if b { 1 } else { 0 })))
+            } else if let Some(s) = v.as_str() {
+                let st = s.trim();
+                if let Ok(n) = st.parse::<i64>() {
+                    Some((k.as_str(), ClientValue::Num(n)))
+                } else {
+                    Some((k.as_str(), ClientValue::Str(st)))
+                }
+            } else {
+                None
+            }
+        }),
+    )
+}
+
+/// The profile's per-snapshot search artifacts, from the LRU or built (and cached).
+/// With exclusions they are built for this request alone and the cache is not touched.
+fn profile_artifacts(
+    cur: &SnapshotState,
+    neighbors: &navpath_core::NeighborProvider,
+    profile_key: &crate::ProfileKey,
+    mask: &navpath_core::eligibility::EligibilityMask,
+    quick_tele: bool,
+    portable_fairy: bool,
+    exclusions: Option<&Arc<engine_adapter::Exclusions>>,
+) -> Arc<engine_adapter::ProfileArtifacts> {
+    if let Some(ex) = exclusions {
+        return Arc::new(engine_adapter::build_profile_artifacts_excluding(
+            neighbors,
+            cur.neighbors_rev.as_deref(),
+            cur.globals.as_slice(),
+            cur.fairy_rings.as_slice(),
+            mask,
+            quick_tele,
+            portable_fairy,
+            Some(ex.clone()),
+        ));
+    }
+    let hit = cur.profile_cache.lock().ok().and_then(|mut c| c.get(profile_key).cloned());
+    match hit {
+        Some(a) => a,
+        None => {
+            let built = Arc::new(engine_adapter::build_profile_artifacts(
+                neighbors,
+                cur.neighbors_rev.as_deref(),
+                cur.globals.as_slice(),
+                cur.fairy_rings.as_slice(),
+                mask,
+                quick_tele,
+                portable_fairy,
+            ));
+            if let Ok(mut c) = cur.profile_cache.lock() {
+                c.put(profile_key.clone(), built.clone());
+            }
+            built
+        }
+    }
+}
+
+type RouteResult = Result<axum::response::Response, (StatusCode, String)>;
+
+pub async fn route(State(state): State<AppState>, Json(mut req): Json<RouteRequest>) -> RouteResult {
+    let start = std::time::Instant::now();
+    // Seed kill switch: clear before ANY reader (cache key, shadow attribution,
+    // search) so the request is unseeded everywhere, not just in the engine.
+    let seed_ignored = seeding_disabled() && req.seed.take().is_some();
+    let metrics = state.metrics.clone();
+    metrics.requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if !state.ready.load(std::sync::atomic::Ordering::Acquire) {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "warming up (snapshot populate / context pre-warm); retry".into()));
+    }
+    // One reference to this request's snapshot generation; everything below borrows it.
+    let cur: Arc<SnapshotState> = state.current.load_full();
+    let Some(snap) = cur.snapshot.as_ref() else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "snapshot not loaded".into()));
+    };
+    let Some(neighbors) = cur.neighbors.as_ref() else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "neighbors not loaded".into()));
+    };
+    let counts = snap.counts();
+
+    // Resolve node ids
+    let (sid, gid, used_virtual_start) = match (req.start_id, req.goal_id, req.start.as_ref(), req.goal.as_ref()) {
+        (Some(sid), Some(gid), _, _) => (sid, gid, false),
+        (_, _, Some(s), Some(g)) => {
+            // Coordinate lookup is a binary search over the snapshot's packed-coords
+            // section (node ids are assigned in packed-key order) — no heap index.
+            let Some(gid) = snap.find_node(g.wx, g.wy, g.plane) else { return Err((StatusCode::BAD_REQUEST, "goal tile not found in snapshot".into())); };
+
+            // If the start coordinate isn't present in the snapshot, do NOT snap to a nearby tile.
+            // Treat it as out-of-graph and force entry via a global teleport.
+            let (sid, used_virtual_start) = if let Some(sid) = snap.find_node(s.wx, s.wy, s.plane) {
+                (sid, false)
+            } else {
+                info!(
+                    start_x = s.wx, start_y = s.wy, start_plane = s.plane,
+                    "start coordinate not found in snapshot; will force global teleport entry"
+                );
+                (0, true)
+            };
+            (sid, gid, used_virtual_start)
+        }
+        _ => {
+            return Err((StatusCode::BAD_REQUEST, "missing start/goal; provide start_id/goal_id or start/goal with {wx,wy,plane}".into()));
+        }
+    };
+    if (!used_virtual_start && sid >= counts.nodes) || gid >= counts.nodes {
+        return Err((StatusCode::BAD_REQUEST, "start_id/goal_id out of range".into()));
+    }
+
+    let quick_tele = req_has_quick_tele(&req.profile.requirements);
+    let portable_fairy = req_has_portable_fairy(&req.profile.requirements);
+    let danger = if req_avoid_danger(&req.profile.requirements) { cur.active_danger().cloned() } else { None };
+
+    let mask = request_mask(snap, &req.profile);
+    let exclusions = request_exclusions(&cur, snap, req.exclude_macros.as_deref());
+    // Excluding requests bypass the route and sub-path caches both ways: their results
+    // are not the profile's, and a cached profile result may use what they exclude.
+    let shared_caches = exclusions.is_none();
+
+    // Route results are pure functions of (snapshot, endpoints, eligibility, seed);
+    // repeated requests hit the per-snapshot LRU and skip the search entirely (payload
+    // is still rebuilt per request so one entry serves every options combination).
+    let mask_bits = crate::pack_mask_bits(&mask.satisfied);
+    let profile_key: crate::ProfileKey = (mask_bits.clone(), quick_tele, portable_fairy);
+    let cache_key = crate::RouteCacheKey {
+        virtual_start: used_virtual_start,
+        sid: if used_virtual_start { 0 } else { sid },
+        gid,
+        mask_bits,
+        quick_tele,
+        portable_fairy,
+        seed: if crate::cache_ignore_seed() { None } else { req.seed },
+        avoid_danger: danger.is_some(),
+    };
+    let cached: Option<crate::RouteCacheEntry> = cur
+        .route_cache
+        .as_ref()
+        .filter(|_| shared_caches)
+        .and_then(|c| c.lock().ok().and_then(|mut c| c.get(&cache_key).cloned()));
+
+    // Exact sub-path reuse (crate::SubpathCache): both endpoints on a cached optimal
+    // path for this profile => serve the slice, no search. Virtual starts never qualify.
+    let mut goal_known = false;
+    // Cached slices carry UNSEEDED (base-cost) `path_g`; a seeded request may use them
+    // only under the seed-blind cache policy, exactly like the route cache.
+    let subpath_hit: Option<crate::SubpathHit> = if shared_caches && cached.is_none() && !used_virtual_start && (req.seed.is_none() || crate::cache_ignore_seed()) {
+        cur.subpath_cache.as_ref().and_then(|c| {
+            let (hit, known) = crate::subpath_lookup(c, &profile_key, sid, gid);
+            goal_known = known;
+            hit
+        })
+    } else {
+        None
+    };
+    let hit: Option<Hit> = match (cached, subpath_hit) {
+        (Some(e), _) => Some(Hit::Cached(e)),
+        (None, Some(h)) => Some(Hit::Subpath(h)),
+        (None, None) => None,
+    };
+    let subpath_served = matches!(hit, Some(Hit::Subpath(_)));
+
+    // Attribute the miss (see crate::SeedShadow). A seeded request whose seed-blind key
+    // is already known missed *because of the seed*; anything else is a genuinely new
+    // (endpoints, profile) pair. The shadow only exists under per-seed keying (T3.12),
+    // and the seed-blind key is rebuilt only where it is used.
+    let seed_blind_key = || crate::RouteCacheKey { seed: None, ..cache_key.clone() };
+    let cache_outcome = if subpath_served {
+        crate::CacheOutcome::Subpath
+    } else if cur.route_cache.is_none() || !shared_caches {
+        crate::CacheOutcome::Disabled
+    } else if hit.is_some() {
+        crate::CacheOutcome::Hit
+    } else if cache_key.seed.is_some()
+        && cur
+            .seed_shadow
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|mut s| s.get(&seed_blind_key()).is_some()))
+            .unwrap_or(false)
+    {
+        crate::CacheOutcome::MissSeed
+    } else {
+        crate::CacheOutcome::MissCold
+    };
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        match cache_outcome {
+            crate::CacheOutcome::MissSeed => { metrics.cache_miss_seed.fetch_add(1, Relaxed); }
+            crate::CacheOutcome::MissCold => { metrics.cache_miss_cold.fetch_add(1, Relaxed); }
+            _ => {}
+        }
+        if hit.is_none() && goal_known {
+            metrics.cache_miss_goal_known.fetch_add(1, Relaxed);
+        }
+    }
+
+    let virtual_start_from = if used_virtual_start {
+        req.start.as_ref().map(|c| (c.wx, c.wy, c.plane))
+    } else {
+        None
+    };
+    let seed = req.seed;
+    let mut job = RouteJob {
+        cur: cur.clone(),
+        artifacts: None,
+        mask,
+        sid,
+        gid,
+        goals: None,
+        used_virtual_start,
+        seed,
+        quick_tele,
+        portable_fairy,
+        return_geometry: req.options.return_geometry,
+        only_actions: req.options.only_actions,
+        surge: req.surge,
+        dive: req.dive,
+        virtual_start_from,
+        index_subpath: shared_caches && cur.subpath_cache.is_some() && !used_virtual_start && seed.is_none(),
+        danger,
+        exclusions: exclusions.clone(),
+    };
+
+    // ---- Cache / sub-path hit: no search, no permit. ----
+    if let Some(hit) = hit {
+        let job = Arc::new(job);
+        let virtual_entry = match &hit {
+            Hit::Cached(e) => e.virtual_entry,
+            Hit::Subpath(_) => None,
+        };
+        // Every found hit builds (prices) its actions, payload requested or not, so only
+        // short paths stay on the reactor.
+        let served = if hit.path().len() <= INLINE_HIT_PAYLOAD_NODES {
+            let payload = job.payload(hit_found(&hit), hit.path(), virtual_entry);
+            Served::from_hit(&hit, payload)
+        } else {
+            let task_job = job.clone();
+            tokio::task::spawn_blocking(move || {
+                let payload = task_job.payload(hit_found(&hit), hit.path(), virtual_entry);
+                Served::from_hit(&hit, payload)
+            })
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        };
+        return Ok(respond(&metrics, start, served, true, subpath_served, cache_outcome, seed_ignored));
+    }
+
+    // Per-profile search artifacts (roadmap 5.4): MacroFilters, eligible globals, fairy
+    // sets and the reachability view are pure functions of (snapshot, exact mask bits,
+    // quick_tele), so misses resolve them from the per-snapshot LRU instead of
+    // rebuilding. Cheap (a lock + at worst one ~1.7k-slot scan). Resolved before the
+    // precheck, which reads the profile's reachability view (T3.14).
+    let artifacts: Arc<engine_adapter::ProfileArtifacts> =
+        profile_artifacts(&cur, neighbors.as_ref(), &profile_key, &job.mask, quick_tele, portable_fairy, exclusions.as_ref());
+
+    // Exact reachability precheck (roadmap 4.1): eligibility never gates walk edges,
+    // so "can this goal be reached at all under this profile" is decided on the
+    // ~491-component condensation in microseconds — BEFORE a permit, a blocking
+    // thread, or a search context is committed. Every rejection here is a budget-capped
+    // ~1.5M-pop flood (plus its retry) that never ran. The verdict is exact, so the
+    // response is identical to what the flood would have produced.
+    if let Some(cg) = cur.comp_graph.as_ref() {
+        let comps = snap.comp_ids();
+        let start_comp = if used_virtual_start { None } else { Some(comps[sid as usize]) };
+        let goal_comp = comps[gid as usize];
+        if !artifacts.reach(cg, &job.mask).reachable(start_comp, goal_comp) {
+            use std::sync::atomic::Ordering::Relaxed;
+            metrics.precheck_rejects.fetch_add(1, Relaxed);
+            metrics.not_found.fetch_add(1, Relaxed);
+            let duration_us = start.elapsed().as_micros() as u64;
+            let duration_ms = (duration_us / 1000) as u128;
+            info!(duration_ms, sid, gid, virtual_start = used_virtual_start,
+                  "route rejected by component reachability precheck");
+            let resp = RouteResponse {
+                found: false,
+                cost: f32::INFINITY,
+                path: None,
+                length_tiles: 0,
+                duration_ms,
+                duration_us,
+                reason: None,
+                degraded: None,
+                actions: None,
+                geometry: None,
+            };
+            return Ok(json_response(&resp, 128));
+        }
+    }
+
+    // Offload search to a blocking thread, bounded by the search semaphore so a burst of
+    // slow queries cannot pin hundreds of blocking-pool threads (each holding
+    // node-sized search contexts). Overload fails fast instead of queueing floods. The
+    // permit moves into the blocking task and is released the moment the search itself
+    // finishes — payload building and response serialization must not count against
+    // search admission.
+    let Some(permit) = state.search_permits.try_acquire() else {
+        metrics.semaphore_rejects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        warn!(sid, gid, "search capacity exhausted; rejecting with 503");
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "search capacity exhausted; retry".into()));
+    };
+
+    // Hedged race (`NAVPATH_RACE=1`): the uni and bidir engines are both exact, so the
+    // served cost is identical either way; the race buys the per-pair minimum of two
+    // engines whose relative speed swings 3-5x in both directions depending on whether
+    // the route is walk- or teleport-dominated (docs/route_latency_improvements_2026-09-17.md
+    // §1.2/§2.1). The primary engine starts at once; the hedge (the other engine) starts
+    // only if the primary is still running after `NAVPATH_RACE_HEDGE_MS`, only when the
+    // predictive gate (if on) judges the route worth it, and only with a spare permit.
+    let race_possible = race_enabled() && engine_adapter::bidir_enabled() && cur.neighbors_rev.is_some();
+    let uni_primary = primary_is_uni(seed, cur.canonical_grid.is_some());
+    let (primary, hedge) = if uni_primary {
+        (engine_adapter::EngineChoice::Uni, engine_adapter::EngineChoice::Bidir)
+    } else {
+        (engine_adapter::EngineChoice::Bidir, engine_adapter::EngineChoice::Uni)
+    };
+    let race = race_possible && {
+        let worth = !race_gate() || {
+            let start_node = if used_virtual_start { None } else { Some(sid) };
+            engine_adapter::race_hint(snap, &artifacts, start_node, gid).worth_racing(uni_primary)
+        };
+        if !worth {
+            metrics.race_gated.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        worth
+    };
+    // Without a race the primary still runs when racing is configured (so gated routes
+    // use the engine the race would have started first); otherwise the shipped policy.
+    let single_engine = if race_possible { primary } else { engine_adapter::EngineChoice::Policy };
+    job.artifacts = Some(artifacts);
+    let job = Arc::new(job);
+
+    // Cooperative cancellation: one flag per engine (the race cancels only the loser);
+    // the disconnect guard and the route deadline flip every flag. The engine checks
+    // its flag every 1024 pops, and the retry ladder never starts a rung once it is set.
+    let cancel_flags: Arc<[Arc<std::sync::atomic::AtomicBool>]> =
+        (0..if race { 2 } else { 1 }).map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false))).collect();
+    struct CancelOnDrop(Arc<[Arc<std::sync::atomic::AtomicBool>]>, bool);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            if !self.1 {
+                for f in self.0.iter() {
+                    f.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+    }
+    let mut disconnect_guard = CancelOnDrop(cancel_flags.clone(), false);
+    let ctx_pool = state.ctx_pool.clone();
+
+    let work: std::pin::Pin<Box<dyn std::future::Future<Output = Result<RouteTaskOut, String>> + Send>> = if !race {
+        let job = job.clone();
+        let cancel = cancel_flags[0].clone();
+        let join = tokio::task::spawn_blocking(move || {
+            let t_search = std::time::Instant::now();
+            let (outcome, virtual_entry) = job.run_search(single_engine, &cancel, &ctx_pool);
+            let search_us = t_search.elapsed().as_micros() as u64;
+            drop(permit);
+            job.finish(outcome, virtual_entry, search_us)
+        });
+        Box::pin(async move { join.await.map_err(|e| e.to_string()) })
+    } else {
+        Box::pin(run_race(
+            RaceSetup {
+                job: job.clone(),
+                pool: ctx_pool,
+                permits: state.search_permits.clone(),
+                metrics: metrics.clone(),
+                flags: cancel_flags.clone(),
+                primary,
+                hedge,
+                delay: race_hedge_delay(),
+            },
+            permit,
+        ))
+    };
+    let out = match tokio::time::timeout(route_deadline(), work).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
+        Err(_) => {
+            for f in cancel_flags.iter() {
+                f.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            metrics.deadline_timeouts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            warn!(sid, gid, deadline_ms = route_deadline().as_millis() as u64, "route deadline exceeded; returning 504");
+            return Err((StatusCode::GATEWAY_TIMEOUT, "route deadline exceeded".into()));
+        }
+    };
+    // Search finished; disarm the disconnect guard so late drops don't poison anything.
+    disconnect_guard.1 = true;
+
+    // Populate the caches: the sub-path index was built in the blocking task (only for
+    // unseeded, on-graph, proven results), and both caches share the result's Arc.
+    let mut out = out;
+    if let (Some(c), Some(rec)) = (cur.subpath_cache.as_ref(), out.subpath_rec.take()) {
+        crate::subpath_insert(c, profile_key, rec);
+    }
+    // The route cache takes fresh, stable outcomes (Found / genuine NotFound only —
+    // budget or cancellation truncations, including truncated-found results whose cost
+    // is unproven, are transient and must not stick).
+    if shared_caches && matches!(out.res.status, navpath_core::SearchStatus::Found | navpath_core::SearchStatus::NotFound) {
+        if let Some(c) = cur.route_cache.as_ref() {
+            // Keeping the attribution index in step with what the cache actually holds
+            // is what stops `miss_seed` from claiming a hit the policy could not have
+            // delivered. Built before the key is moved into the cache.
+            let shadow = cur.seed_shadow.as_ref().map(|s| (s, seed_blind_key()));
+            if let Ok(mut c) = c.lock() {
+                c.put(
+                    cache_key,
+                    crate::RouteCacheEntry { res: out.res.clone(), virtual_entry: out.virtual_entry, seed_dropped: out.seed_dropped },
+                );
+                metrics.cache_puts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            if let Some((s, key)) = shadow {
+                if let Ok(mut s) = s.lock() {
+                    s.put(key, ());
+                }
+            }
+        }
+    }
+
+    Ok(respond(&metrics, start, Served::from_search(out), false, false, cache_outcome, seed_ignored))
+}
+
+fn hit_found(hit: &Hit) -> bool {
+    match hit {
+        Hit::Cached(e) => e.res.found,
+        Hit::Subpath(_) => true,
+    }
+}
+
+/// Metrics, optional dump, the per-request log line, and the single-pass response body.
+fn respond(
+    metrics: &crate::Metrics,
+    start: std::time::Instant,
+    s: Served,
+    cache_hit: bool,
+    subpath_served: bool,
+    cache_outcome: crate::CacheOutcome,
+    seed_ignored: bool,
+) -> axum::response::Response {
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        if subpath_served {
+            metrics.cache_subpath_hits.fetch_add(1, Relaxed);
+        } else if cache_hit {
+            metrics.cache_hits.fetch_add(1, Relaxed);
+        } else {
+            metrics.searches.fetch_add(1, Relaxed);
+            if s.retried {
+                metrics.retries.fetch_add(1, Relaxed);
+                if s.found {
+                    metrics.retry_found.fetch_add(1, Relaxed);
+                }
+            }
+            metrics.record_pops(s.pops as u64);
+            metrics.record_search_ms(s.search_us / 1000);
+            metrics.record_search_us(s.search_us, s.pops as u64);
+        }
+        match s.status {
+            navpath_core::SearchStatus::Found => metrics.found.fetch_add(1, Relaxed),
+            navpath_core::SearchStatus::NotFound => metrics.not_found.fetch_add(1, Relaxed),
+            navpath_core::SearchStatus::BudgetExceeded => metrics.budget_exceeded.fetch_add(1, Relaxed),
+            navpath_core::SearchStatus::Cancelled => metrics.cancelled.fetch_add(1, Relaxed),
+        };
+    }
+
+    let duration_us = start.elapsed().as_micros() as u64;
+    let duration_ms = (duration_us / 1000) as u128;
+    let reason = match s.status {
+        navpath_core::SearchStatus::BudgetExceeded => Some("budget_exceeded"),
+        navpath_core::SearchStatus::Cancelled => Some("cancelled"),
+        _ => None,
+    };
+    let degraded = if s.seed_dropped {
+        Some("seed_dropped")
+    } else if seed_ignored {
+        // The client sent a seed but the server runs with --no-seed: the served route
+        // is the deterministic unseeded optimum.
+        Some("seed_ignored")
+    } else {
+        None
+    };
+    let payload_us = s.payload.payload_us;
+    let size_hint = s.payload.len() + 256;
+    let resp = RouteResponse {
+        found: s.found,
+        cost: s.cost,
+        path: s.payload.path,
+        length_tiles: s.length_tiles,
+        duration_ms,
+        duration_us,
+        reason,
+        degraded,
+        actions: s.payload.actions,
+        geometry: s.payload.geometry,
+    };
+    if let Some(dump_path) = result_dump_path() {
+        if let Ok(bytes) = serde_json::to_vec_pretty(&resp) {
+            let _ = std::fs::write(dump_path, bytes);
+        }
+    }
+    info!(
+        duration_ms = duration_ms,
+        search_ms = s.search_us / 1000,
+        payload_ms = payload_us / 1000,
+        duration_us = duration_us,
+        search_us = s.search_us,
+        payload_us = payload_us,
+        // Memory-behaviour signal: ~150-230 warm, tens of thousands on a cold page cache.
+        ns_per_pop = if s.pops > 0 { s.search_us * 1000 / s.pops as u64 } else { 0 },
+        found = s.found,
+        cost = s.cost,
+        engine_cost = s.engine_cost,
+        length = s.length_tiles,
+        status = ?s.status,
+        pops = s.pops,
+        pops_f = s.pops_f,
+        pops_b = s.pops_b,
+        retried = s.retried,
+        first_attempt_pops = s.attempts_pops[0],
+        retry_pops = s.attempts_pops[1],
+        retry_unseeded_pops = s.attempts_pops[2],
+        seed_dropped = s.seed_dropped,
+        cache_hit = cache_hit,
+        // Which engine served it: uni | jps | bidir | cache (race winners are uni/jps/bidir).
+        engine = s.engine,
+        // Why the cache did/didn't serve this: hit | subpath | miss_seed | miss_cold | off.
+        cache = cache_outcome.as_str(),
+        "route request completed"
+    );
+    json_response(&resp, size_hint)
+}
+
+/// Inputs of one hedged race (see [`run_race`]).
+struct RaceSetup {
+    job: Arc<RouteJob>,
+    pool: Arc<crate::ContextPool>,
+    permits: Arc<crate::SearchPermits>,
+    metrics: Arc<crate::Metrics>,
+    /// Cancel flags: [primary, hedge].
+    flags: Arc<[Arc<std::sync::atomic::AtomicBool>]>,
+    primary: engine_adapter::EngineChoice,
+    hedge: engine_adapter::EngineChoice,
+    delay: std::time::Duration,
+}
+
+enum RaceMsg {
+    /// The arm that claimed the request, with its payload built on its own thread.
+    Done(RouteTaskOut),
+    /// An arm that did not claim: truncated (budget/cancel), or stable but second.
+    Truncated(engine_adapter::SearchOutcome, Option<u32>, u64),
+}
+
+fn stable(o: &engine_adapter::SearchOutcome) -> bool {
+    matches!(o.res.status, navpath_core::SearchStatus::Found | navpath_core::SearchStatus::NotFound)
+}
+
+/// Start one race arm on the blocking pool. The first arm to finish with a STABLE result
+/// (Found / genuine NotFound) claims the request: it cancels the other engine and builds
+/// the payload on its own thread, so the winning path costs no extra task hop. A
+/// truncated result (budget/cancel) never claims.
+fn spawn_race_arm(
+    setup: &RaceSetup,
+    engine: engine_adapter::EngineChoice,
+    idx: usize,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    claimed: &Arc<std::sync::atomic::AtomicBool>,
+    tx: &tokio::sync::mpsc::Sender<RaceMsg>,
+) {
+    let (job, pool, flags) = (setup.job.clone(), setup.pool.clone(), setup.flags.clone());
+    let (claimed, tx) = (claimed.clone(), tx.clone());
+    tokio::task::spawn_blocking(move || {
+        let t_search = std::time::Instant::now();
+        let (outcome, virtual_entry) = job.run_search(engine, &flags[idx], &pool);
+        let search_us = t_search.elapsed().as_micros() as u64;
+        drop(permit);
+        let won = stable(&outcome)
+            && claimed
+                .compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire)
+                .is_ok();
+        if won {
+            if let Some(other) = flags.get(1 - idx) {
+                other.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            let _ = tx.blocking_send(RaceMsg::Done(job.finish(outcome, virtual_entry, search_us)));
+        } else {
+            // Loser (or truncated): the receiver may already be gone.
+            let _ = tx.blocking_send(RaceMsg::Truncated(outcome, virtual_entry, search_us));
+        }
+    });
+}
+
+/// Run the primary engine and, per the hedge policy, the other engine; serve the first
+/// stable result. If both arms truncate, the better truncated result is served.
+async fn run_race(setup: RaceSetup, primary_permit: tokio::sync::OwnedSemaphorePermit) -> Result<RouteTaskOut, String> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<RaceMsg>(2);
+    let (primary, hedge, delay) = (setup.primary, setup.hedge, setup.delay);
+    spawn_race_arm(&setup, primary, 0, primary_permit, &claimed, &tx);
+
+    // Start the hedge: needs a spare permit (T3.1). Our sender is dropped once the hedge
+    // is decided, so the channel closes when every started arm has reported (or died).
+    let start_hedge = |setup: &RaceSetup, tx: &tokio::sync::mpsc::Sender<RaceMsg>| -> bool {
+        match setup.permits.try_acquire_hedge() {
+            Some(p) => {
+                setup.metrics.race_runs.fetch_add(1, Relaxed);
+                spawn_race_arm(setup, hedge, 1, p, &claimed, tx);
+                true
+            }
+            None => {
+                setup.metrics.race_hedge_denied.fetch_add(1, Relaxed);
+                false
+            }
+        }
+    };
+    let mut raced = false;
+    let mut tx = Some(tx);
+    let mut hedge_at: Option<tokio::time::Instant> = None;
+    if delay.is_zero() {
+        raced = start_hedge(&setup, tx.as_ref().expect("sender held until the hedge is decided"));
+        tx = None;
+    } else {
+        hedge_at = Some(tokio::time::Instant::now() + delay);
+    }
+
+    let mut truncated: Option<(engine_adapter::SearchOutcome, Option<u32>, u64)> = None;
+    loop {
+        let msg = match hedge_at {
+            Some(at) => tokio::select! {
+                biased;
+                m = rx.recv() => m,
+                _ = tokio::time::sleep_until(at) => {
+                    hedge_at = None;
+                    if let Some(tx) = tx.take() {
+                        raced = start_hedge(&setup, &tx);
+                    }
+                    continue;
+                }
+            },
+            None => rx.recv().await,
+        };
+        match msg {
+            Some(RaceMsg::Done(out)) => {
+                if raced {
+                    let ctr = if out.engine == "bidir" { &setup.metrics.race_wins_bidir } else { &setup.metrics.race_wins_uni };
+                    ctr.fetch_add(1, Relaxed);
+                } else if hedge_at.is_some() {
+                    setup.metrics.race_hedge_skipped.fetch_add(1, Relaxed);
+                }
+                return Ok(out);
+            }
+            Some(RaceMsg::Truncated(o, ve, us)) => {
+                // A stable loser also lands here (it lost the claim); the winner's Done
+                // is already in the channel or arriving, so keep waiting until the
+                // channel closes.
+                truncated = Some(match truncated.take() {
+                    None => (o, ve, us),
+                    Some((po, pve, pus)) => {
+                        if stable(&o) || (o.res.found && (!po.res.found || o.res.cost < po.res.cost)) { (o, ve, us) } else { (po, pve, pus) }
+                    }
+                });
+                // The primary gave up (budget) inside the hedge delay: hedge now — the
+                // other engine may prove the route within its own budget.
+                if hedge_at.take().is_some() {
+                    if let Some(tx) = tx.take() {
+                        raced = start_hedge(&setup, &tx);
+                    }
+                }
+            }
+            None => break,
+        }
+    }
+    let (o, ve, us) = truncated.ok_or_else(|| "race: no engine reported".to_string())?;
+    let job = setup.job.clone();
+    tokio::task::spawn_blocking(move || job.finish(o, ve, us)).await.map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------------
+// POST /route_area — the cheapest route to ANY tile of an area.
+//
+// A separate endpoint: `/route` (single goal tile) is untouched — its handler, caches,
+// engine race and response bytes are exactly as before. See docs/route_to_area_endpoint.md.
+// ---------------------------------------------------------------------------------
+
+/// Inclusive tile rectangle on one plane (`goal_area` of a `/route_area` request).
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub struct GoalArea {
+    pub min_wx: i32,
+    pub min_wy: i32,
+    pub max_wx: i32,
+    pub max_wy: i32,
+    pub plane: i32,
+}
+
+/// Most tiles a `/route_area` request may name: per field (a 64x64 `goal_area`, or 4096
+/// `goal_tiles`) and in the resolved set.
+pub const MAX_AREA_TILES: usize = 4096;
+
+#[derive(Debug, Deserialize)]
+pub struct AreaRouteRequest {
+    #[serde(default)] pub start_id: Option<u32>,
+    #[serde(default)] pub start: Option<NodeTile>,
+    /// Optional tie preference: among area tiles reached at exactly equal cost, prefer the
+    /// one nearest (Chebyshev, same plane first) to this tile, then the lowest node id.
+    #[serde(default)] pub goal: Option<NodeTile>,
+    /// The area as a rectangle; `goal_tiles` (any tiles, any planes) is unioned with it.
+    #[serde(default)] pub goal_area: Option<GoalArea>,
+    #[serde(default)] pub goal_tiles: Option<Vec<NodeTile>>,
+    #[serde(default)] pub profile: Profile,
+    #[serde(default)] pub options: RouteOptions,
+    #[serde(default)] pub surge: SurgeConfig,
+    #[serde(default)] pub dive: DiveConfig,
+    #[serde(default)] pub seed: Option<u64>,
+    #[serde(default)] pub exclude_macros: Option<Vec<ExcludeMacro>>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub struct TileRef {
+    pub wx: i32,
+    pub wy: i32,
+    pub plane: i32,
+}
+
+/// `/route` response fields plus the area outcome.
+#[derive(Debug, Serialize)]
+pub struct AreaRouteResponse {
+    pub found: bool,
+    pub cost: f32,
+    #[serde(skip_serializing_if = "Option::is_none")] pub path: Option<Box<serde_json::value::RawValue>>,
+    pub length_tiles: usize,
+    pub duration_ms: u128,
+    pub duration_us: u64,
+    #[serde(skip_serializing_if = "Option::is_none")] pub reason: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")] pub degraded: Option<&'static str>,
+    /// The area tile the path ends on — the first area tile it reaches. Absent on
+    /// found=false.
+    #[serde(skip_serializing_if = "Option::is_none")] pub goal_reached: Option<TileRef>,
+    /// Area tiles present in the snapshot.
+    pub goal_tiles_resolved: usize,
+    /// Of those, the tiles the search targeted: the ones a route can reach FIRST (see
+    /// [`entry_tiles`]) in a component the profile can reach.
+    pub goal_tiles_searched: usize,
+    #[serde(skip_serializing_if = "Option::is_none")] pub actions: Option<Box<serde_json::value::RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")] pub geometry: Option<Box<serde_json::value::RawValue>>,
+}
+
+/// Resolve `goal_area` ∪ `goal_tiles` to snapshot nodes (sorted, deduplicated; tiles
+/// missing from the snapshot are skipped). Errors are the 400 messages.
+pub fn resolve_area_goals(
+    snap: &navpath_core::Snapshot,
+    area: Option<GoalArea>,
+    tiles: Option<&[NodeTile]>,
+) -> Result<Vec<u32>, String> {
+    if area.is_none() && tiles.is_none() {
+        return Err("missing goal_area / goal_tiles".into());
+    }
+    let mut nodes: Vec<u32> = Vec::new();
+    if let Some(a) = area {
+        if a.max_wx < a.min_wx || a.max_wy < a.min_wy {
+            return Err("goal_area: max_wx/max_wy must be >= min_wx/min_wy".into());
+        }
+        let count = (a.max_wx - a.min_wx + 1) as i64 * (a.max_wy - a.min_wy + 1) as i64;
+        if count > MAX_AREA_TILES as i64 {
+            return Err(format!("goal_area too large: {count} tiles (max {MAX_AREA_TILES})"));
+        }
+        for wy in a.min_wy..=a.max_wy {
+            for wx in a.min_wx..=a.max_wx {
+                if let Some(n) = snap.find_node(wx, wy, a.plane) {
+                    nodes.push(n);
+                }
+            }
+        }
+    }
+    if let Some(t) = tiles {
+        if t.len() > MAX_AREA_TILES {
+            return Err(format!("goal_tiles too large: {} tiles (max {MAX_AREA_TILES})", t.len()));
+        }
+        nodes.extend(t.iter().filter_map(|t| snap.find_node(t.wx, t.wy, t.plane)));
+    }
+    nodes.sort_unstable();
+    nodes.dedup();
+    if nodes.len() > MAX_AREA_TILES {
+        return Err(format!("goal set too large: {} tiles (max {MAX_AREA_TILES})", nodes.len()));
+    }
+    if nodes.is_empty() {
+        return Err("no goal_area tile in snapshot".into());
+    }
+    Ok(nodes)
+}
+
+/// The tiles of `nodes` (sorted) that a route can reach FIRST — the only ones that can
+/// end it. A route entering the area by walking steps onto a tile with a walk neighbour
+/// outside the area (walk edges are symmetric), so interior tiles can only be first when
+/// something lands on them: a macro edge (door, stairs, teleport), a global teleport, or
+/// a fairy ring — or when the route starts there. Dropping every other tile is exact:
+/// same cost, same reached tile (each dropped tile is strictly costlier than the
+/// boundary tile its route crossed).
+pub fn entry_tiles(snap: &navpath_core::Snapshot, globals: &[engine_adapter::GlobalTeleport], nodes: &[u32], start: Option<u32>) -> Vec<u32> {
+    let member = |v: u32| nodes.binary_search(&v).is_ok();
+    let mut keep = vec![false; nodes.len()];
+    let mark = |v: u32, keep: &mut [bool]| {
+        if let Ok(i) = nodes.binary_search(&v) {
+            keep[i] = true;
+        }
+    };
+    for &d in snap.macro_dst() {
+        mark(d, &mut keep);
+    }
+    for g in globals {
+        mark(g.dst, &mut keep);
+    }
+    for &r in snap.fairy_nodes() {
+        mark(r, &mut keep);
+    }
+    if let Some(s) = start {
+        mark(s, &mut keep);
+    }
+    let (offsets, dst) = (snap.walk_offsets(), snap.walk_dst());
+    for (i, &t) in nodes.iter().enumerate() {
+        if keep[i] {
+            continue;
+        }
+        let (a, b) = (offsets[t as usize] as usize, offsets[t as usize + 1] as usize);
+        keep[i] = dst[a..b].iter().any(|&v| !member(v));
+    }
+    nodes.iter().zip(keep).filter(|(_, k)| *k).map(|(&n, _)| n).collect()
+}
+
+/// Tie rank of each goal: Chebyshev distance to the preferred tile, other planes after
+/// every same-plane tile; all 0 without a preference (lowest node id wins).
+fn area_tie_ranks(snap: &navpath_core::Snapshot, nodes: &[u32], pref: Option<&NodeTile>) -> Vec<(u32, u32)> {
+    let coords = snap.coords_packed();
+    nodes
+        .iter()
+        .map(|&n| {
+            let rank = match pref {
+                None => 0,
+                Some(p) => {
+                    let (x, y, pl) = navpath_core::snapshot::unpack_coord(coords[n as usize]);
+                    let d = (x - p.wx).unsigned_abs().max((y - p.wy).unsigned_abs()).min(1 << 20);
+                    if pl == p.plane { d } else { (1 << 21) + d }
+                }
+            };
+            (n, rank)
+        })
+        .collect()
+}
+
+fn tile_of(snap: &navpath_core::Snapshot, n: u32) -> TileRef {
+    let (wx, wy, plane) = navpath_core::snapshot::unpack_coord(snap.coords_packed()[n as usize]);
+    TileRef { wx, wy, plane }
+}
+
+pub async fn route_area(State(state): State<AppState>, Json(mut req): Json<AreaRouteRequest>) -> RouteResult {
+    use std::sync::atomic::Ordering::Relaxed;
+    let start = std::time::Instant::now();
+    let seed_ignored = seeding_disabled() && req.seed.take().is_some();
+    let metrics = state.metrics.clone();
+    metrics.area_requests.fetch_add(1, Relaxed);
+    if !state.ready.load(std::sync::atomic::Ordering::Acquire) {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "warming up (snapshot populate / context pre-warm); retry".into()));
+    }
+    let cur: Arc<SnapshotState> = state.current.load_full();
+    let Some(snap) = cur.snapshot.as_ref() else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "snapshot not loaded".into()));
+    };
+    let Some(neighbors) = cur.neighbors.as_ref() else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "neighbors not loaded".into()));
+    };
+    let counts = snap.counts();
+
+    // Start: id, or coordinates (off the snapshot = virtual start through a teleport).
+    let (sid, used_virtual_start) = match (req.start_id, req.start.as_ref()) {
+        (Some(sid), _) => (sid, false),
+        (None, Some(s)) => match snap.find_node(s.wx, s.wy, s.plane) {
+            Some(sid) => (sid, false),
+            None => {
+                info!(start_x = s.wx, start_y = s.wy, start_plane = s.plane,
+                      "route_area: start coordinate not found in snapshot; will force global teleport entry");
+                (0, true)
+            }
+        },
+        (None, None) => return Err((StatusCode::BAD_REQUEST, "missing start; provide start_id or start {wx,wy,plane}".into())),
+    };
+    if !used_virtual_start && sid >= counts.nodes {
+        return Err((StatusCode::BAD_REQUEST, "start_id out of range".into()));
+    }
+    let resolved = resolve_area_goals(snap, req.goal_area, req.goal_tiles.as_deref()).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let start_node = if used_virtual_start { None } else { Some(sid) };
+    let mut targets = entry_tiles(snap, &cur.globals, &resolved, start_node);
+
+    let quick_tele = req_has_quick_tele(&req.profile.requirements);
+    let portable_fairy = req_has_portable_fairy(&req.profile.requirements);
+    let danger = if req_avoid_danger(&req.profile.requirements) { cur.active_danger().cloned() } else { None };
+    let mask = request_mask(snap, &req.profile);
+    let mask_bits = crate::pack_mask_bits(&mask.satisfied);
+    let profile_key: crate::ProfileKey = (mask_bits, quick_tele, portable_fairy);
+    let exclusions = request_exclusions(&cur, snap, req.exclude_macros.as_deref());
+    let artifacts = profile_artifacts(&cur, neighbors.as_ref(), &profile_key, &mask, quick_tele, portable_fairy, exclusions.as_ref());
+
+    // Exact reachability (as /route's precheck): keep the tiles in components the
+    // profile can reach from this start; none left = found=false, no search.
+    if let Some(cg) = cur.comp_graph.as_ref() {
+        let comps = snap.comp_ids();
+        let reach = artifacts.reach(cg, &mask).reachable_comps(start_node.map(|s| comps[s as usize]));
+        targets.retain(|&n| reach(comps[n as usize]));
+    }
+    let resolved_count = resolved.len();
+    let searched_count = targets.len();
+    if targets.is_empty() {
+        metrics.area_not_found.fetch_add(1, Relaxed);
+        let duration_us = start.elapsed().as_micros() as u64;
+        info!(duration_us, sid, virtual_start = used_virtual_start, goal_tiles_resolved = resolved_count,
+              "route_area: no reachable area tile (component precheck)");
+        let resp = AreaRouteResponse {
+            found: false, cost: f32::INFINITY, path: None, length_tiles: 0,
+            duration_ms: (duration_us / 1000) as u128, duration_us, reason: None, degraded: None, goal_reached: None,
+            goal_tiles_resolved: resolved_count, goal_tiles_searched: 0, actions: None, geometry: None,
+        };
+        return Ok(json_response(&resp, 256));
+    }
+    let ranked = area_tie_ranks(snap, &targets, req.goal.as_ref());
+    // Representative (landmark ranking, engine policy, logs): the preferred tile.
+    let gid = ranked.iter().min_by_key(|&&(n, r)| (r, n)).map_or(targets[0], |p| p.0);
+    let goals = Arc::new(navpath_core::GoalSet::with_ranks(ranked));
+
+    let Some(permit) = state.search_permits.try_acquire() else {
+        metrics.semaphore_rejects.fetch_add(1, Relaxed);
+        warn!(sid, gid, "route_area: search capacity exhausted; rejecting with 503");
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "search capacity exhausted; retry".into()));
+    };
+    // ONE engine, chosen from the request alone (never a timing race), so the same
+    // request always ends on the same tile. Unseeded: the unidirectional engine (JPS
+    // when enabled), the one that resolves EXACT cost ties by the `goal` preference —
+    // and unseeded is where exact ties happen. Seeded (jitter makes ties vanishingly
+    // rare): the race's primary when racing is configured, else the shipped policy.
+    let engine = if req.seed.is_none() {
+        engine_adapter::EngineChoice::Uni
+    } else if race_enabled() && engine_adapter::bidir_enabled() && cur.neighbors_rev.is_some() {
+        if primary_is_uni(req.seed, cur.canonical_grid.is_some()) { engine_adapter::EngineChoice::Uni } else { engine_adapter::EngineChoice::Bidir }
+    } else {
+        engine_adapter::EngineChoice::Policy
+    };
+    let seed = req.seed;
+    let job = Arc::new(RouteJob {
+        cur: cur.clone(),
+        artifacts: Some(artifacts),
+        mask,
+        sid,
+        gid,
+        goals: Some(goals.clone()),
+        used_virtual_start,
+        seed,
+        quick_tele,
+        portable_fairy,
+        return_geometry: req.options.return_geometry,
+        only_actions: req.options.only_actions,
+        surge: req.surge,
+        dive: req.dive,
+        virtual_start_from: if used_virtual_start { req.start.as_ref().map(|c| (c.wx, c.wy, c.plane)) } else { None },
+        // Area results stay out of the shared caches: /route is unaffected.
+        index_subpath: false,
+        danger,
+        exclusions,
+    });
+
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    struct CancelOnDrop(Arc<std::sync::atomic::AtomicBool>, bool);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            if !self.1 {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+    let mut disconnect_guard = CancelOnDrop(cancel.clone(), false);
+    let (task_job, task_cancel, pool) = (job.clone(), cancel.clone(), state.ctx_pool.clone());
+    let join = tokio::task::spawn_blocking(move || {
+        let t_search = std::time::Instant::now();
+        let (outcome, virtual_entry) = task_job.run_search(engine, &task_cancel, &pool);
+        let search_us = t_search.elapsed().as_micros() as u64;
+        drop(permit);
+        task_job.finish(outcome, virtual_entry, search_us)
+    });
+    let out = match tokio::time::timeout(route_deadline(), join).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(_) => {
+            cancel.store(true, Relaxed);
+            metrics.deadline_timeouts.fetch_add(1, Relaxed);
+            warn!(sid, gid, deadline_ms = route_deadline().as_millis() as u64, "route_area deadline exceeded; returning 504");
+            return Err((StatusCode::GATEWAY_TIMEOUT, "route deadline exceeded".into()));
+        }
+    };
+    disconnect_guard.1 = true;
+
+    metrics.area_searches.fetch_add(1, Relaxed);
+    let res = &out.res;
+    match res.status {
+        navpath_core::SearchStatus::Found => metrics.area_found.fetch_add(1, Relaxed),
+        navpath_core::SearchStatus::NotFound => metrics.area_not_found.fetch_add(1, Relaxed),
+        _ => metrics.area_truncated.fetch_add(1, Relaxed),
+    };
+    let goal_reached = if res.found { res.path.last().map(|&n| tile_of(snap, n)) } else { None };
+    let duration_us = start.elapsed().as_micros() as u64;
+    let reason = match res.status {
+        navpath_core::SearchStatus::BudgetExceeded => Some("budget_exceeded"),
+        navpath_core::SearchStatus::Cancelled => Some("cancelled"),
+        _ => None,
+    };
+    let degraded = if out.seed_dropped { Some("seed_dropped") } else if seed_ignored { Some("seed_ignored") } else { None };
+    info!(
+        duration_us,
+        search_us = out.search_us,
+        payload_us = out.payload.payload_us,
+        found = res.found,
+        cost = out.payload.cost.unwrap_or(res.cost as f64),
+        engine_cost = res.cost,
+        length = res.path.len(),
+        status = ?res.status,
+        pops = res.pops,
+        pops_f = res.pops_f,
+        pops_b = res.pops_b,
+        retried = out.retried,
+        seed_dropped = out.seed_dropped,
+        engine = out.engine,
+        goal_tiles_resolved = resolved_count,
+        goal_tiles_searched = searched_count,
+        goal_reached = ?goal_reached,
+        "route_area request completed"
+    );
+    let size_hint = out.payload.len() + 384;
+    let resp = AreaRouteResponse {
+        found: res.found,
+        cost: out.payload.cost.map_or(res.cost, |c| c as f32),
+        length_tiles: res.path.len(),
+        path: out.payload.path,
+        duration_ms: (duration_us / 1000) as u128,
+        duration_us,
+        reason,
+        degraded,
+        goal_reached,
+        goal_tiles_resolved: resolved_count,
+        goal_tiles_searched: searched_count,
+        actions: out.payload.actions,
+        geometry: out.payload.geometry,
+    };
+    Ok(json_response(&resp, size_hint))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReloadResponse { pub reloaded: bool, pub snapshot_hash: Option<String>, pub loaded_at: u64 }
+
+pub async fn reload(State(state): State<AppState>, Query(q): Query<ReloadQuery>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    enum Built {
+        /// Snapshot and danger areas unchanged: keep the live state.
+        Unchanged,
+        /// Same snapshot, re-read danger areas changed: derived structures kept, result
+        /// caches emptied.
+        Danger(SnapshotState),
+        Snapshot(SnapshotState),
+    }
+    let cur = state.current.load_full();
+    let path = cur.path.clone();
+    let force = matches!(q.force.as_deref().map(str::trim), Some("1") | Some("true"));
+
+    // Snapshot open + provider/component/canonical builds are ~100 ms of CPU work —
+    // run them on the blocking pool so reactor threads keep serving requests.
+    let log_path = path.clone();
+    let serving = cur.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        // The file on disk is the snapshot already serving (same blake3 tail hash): keep
+        // the live state — mapping, derived structures and warm caches — but re-read the
+        // danger-areas file (it is edited independently of the snapshot). `?force=1`
+        // rebuilds anyway.
+        if !force {
+            if let Some(snap) = serving.snapshot.as_ref() {
+                let disk = crate::read_tail_hash_hex(&path);
+                if disk.is_some() && disk == serving.snapshot_hash_hex {
+                    let d = crate::danger::DangerAreas::load(snap, &path);
+                    let same = serving.danger.as_ref().is_some_and(|old| {
+                        old.areas == d.areas && old.penalty_ms.to_bits() == d.penalty_ms.to_bits()
+                    });
+                    return Ok(if same { Built::Unchanged } else { Built::Danger(serving.with_danger(Arc::new(d))) });
+                }
+            }
+        }
+        let new_snap = navpath_core::Snapshot::open(&path).map_err(|e| e.to_string())?;
+        // Page the new mapping in BEFORE it is swapped live.
+        let warm = crate::warm_snapshot(&new_snap);
+        let new_hash = new_snap.tail_hash_hex();
+        let st = SnapshotState::build(path, new_snap, new_hash);
+        st.set_warm_state(warm);
+        Ok::<Built, String>(Built::Snapshot(st))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let danger_json = |st: &SnapshotState| match st.danger.as_ref() {
+        Some(d) => serde_json::json!({ "file": d.path, "areas": d.areas.len(), "tiles": d.tiles, "penalty_ms": d.penalty_ms }),
+        None => serde_json::Value::Null,
+    };
+    match built {
+        Ok(Built::Snapshot(new_state)) => {
+            let new_hash = new_state.snapshot_hash_hex.clone();
+            state.current.store(Arc::new(new_state));
+            info!(path=?log_path, hash=?new_hash, "reloaded snapshot");
+            let latest = state.current.load();
+            Ok(Json(serde_json::json!({
+                "reloaded": true,
+                "snapshot_hash": latest.snapshot_hash_hex,
+                "loaded_at": latest.loaded_at_unix,
+                "danger_areas": danger_json(&latest),
+            })))
+        }
+        Ok(Built::Danger(new_state)) => {
+            state.current.store(Arc::new(new_state));
+            let latest = state.current.load();
+            info!(path=?log_path, hash=?latest.snapshot_hash_hex, "snapshot unchanged; danger areas reloaded (result caches cleared)");
+            Ok(Json(serde_json::json!({
+                "reloaded": false,
+                "unchanged": true,
+                "danger_areas_reloaded": true,
+                "snapshot_hash": latest.snapshot_hash_hex,
+                "loaded_at": latest.loaded_at_unix,
+                "danger_areas": danger_json(&latest),
+            })))
+        }
+        Ok(Built::Unchanged) => {
+            info!(path=?log_path, hash=?cur.snapshot_hash_hex, "snapshot and danger areas unchanged on disk; reload skipped (?force=1 rebuilds)");
+            Ok(Json(serde_json::json!({
+                "reloaded": false,
+                "unchanged": true,
+                "snapshot_hash": cur.snapshot_hash_hex,
+                "loaded_at": cur.loaded_at_unix,
+                "danger_areas": danger_json(&cur),
+            })))
+        }
+        Err(e) => {
+            warn!(error=%e, path=?log_path, "reload failed; keeping old snapshot");
+            Err((StatusCode::CONFLICT, e))
+        }
+    }
+}
+
+/// `POST /admin/reload?force=1` rebuilds even when the snapshot file is unchanged.
+#[derive(Debug, Deserialize, Default)]
+pub struct ReloadQuery {
+    #[serde(default)]
+    pub force: Option<String>,
+}
+
+#[cfg(test)]
+mod surge_dive_tests {
+    use super::*;
+    use crate::hops::{StepRule, HOP_MS, HOP_RANGE};
+
+    /// Open ground: every step is legal.
+    struct Open;
+    impl StepRule for Open {
+        fn can_step(&mut self, _x: i32, _y: i32, _p: i32, _dx: i32, _dy: i32) -> bool {
+            true
+        }
+    }
+
+    fn mv(x: i32, y: i32) -> Action {
+        Action::Move(MoveAction { kind: "move", to: [x, y, 0], cost_ms: 300.0 })
+    }
+
+    fn cfgs(surge: bool, dive: bool) -> (SurgeConfig, DiveConfig) {
+        (
+            SurgeConfig { enabled: surge, charges: 2, cooldown_ms: 10200.0 },
+            DiveConfig { enabled: dive, available_in_ms: 0.0, cooldown_ms: 10200.0 },
+        )
+    }
+
+    fn run(path: Vec<Action>, surge: bool, dive: bool) -> Vec<Action> {
+        let (s, d) = cfgs(surge, dive);
+        optimize_with_surge_dive(path, &s, &d, Some((0, 0, 0)), &mut Open, &crate::hop_knowledge::HopKnowledge::default())
+    }
+
+    fn abilities(actions: &[Action]) -> Vec<(&'static str, [i32; 3], [i32; 3])> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Ability(ab) => Some((ab.kind, ab.from, ab.to)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn total(actions: &[Action]) -> f64 {
+        actions.iter().map(Action::cost_ms_f64).sum()
+    }
+
+    /// Walk the output from `origin`: every ability must start where the character
+    /// stands, and every move must be one walk step. Returns the tiles visited.
+    fn covered_tiles(out: &[Action], origin: (i32, i32, i32)) -> Vec<[i32; 3]> {
+        let mut seen = vec![[origin.0, origin.1, origin.2]];
+        for a in out {
+            let here = *seen.last().unwrap();
+            match a {
+                Action::Ability(ab) => assert_eq!(ab.from, here, "ability starts where the character is"),
+                Action::Move(m) => assert!(
+                    (m.to[0] - here[0]).abs() <= 1 && (m.to[1] - here[1]).abs() <= 1,
+                    "move {:?} is not a step from {here:?}",
+                    m.to
+                ),
+                _ => {}
+            }
+            let (x, y, p) = a.to_coords();
+            seen.push([x, y, p]);
+        }
+        seen
+    }
+
+    /// Every emitted hop is within the game's reach (Chebyshev 10) and replaces exactly
+    /// the moves between its ends.
+    fn assert_all_abilities_in_range(out: &[Action]) {
+        for a in out {
+            if let Action::Ability(ab) = a {
+                let reach = (ab.to[0] - ab.from[0]).abs().max((ab.to[1] - ab.from[1]).abs());
+                assert!(reach <= HOP_RANGE, "{} reaches {reach} tiles from {:?} to {:?}", ab.kind, ab.from, ab.to);
+                assert_eq!(ab.cost_ms as f64, HOP_MS);
+            }
+        }
+    }
+
+    /// A surge and a dive chain: the second hop starts exactly where the first landed.
+    #[test]
+    fn chained_hops_start_on_the_previous_landing() {
+        let out = run((1..=30).map(|x| mv(x, 0)).collect(), true, true);
+        let abs = abilities(&out);
+        assert_eq!(abs.len(), 2, "{abs:?}");
+        assert_eq!(abs[1].1, abs[0].2);
+        assert_all_abilities_in_range(&out);
+        assert_eq!(*covered_tiles(&out, (0, 0, 0)).last().unwrap(), [30, 0, 0]);
+    }
+
+    /// Regression: an ability fires from the character's ACTUAL tile and the opening walk
+    /// steps stay in the payload (the origin is threaded through, never the first move's
+    /// destination).
+    #[test]
+    fn leading_ability_starts_on_the_walk_and_keeps_the_opening_steps() {
+        let out = run((1..=20).map(|x| mv(x, 0)).collect(), false, true);
+        // Reaction 700 ms: the dive goes from the tile reached at 900 ms, (3,0), to the
+        // furthest walk tile within 10.
+        assert_eq!(abilities(&out), vec![("dive", [3, 0, 0], [13, 0, 0])]);
+        let Action::Ability(ab) = &out[3] else { panic!("three moves, then the dive") };
+        assert_eq!(ab.tiles_covered, 10);
+        assert_eq!(*covered_tiles(&out, (0, 0, 0)).last().unwrap(), [20, 0, 0]);
+    }
+
+    /// Diagonal runs: 10 diagonal steps are within reach (Chebyshev 10, the game's
+    /// rule), and nothing further is ever emitted.
+    #[test]
+    fn diagonal_runs_stay_within_reach() {
+        let out = run((1..=40).map(|i| mv(i, i)).collect(), true, true);
+        assert!(!abilities(&out).is_empty());
+        assert_all_abilities_in_range(&out);
+        assert_eq!(*covered_tiles(&out, (0, 0, 0)).last().unwrap(), [40, 40, 0]);
+    }
+
+    /// A virtual start (a teleport) is a landing: no hop for 1.2 s, then from the tile
+    /// the character has reached.
+    #[test]
+    fn virtual_start_is_a_landing() {
+        let mut path: Vec<Action> = vec![Action::VirtualStart(Box::new(VirtualStartAction {
+            kind: "lodestone".to_string(),
+            from: MinMax::point(-1, -1, 0),
+            to: MinMax::point(0, 0, 0),
+            cost_ms: serde_json::Number::from(0),
+            macro_id: None,
+            metadata: serde_json::json!({}),
+        }))];
+        path.extend((1..=20).map(|x| mv(x, 0)));
+        let out = run(path, false, true);
+        assert_eq!(abilities(&out)[0].1, [4, 0, 0], "1,200 ms of walking after the landing");
+        assert_eq!(*covered_tiles(&out, (-1, -1, 0)).last().unwrap(), [20, 0, 0]);
+    }
+
+    #[test]
+    fn without_abilities_the_cost_is_the_walk_at_300_a_tile() {
+        let straight = run((1..=20).map(|x| mv(x, 0)).collect(), false, false);
+        assert_eq!(total(&straight), 20.0 * 300.0);
+        let diagonal = run((1..=20).map(|i| mv(i, i)).collect(), false, false);
+        assert_eq!(total(&diagonal), 20.0 * 300.0);
+    }
+
+    #[test]
+    fn hops_lower_the_cost_by_the_skipped_tiles_minus_the_hop_ticks() {
+        let walk: Vec<Action> = (1..=20).map(|x| mv(x, 0)).collect();
+        let n = walk.len();
+        let out = run(walk, true, true);
+        let hops: Vec<&AbilityAction> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::Ability(ab) => Some(ab),
+                _ => None,
+            })
+            .collect();
+        assert!(!hops.is_empty());
+        let skipped: usize = hops.iter().map(|h| h.tiles_covered).sum();
+        let want = n as f64 * 300.0 - skipped as f64 * 300.0 + hops.len() as f64 * HOP_MS;
+        assert_eq!(total(&out), want);
+        assert!(total(&out) < n as f64 * 300.0);
+    }
+
+    #[test]
+    fn interactions_are_landings_and_keep_their_cost() {
+        let mut path: Vec<Action> = (1..=5).map(|x| mv(x, 0)).collect();
+        path.push(Action::Teleport(TeleportAction {
+            kind: "teleport",
+            from: MinMax::point(5, 0, 0),
+            to: MinMax::point(100, 0, 0),
+            cost_ms: 2400,
+        }));
+        path.extend((101..=125).map(|x| mv(x, 0)));
+        let out = run(path, false, true);
+        let abs = abilities(&out);
+        // Nothing before the teleport (5 tiles is under the end gate); after the landing
+        // the dive waits out the 1.2 s hold: from (104,0).
+        assert_eq!(abs[0].1, [104, 0, 0]);
+        let walked = out.iter().filter(|a| matches!(a, Action::Move(_))).count();
+        assert_eq!(total(&out), walked as f64 * 300.0 + 2400.0 + abs.len() as f64 * HOP_MS);
+    }
+
+    fn learned_times() -> crate::hop_knowledge::HopKnowledge {
+        crate::hop_knowledge::HopKnowledge::from_files([(
+            "schedule-a.jsonl",
+            r#"{"k":"dead:ObjectNode:Climb-over","w":4.0,"s1":16000.0,"s2":0}
+{"k":"dead:ObjectNode","w":4.0,"s1":16000.0,"s2":0}
+{"k":"dead:IFSlotNode","w":1.0,"s1":1000.0,"s2":0}
+{"k":"dead:LodestoneNode","w":1.0,"s1":9600.0,"s2":0}
+{"k":"lock:LodestoneNode","w":1.0,"s1":4800.0,"s2":0}"#,
+        )])
+    }
+
+    #[test]
+    fn learned_interaction_times_replace_the_step_costs() {
+        let k = learned_times();
+        let step = |kind: &str, action: Option<&str>, cost: f64| {
+            let mut db = serde_json::json!({});
+            if let Some(a) = action {
+                db["action"] = serde_json::Value::String(a.to_string());
+            }
+            serde_json::json!({ "kind": kind, "cost_ms": cost, "db_row": db })
+        };
+        // One object step: the learned time ((16,000 + 3,000) / 5 = 3,800 ms) replaces 1,200.
+        let meta = serde_json::json!({ "steps": [step("object", Some("Climb-over"), 1200.0)] });
+        assert_eq!(learned_macro_cost("object", &meta, 1200.0, &k, false), (3800.0, Some("ObjectNode:Climb-over".into())));
+        // A chain: the NPC (never timed by the client) keeps its 4,500; the interface
+        // after it takes its learned (1,000 + 3,000) / 2 = 2,000 instead of 300.
+        let meta = serde_json::json!({ "steps": [step("npc", Some("Charter"), 4500.0), step("ifslot", None, 300.0)] });
+        assert_eq!(learned_macro_cost("npc", &meta, 4800.0, &k, false), (6500.0, Some("NpcNode:Charter".into())));
+        // Lodestones keep the quick-tele cost; without it they take the learned time.
+        let meta = serde_json::json!({ "steps": [step("lodestone", None, 17000.0)] });
+        assert_eq!(learned_macro_cost("lodestone", &meta, 5000.0, &k, true).0, 5000.0);
+        assert_eq!(learned_macro_cost("lodestone", &meta, 17000.0, &k, false).0, ((9600.0 + 10800.0) / 2.0_f64).round());
+        // Nothing learned: unchanged.
+        let none = crate::hop_knowledge::HopKnowledge::default();
+        let meta = serde_json::json!({ "steps": [step("object", Some("Climb-over"), 1200.0)] });
+        assert_eq!(learned_macro_cost("object", &meta, 1200.0, &none, false).0, 1200.0);
+    }
+
+    #[test]
+    fn a_learned_landing_hold_delays_the_first_hop() {
+        let k = learned_times();
+        let lodestone = |cost_ms: f64| {
+            Action::Macro(Box::new(MacroAction {
+                kind: "lodestone",
+                from: MinMax::point(5, 0, 0),
+                to: MinMax::point(100, 0, 0),
+                cost_ms,
+                node: NodeRef { kind: "lodestone", id: 1 },
+                macro_id: MacroId { kind: "lodestone", id: 1 },
+                metadata: serde_json::Value::Null,
+                client_key: Some("LodestoneNode".into()),
+            }))
+        };
+        let mut path: Vec<Action> = (1..=5).map(|x| mv(x, 0)).collect();
+        path.push(lodestone(5000.0));
+        path.extend((101..=130).map(|x| mv(x, 0)));
+        let (s, d) = cfgs(false, true);
+        let out = optimize_with_surge_dive(path, &s, &d, Some((0, 0, 0)), &mut Open, &k);
+        // (4,800 + 1,200) / 2 = 3,000 ms held after the landing: 10 tiles walked first.
+        assert_eq!(abilities(&out)[0].1, [110, 0, 0]);
+        // Without learned data the 1.2 s default applies (4 tiles).
+        let mut path: Vec<Action> = (1..=5).map(|x| mv(x, 0)).collect();
+        path.push(lodestone(5000.0));
+        path.extend((101..=130).map(|x| mv(x, 0)));
+        let out = run(path, false, true);
+        assert_eq!(abilities(&out)[0].1, [104, 0, 0]);
+    }
+}

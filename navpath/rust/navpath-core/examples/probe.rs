@@ -1,0 +1,76 @@
+//! Diagnostic probe: for a few (start, goal) pairs, print the ALT bound at the start,
+//! the true optimal cost, the pop count, and the bound tightness ratio.
+//!
+//! Usage: cargo run --release -p navpath-core --example probe [-- start goal]...
+//! Snapshot path from NAVPATH_BENCH_SNAPSHOT (defaults to ../../graph.snapshot).
+
+use navpath_core::engine::heuristics::ACTIVE_LANDMARKS;
+use navpath_core::engine::search::{SearchContext, SearchParams};
+use navpath_core::{EngineView, Snapshot};
+
+// Production allocator (the service and builder both run on mimalloc; efficiency audit
+// T5.14) so allocation-heavy paths are timed as they run in production.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// Pre-fault the snapshot like the service does at load, so timings measure the engine
+/// rather than disk reads (efficiency audit T5.9). `NAVPATH_HARNESS_COLD=1` skips it for
+/// cold-cache studies.
+fn warm_snapshot(snap: &Snapshot) {
+    if std::env::var("NAVPATH_HARNESS_COLD").ok().as_deref() == Some("1") {
+        eprintln!("NAVPATH_HARNESS_COLD=1: snapshot not pre-faulted");
+        return;
+    }
+    let t = std::time::Instant::now();
+    let bytes = snap.populate();
+    eprintln!("snapshot pre-faulted: {:.0} MiB in {:?}", bytes as f64 / (1 << 20) as f64, t.elapsed());
+}
+
+fn main() {
+    let path = std::env::var("NAVPATH_BENCH_SNAPSHOT")
+        .unwrap_or_else(|_| format!("{}/../../graph.snapshot", env!("CARGO_MANIFEST_DIR")));
+    let snap = Snapshot::open(&path).expect("open snapshot");
+    warm_snapshot(&snap);
+    let view = EngineView::from_snapshot(&snap);
+    let mut ctx = SearchContext::new(view.nodes);
+
+    let args: Vec<u32> = std::env::args().skip(1).filter_map(|a| a.parse().ok()).collect();
+    let pairs: Vec<(u32, u32)> = if args.len() >= 2 && args.len() % 2 == 0 {
+        args.chunks(2).map(|c| (c[0], c[1])).collect()
+    } else {
+        // Default: the bench corpus's slow medium/long pairs plus a short one.
+        vec![(923, 1957), (392, 74053), (392, 74489), (392, 923), (392, 1310)]
+    };
+
+    let mut admissibility_violations = 0usize;
+    for (s, g) in pairs {
+        let active = view.lm.select_active(s, g, ACTIVE_LANDMARKS);
+        let h0 = view.lm.h_active(s, &active);
+        let t = std::time::Instant::now();
+        let res = view.astar(
+            SearchParams { start: s, goal: g, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 },
+            &mut ctx,
+        );
+        let el = t.elapsed();
+        let (sx, sy, _) = snap.node_coord(s);
+        let (gx, gy, _) = snap.node_coord(g);
+        println!(
+            "{}->{} ({},{})->({},{}): h0={:.0} cost={:.0} ratio={:.3} pops={} path_len={} time={:?} active_lms={:?}",
+            s, g,
+            sx, sy, gx, gy,
+            h0, res.cost,
+            if res.cost > 0.0 { h0 / res.cost } else { 0.0 },
+            res.pops, res.path.len(), el, active.indices
+        );
+        // Admissibility oracle, not just a printout: h overstating the true cost is the
+        // historically worst bug class here (silent suboptimal routes that look fast).
+        if res.found && h0 > res.cost + 1e-3 {
+            eprintln!("ADMISSIBILITY VIOLATION: h0={h0} > cost={} for {s}->{g}", res.cost);
+            admissibility_violations += 1;
+        }
+    }
+    if admissibility_violations > 0 {
+        eprintln!("{admissibility_violations} admissibility violation(s)");
+        std::process::exit(1);
+    }
+}

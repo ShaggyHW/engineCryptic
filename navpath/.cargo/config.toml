@@ -1,0 +1,5 @@
+# Players' machines, not one server: x86-64-v3 is the portable target upstream sanctions.
+# A baseline build for CPUs without AVX2 adds the `allow-baseline-cpu` feature and drops this flag.
+[build]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
+rustdocflags = ["-C", "target-cpu=x86-64-v3"]

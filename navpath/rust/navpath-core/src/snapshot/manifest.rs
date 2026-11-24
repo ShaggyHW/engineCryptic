@@ -1,0 +1,408 @@
+use byteorder::{ByteOrder, LittleEndian};
+
+pub const SNAPSHOT_MAGIC: [u8; 4] = *b"NPSS"; // NavPath SnapShot
+// v8: format overhaul for read-side speed and 4M-tile scale:
+//  - node coords packed into one u32 section, ascending in node id order, so
+//    coordinate->id lookup is a binary search over the mmap (no heap index);
+//  - walk graph stored CSR-native (offsets + dst + per-edge diagonal bitmap; weights are
+//    derived: 300ms cardinal / 300*sqrt(2) diagonal) — no load-time CSR rebuild;
+//  - ALT tables quantized to u16 in ALT_QUANTUM_MS units and interleaved
+//    [node][landmark][fw,bw] so one heuristic call reads one contiguous row;
+//  - per-node walk-component ids (u16) for reachability prechecks;
+//  - every section start is 64-byte aligned, enabling zero-copy typed slices.
+// v9 (2026-09): locality overhaul —
+//  - the coordinate key (and therefore node numbering) is plane-major MORTON order
+//    (x/y bits interleaved) instead of raster (plane, y, x): spatial neighbours get
+//    nearby ids, so a search corridor's ALT rows / CSR rows / search-state records
+//    share pages and cache lines (measured 72% -> 23% of walk edges crossing a 4 KiB
+//    ALT page; 2.6x fewer 2 MiB folios per corridor);
+//  - the ALT section may use the clustered u8 encoding (`alt_format` = 1, see
+//    `alt_pack`), and starts and ends on 2 MiB boundaries so every table page can be
+//    PMD-mapped.
+// v10 (2026-11): walk steps cost 300 ms in all 8 directions (RS3 runs 2 tiles a tick,
+//  diagonal or not) plus a tiny diagonal tie-break (see `walk_diagonal_ms`). The ALT
+//  tables bake walk distances, so v9 tables (octile weights) would OVERestimate the new
+//  distances — an inadmissible heuristic. The format is unchanged; the bump only makes
+//  the service refuse a snapshot built with the old weights.
+// Snapshots must be rebuilt.
+pub const SNAPSHOT_VERSION: u32 = 10;
+
+/// ALT section encodings (`Manifest::alt_format`).
+pub const ALT_FORMAT_U16: u32 = 0;
+pub const ALT_FORMAT_PACKED: u32 = 1;
+
+/// Alignment of the ALT section's start and of the section following it (huge page).
+pub const ALT_SECTION_ALIGN: u64 = 2 << 20;
+
+/// Quantum for the u16 ALT tables, in milliseconds. Stored values are
+/// floor(distance_ms / quantum); 0xFFFF marks unreachable and 0xFFFE saturation
+/// (distance >= 0xFFFE quanta). Readers subtract one quantum from derived bounds to
+/// preserve admissibility under the floor rounding, and must never use a SATURATED
+/// entry where understating a distance would OVERstate a bound: the forward d(L,u)
+/// side of the max, and BOTH goal entries (select_active drops saturated landmarks
+/// for the query — measured live as a suboptimal-route bug when this was violated).
+///
+/// 64ms gives a 4.19M ms range (~14,000 walk tiles), which no in-map distance reaches
+/// today, so saturation is a safety net rather than a working state. A 16ms quantum was
+/// measured to give no fewer expansions (the equal-cost plateau dominates, not the
+/// quantization slack) while shrinking the range enough to actually saturate.
+pub const ALT_QUANTUM_MS: f32 = 64.0;
+/// Sentinel for "unreachable" in the quantized ALT tables.
+pub const ALT_UNREACHABLE: u16 = u16::MAX;
+/// Saturation marker: the true distance is at least this many quanta.
+pub const ALT_SATURATED: u16 = u16::MAX - 1;
+
+/// Walk-edge weights are not stored: every step costs 300ms (running moves 2 tiles per
+/// 600ms server tick in any of the 8 directions), diagonal steps plus
+/// [`WALK_DIAGONAL_TIEBREAK_MS`], selected by the per-edge diagonal bitmap.
+pub const WALK_CARDINAL_MS: f32 = 300.0;
+
+/// Secondary cost of a diagonal step. Real travel time is Chebyshev (a diagonal step
+/// takes as long as a cardinal one), but pure Chebyshev weights make huge equal-cost
+/// plateaus: a 10x3 offset has dozens of 10-step paths, zig-zags included. This tiny
+/// surcharge picks, among the paths with the fewest steps, one with the fewest
+/// diagonals — the old octile cost as a secondary key — so paths stay natural and
+/// deterministic.
+///
+/// It also keeps every comparison of 1- and 2-step costs in the SAME order as octile
+/// weights did (1 < 1+e < 2 < 2+e < 2+2e, as 1 < sqrt2 < 2 < 1+sqrt2 < 2sqrt2), which is
+/// all canonical pruning and the jump-point tables look at (`canonical.rs` STEP_COST): the
+/// derived tables are bit-identical to the octile ones and stay sound.
+///
+/// Sized so it survives f32 accumulation (ulp is 0.25 ms only past 2M ms of route) and
+/// can only outweigh a whole step after 1,200 extra diagonals. Response costs never
+/// include it: the payload re-prices walk steps at exactly [`WALK_CARDINAL_MS`].
+pub const WALK_DIAGONAL_TIEBREAK_MS: f32 = 0.25;
+
+#[inline]
+pub fn walk_diagonal_ms() -> f32 {
+    WALK_CARDINAL_MS + WALK_DIAGONAL_TIEBREAK_MS
+}
+
+/// Spread the low 15 bits of `v` to the even bit positions.
+#[inline(always)]
+fn spread15(v: u32) -> u32 {
+    #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
+    {
+        // SAFETY: the bmi2 target feature is enabled at compile time.
+        unsafe { core::arch::x86_64::_pdep_u32(v, 0x5555_5555) }
+    }
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]
+    {
+        let mut x = v & 0x7FFF;
+        x = (x | (x << 8)) & 0x00FF_00FF;
+        x = (x | (x << 4)) & 0x0F0F_0F0F;
+        x = (x | (x << 2)) & 0x3333_3333;
+        (x | (x << 1)) & 0x5555_5555
+    }
+}
+
+/// Inverse of [`spread15`]: gather the even bit positions.
+#[inline(always)]
+fn gather15(k: u32) -> u32 {
+    #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
+    {
+        // SAFETY: the bmi2 target feature is enabled at compile time.
+        unsafe { core::arch::x86_64::_pext_u32(k, 0x1555_5555) }
+    }
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]
+    {
+        let mut x = k & 0x1555_5555;
+        x = (x | (x >> 1)) & 0x3333_3333;
+        x = (x | (x >> 2)) & 0x0F0F_0F0F;
+        x = (x | (x >> 4)) & 0x00FF_00FF;
+        (x | (x >> 8)) & 0x7FFF
+    }
+}
+
+/// Pack node coordinates into the v9 key: `plane << 30 | morton(x, y)` (x on the even
+/// bits, y on the odd bits, 15 bits each). Key order is plane-major Z-order, which is
+/// also node-id assignment order. Monotone in x for fixed (y, plane) and in y for fixed
+/// (x, plane), but NOT raster order: code that needs a raster sweep must sort by
+/// [`raster_key`].
+#[inline]
+pub fn pack_coord(x: i32, y: i32, plane: i32) -> u32 {
+    debug_assert!((0..32768).contains(&x) && (0..32768).contains(&y) && (0..4).contains(&plane));
+    ((plane as u32) << 30) | spread15(x as u32) | (spread15(y as u32) << 1)
+}
+
+#[inline]
+pub fn unpack_coord(key: u32) -> (i32, i32, i32) {
+    (gather15(key) as i32, gather15(key >> 1) as i32, (key >> 30) as i32)
+}
+
+/// Raster (plane, y, x) order key of a v9 packed coordinate — the pre-v9 key.
+#[inline]
+pub fn raster_key(key: u32) -> u32 {
+    let (x, y, p) = unpack_coord(key);
+    ((p as u32) << 30) | ((y as u32) << 15) | (x as u32)
+}
+
+/// Alignment for every section start (and the header size), so mmap'd sections can be
+/// reinterpreted as typed slices.
+pub const SECTION_ALIGN: u64 = 64;
+
+#[inline]
+pub fn align_up(off: u64) -> u64 {
+    (off + (SECTION_ALIGN - 1)) & !(SECTION_ALIGN - 1)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotCounts {
+    pub nodes: u32,
+    pub walk_edges: u32,
+    pub macro_edges: u32,
+    pub req_tags: u32,     // number of u32 entries (not necessarily triplets)
+    pub landmarks: u32,
+    pub fairy_rings: u32,  // number of fairy ring nodes
+    pub walk_components: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Manifest {
+    pub version: u32,
+    pub counts: SnapshotCounts,
+    /// ALT table quantum in ms, stamped by the builder. Readers MUST use this instead of
+    /// the compiled constant: a binary/snapshot quantum mismatch silently mis-scales
+    /// every heuristic value (observed in production as weak-h budget exhaustion).
+    /// 0.0 in legacy v8 files (header padding) decodes as 64.0.
+    pub alt_quantum_ms: f32,
+    /// ALT section encoding: [`ALT_FORMAT_U16`] or [`ALT_FORMAT_PACKED`].
+    pub alt_format: u32,
+    /// Packed format: number of exact-value exception entries after the records.
+    pub alt_exceptions: u32,
+    pub off_coords: u64,
+    pub off_walk_offsets: u64,
+    pub off_walk_dst: u64,
+    pub off_walk_diag: u64,
+    pub off_comp: u64,
+    pub off_macro_src: u64,
+    pub off_macro_dst: u64,
+    pub off_macro_w: u64,
+    pub off_macro_kind_first: u64,
+    pub off_macro_id_first: u64,
+    pub off_macro_meta_offs: u64,
+    pub off_macro_meta_lens: u64,
+    pub off_macro_meta_blob: u64,
+    pub off_req_tags: u64,
+    pub off_landmarks: u64,
+    pub off_lm_tab: u64,
+    pub off_fairy_nodes: u64,
+    pub off_fairy_cost_ms: u64,
+    pub off_fairy_meta_offs: u64,
+    pub off_fairy_meta_lens: u64,
+    pub off_fairy_meta_blob: u64,
+}
+
+pub const MANIFEST_OFFSET_COUNT: usize = 21;
+
+impl Manifest {
+    /// Header occupies one aligned block: 4 magic + 4 version + 7*4 counts + 21*8 offsets
+    /// = 204 bytes, padded to the section alignment.
+    pub const SIZE: usize = 256;
+
+    pub fn offsets(&self) -> [u64; MANIFEST_OFFSET_COUNT] {
+        [
+            self.off_coords,
+            self.off_walk_offsets,
+            self.off_walk_dst,
+            self.off_walk_diag,
+            self.off_comp,
+            self.off_macro_src,
+            self.off_macro_dst,
+            self.off_macro_w,
+            self.off_macro_kind_first,
+            self.off_macro_id_first,
+            self.off_macro_meta_offs,
+            self.off_macro_meta_lens,
+            self.off_macro_meta_blob,
+            self.off_req_tags,
+            self.off_landmarks,
+            self.off_lm_tab,
+            self.off_fairy_nodes,
+            self.off_fairy_cost_ms,
+            self.off_fairy_meta_offs,
+            self.off_fairy_meta_lens,
+            self.off_fairy_meta_blob,
+        ]
+    }
+
+    pub fn parse(header: &[u8]) -> Result<Self, ManifestError> {
+        if header.len() < Self::SIZE { return Err(ManifestError::HeaderTooSmall); }
+        if header[0..4] != SNAPSHOT_MAGIC { return Err(ManifestError::BadMagic); }
+        let version = LittleEndian::read_u32(&header[4..8]);
+        if version != SNAPSHOT_VERSION { return Err(ManifestError::UnsupportedVersion(version)); }
+        let c0 = 8;
+        let counts = SnapshotCounts {
+            nodes: LittleEndian::read_u32(&header[c0..c0 + 4]),
+            walk_edges: LittleEndian::read_u32(&header[c0 + 4..c0 + 8]),
+            macro_edges: LittleEndian::read_u32(&header[c0 + 8..c0 + 12]),
+            req_tags: LittleEndian::read_u32(&header[c0 + 12..c0 + 16]),
+            landmarks: LittleEndian::read_u32(&header[c0 + 16..c0 + 20]),
+            fairy_rings: LittleEndian::read_u32(&header[c0 + 20..c0 + 24]),
+            walk_components: LittleEndian::read_u32(&header[c0 + 24..c0 + 28]),
+        };
+        let o0 = c0 + 28;
+        let mut offs = [0u64; MANIFEST_OFFSET_COUNT];
+        for (i, o) in offs.iter_mut().enumerate() {
+            *o = LittleEndian::read_u64(&header[o0 + i * 8..o0 + i * 8 + 8]);
+        }
+        let q0 = o0 + MANIFEST_OFFSET_COUNT * 8;
+        let q = LittleEndian::read_f32(&header[q0..q0 + 4]);
+        let alt_quantum_ms = if q > 0.0 && q.is_finite() { q } else { ALT_QUANTUM_MS };
+        let alt_format = LittleEndian::read_u32(&header[q0 + 4..q0 + 8]);
+        let alt_exceptions = LittleEndian::read_u32(&header[q0 + 8..q0 + 12]);
+        if alt_format != ALT_FORMAT_U16 && alt_format != ALT_FORMAT_PACKED {
+            return Err(ManifestError::Invalid("unknown ALT table format"));
+        }
+        Ok(Manifest {
+            version,
+            counts,
+            alt_quantum_ms,
+            alt_format,
+            alt_exceptions,
+            off_coords: offs[0],
+            off_walk_offsets: offs[1],
+            off_walk_dst: offs[2],
+            off_walk_diag: offs[3],
+            off_comp: offs[4],
+            off_macro_src: offs[5],
+            off_macro_dst: offs[6],
+            off_macro_w: offs[7],
+            off_macro_kind_first: offs[8],
+            off_macro_id_first: offs[9],
+            off_macro_meta_offs: offs[10],
+            off_macro_meta_lens: offs[11],
+            off_macro_meta_blob: offs[12],
+            off_req_tags: offs[13],
+            off_landmarks: offs[14],
+            off_lm_tab: offs[15],
+            off_fairy_nodes: offs[16],
+            off_fairy_cost_ms: offs[17],
+            off_fairy_meta_offs: offs[18],
+            off_fairy_meta_lens: offs[19],
+            off_fairy_meta_blob: offs[20],
+        })
+    }
+
+    pub fn write_header(&self) -> Vec<u8> {
+        let mut header = vec![0u8; Self::SIZE];
+        header[0..4].copy_from_slice(&SNAPSHOT_MAGIC);
+        LittleEndian::write_u32(&mut header[4..8], self.version);
+        let c0 = 8;
+        LittleEndian::write_u32(&mut header[c0..c0 + 4], self.counts.nodes);
+        LittleEndian::write_u32(&mut header[c0 + 4..c0 + 8], self.counts.walk_edges);
+        LittleEndian::write_u32(&mut header[c0 + 8..c0 + 12], self.counts.macro_edges);
+        LittleEndian::write_u32(&mut header[c0 + 12..c0 + 16], self.counts.req_tags);
+        LittleEndian::write_u32(&mut header[c0 + 16..c0 + 20], self.counts.landmarks);
+        LittleEndian::write_u32(&mut header[c0 + 20..c0 + 24], self.counts.fairy_rings);
+        LittleEndian::write_u32(&mut header[c0 + 24..c0 + 28], self.counts.walk_components);
+        let o0 = c0 + 28;
+        for (i, o) in self.offsets().iter().enumerate() {
+            LittleEndian::write_u64(&mut header[o0 + i * 8..o0 + i * 8 + 8], *o);
+        }
+        let q0 = o0 + MANIFEST_OFFSET_COUNT * 8;
+        LittleEndian::write_f32(&mut header[q0..q0 + 4], self.alt_quantum_ms);
+        LittleEndian::write_u32(&mut header[q0 + 4..q0 + 8], self.alt_format);
+        LittleEndian::write_u32(&mut header[q0 + 8..q0 + 12], self.alt_exceptions);
+        header
+    }
+
+    /// Byte `(offset, length)` of the ALT table section.
+    pub fn lm_tab_range(&self) -> (usize, usize) {
+        let (n, l) = (self.counts.nodes as usize, self.counts.landmarks as usize);
+        let len = if self.alt_format == ALT_FORMAT_PACKED {
+            super::alt_pack::packed_bytes(n, l) + self.alt_exceptions as usize * super::alt_pack::EXCEPTION_BYTES
+        } else {
+            n.saturating_mul(l).saturating_mul(4)
+        };
+        (self.off_lm_tab as usize, len)
+    }
+
+    pub fn validate_layout(&self, file_len: usize) -> Result<(), ManifestError> {
+        fn fits(off: u64, bytes: usize, file_len: usize) -> bool {
+            let off = off as usize;
+            off <= file_len && file_len - off >= bytes
+        }
+        let n = self.counts.nodes as usize;
+        let e = self.counts.walk_edges as usize;
+        let m = self.counts.macro_edges as usize;
+        let fr = self.counts.fairy_rings as usize;
+        let lm = self.counts.landmarks as usize;
+
+        let checks: [(&'static str, u64, usize); 12] = [
+            ("coords", self.off_coords, n * 4),
+            ("walk_offsets", self.off_walk_offsets, (n + 1) * 4),
+            ("walk_dst", self.off_walk_dst, e * 4),
+            ("walk_diag", self.off_walk_diag, e.div_ceil(8)),
+            ("comp", self.off_comp, n * 2),
+            ("macro_src", self.off_macro_src, m * 4),
+            ("macro_dst", self.off_macro_dst, m * 4),
+            ("macro_w", self.off_macro_w, m * 4),
+            ("req_tags", self.off_req_tags, self.counts.req_tags as usize * 4),
+            ("landmarks", self.off_landmarks, lm * 4),
+            ("lm_tab", self.off_lm_tab, self.lm_tab_range().1),
+            ("fairy_nodes", self.off_fairy_nodes, fr * 4),
+        ];
+        for (name, off, bytes) in checks {
+            if !fits(off, bytes, file_len) { return Err(ManifestError::OutOfBounds(name)); }
+        }
+        for (name, off, bytes) in [
+            ("macro_kind_first", self.off_macro_kind_first, m * 4),
+            ("macro_id_first", self.off_macro_id_first, m * 4),
+            ("macro_meta_offs", self.off_macro_meta_offs, m * 4),
+            ("macro_meta_lens", self.off_macro_meta_lens, m * 4),
+            ("fairy_cost_ms", self.off_fairy_cost_ms, fr * 4),
+            ("fairy_meta_offs", self.off_fairy_meta_offs, fr * 4),
+            ("fairy_meta_lens", self.off_fairy_meta_lens, fr * 4),
+        ] {
+            if !fits(off, bytes, file_len) { return Err(ManifestError::OutOfBounds(name)); }
+        }
+        // blobs are variable length; ensure starts are within the file
+        if (self.off_macro_meta_blob as usize) > file_len { return Err(ManifestError::OutOfBounds("macro_meta_blob")); }
+        if (self.off_fairy_meta_blob as usize) > file_len { return Err(ManifestError::OutOfBounds("fairy_meta_blob")); }
+        // alignment: EVERY typed section is reinterpreted as a slice of its element
+        // type (Snapshot::section), so each must be aligned; the writer puts all of them
+        // on SECTION_ALIGN boundaries. (Checking only the hot ones left misaligned
+        // macro/fairy sections of a malformed file as undefined behaviour.)
+        for (name, off) in [
+            ("coords", self.off_coords),
+            ("walk_offsets", self.off_walk_offsets),
+            ("walk_dst", self.off_walk_dst),
+            ("comp", self.off_comp),
+            ("macro_src", self.off_macro_src),
+            ("macro_dst", self.off_macro_dst),
+            ("macro_w", self.off_macro_w),
+            ("macro_kind_first", self.off_macro_kind_first),
+            ("macro_id_first", self.off_macro_id_first),
+            ("macro_meta_offs", self.off_macro_meta_offs),
+            ("macro_meta_lens", self.off_macro_meta_lens),
+            ("req_tags", self.off_req_tags),
+            ("landmarks", self.off_landmarks),
+            ("lm_tab", self.off_lm_tab),
+            ("fairy_nodes", self.off_fairy_nodes),
+            ("fairy_cost_ms", self.off_fairy_cost_ms),
+            ("fairy_meta_offs", self.off_fairy_meta_offs),
+            ("fairy_meta_lens", self.off_fairy_meta_lens),
+        ] {
+            if off % SECTION_ALIGN != 0 { return Err(ManifestError::Misaligned(name)); }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestError {
+    #[error("snapshot header too small")]
+    HeaderTooSmall,
+    #[error("bad magic")]
+    BadMagic,
+    #[error("unsupported version {0}")]
+    UnsupportedVersion(u32),
+    #[error("section out of bounds: {0}")]
+    OutOfBounds(&'static str),
+    #[error("section misaligned: {0}")]
+    Misaligned(&'static str),
+    #[error("invalid snapshot: {0}")]
+    Invalid(&'static str),
+}

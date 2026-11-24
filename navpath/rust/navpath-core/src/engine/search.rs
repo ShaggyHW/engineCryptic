@@ -1,0 +1,2646 @@
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+use std::sync::Arc;
+
+use crate::snapshot::{unpack_coord, walk_diagonal_ms, Snapshot, WALK_CARDINAL_MS};
+
+use super::canonical::{arrival_code, CanonicalGrid, TileBox};
+use super::heuristics::{active_landmarks, LandmarkHeuristic, RevAnchorBase};
+use super::neighbors::{MacroFilter, NeighborProvider, WalkGraph};
+
+/// Inputs specific to the backward half of a bidirectional search.
+pub struct BidirParams<'a> {
+    /// Reversed macro adjacency (same per-edge requirement data, src/dst swapped).
+    pub macros_rev: &'a NeighborProvider,
+    /// Per-request filter for the reversed macro slots.
+    pub macro_filter_rev: Option<&'a MacroFilter>,
+}
+
+pub struct SearchParams<'a> {
+    pub start: u32,
+    pub goal: u32,
+    /// Per-request macro-edge eligibility/effective weights (None = all macro edges at
+    /// their stored weights). Built once via [`NeighborProvider::macro_filter`].
+    pub macro_filter: Option<&'a MacroFilter>,
+    /// Optional seed for path randomization. If Some, adds deterministic jitter to edge weights.
+    pub seed: Option<u64>,
+    /// Optional cap on heap pops. When exceeded the search stops and reports
+    /// [`SearchStatus::BudgetExceeded`] so callers can distinguish "gave up" from "no path".
+    /// A budget-stopped search can be CONTINUED with a larger cap through the `*_resume`
+    /// entry points (see [`EngineView::astar_resume`]).
+    pub max_pops: Option<u32>,
+    /// Cooperative cancellation, checked every [`CANCEL_CHECK_POPS`] pops. Set it from a
+    /// request deadline or client-disconnect guard; a cancelled search reports
+    /// [`SearchStatus::Cancelled`].
+    pub cancel: Option<&'a std::sync::atomic::AtomicBool>,
+    /// Opt-in plateau tie-break (roadmap 3.4): 0.0 = exact ordering (default). When
+    /// positive, the heap compares f at this bucket granularity (then HIGH g), so the
+    /// u16-ALT equal-cost plateau — whose exact-tie collapse seed jitter otherwise
+    /// destroys — is dived instead of swept. PROVABLY bounded: at goal-pop every open
+    /// entry's f exceeds the goal bucket's lower edge, so served cost <= optimum (on
+    /// the jittered graph) + bucket_ms. MM's stop rule reads the bucket's lower edge,
+    /// which only understates the frontier minimum — the same bound holds.
+    pub bucket_ms: f32,
+}
+
+/// Cancellation poll interval in pops. A relaxed load of an uncontended flag costs ~1 ns;
+/// at the cold-cache 50-90 µs/pop the old 1024-pop interval let a cancelled race loser
+/// keep its permit, contexts and memory bandwidth for 50-90 ms.
+pub const CANCEL_CHECK_POPS: u32 = 128;
+const CANCEL_CHECK_MASK: u32 = CANCEL_CHECK_POPS - 1;
+
+/// Deterministic per-edge jitter in [0, 0.1) ms, keyed on (seed, from, to).
+///
+/// Public because it is part of the engine's cost contract: backward bidirectional
+/// relaxations must price the forward edge identity, and external validators (the
+/// golden replay re-coster) must be able to reproduce a returned path's exact cost.
+#[inline]
+pub fn edge_jitter(seed: u64, from: u32, to: u32) -> f32 {
+    // FNV-1a inspired hash combining seed, from, and to
+    let mut h = seed;
+    h ^= from as u64;
+    h = h.wrapping_mul(0x100000001b3);
+    h ^= to as u64;
+    h = h.wrapping_mul(0x100000001b3);
+    // Convert to small jitter in range [0, 0.1)
+    ((h & 0xFFFF) as f32) / 655360.0
+}
+
+/// Per-edge pricing policy, monomorphized so the unseeded hot loop carries no
+/// per-edge seed branch and the seeded loop no `Option` unwrap (roadmap 2.6(2)).
+/// Both implementations are the exact arithmetic the old inline `match params.seed`
+/// performed, so results are bit-identical.
+trait JitterPolicy: Copy {
+    /// Whether this policy adds per-node entry penalties ([`Penalized`]). A const so
+    /// the unpenalized monomorphizations fold every penalty branch away (bit-identical
+    /// to the pre-penalty engine).
+    const PENALIZED: bool = false;
+    /// Price of the forward edge `from -> to` with base weight `w` (ms).
+    fn w(self, from: u32, to: u32, w: f32) -> f32;
+    /// Entry penalty of node `v` (charged on multi-source seeds, which enter the open
+    /// list without an edge). Only consulted when [`Self::PENALIZED`].
+    fn node_pen(self, _v: u32) -> f32 { 0.0 }
+    /// Identity of the penalty table, part of the resume tag (0 = none).
+    fn pen_fp(self) -> u64 { 0 }
+}
+
+#[derive(Clone, Copy)]
+struct NoJitter;
+impl JitterPolicy for NoJitter {
+    #[inline(always)]
+    fn w(self, _from: u32, _to: u32, w: f32) -> f32 { w }
+}
+
+#[derive(Clone, Copy)]
+struct SeededJitter(u64);
+impl JitterPolicy for SeededJitter {
+    #[inline(always)]
+    fn w(self, from: u32, to: u32, w: f32) -> f32 { w + edge_jitter(self.0, from, to) }
+}
+
+/// Per-node ENTRY penalty (danger-area avoidance): every relaxation that lands on a
+/// flagged node pays `ms` on top of the edge weight. The origin itself is never charged
+/// (no edge enters it); multi-source seeds are (they are landings).
+///
+/// Penalties only ever ADD cost, so the ALT bound (built on the unpenalized graph) stays
+/// admissible and consistent: a penalized search is exact on the penalized graph. It
+/// breaks the uniform-walk-cost premise of canonical pruning and jump points, so
+/// penalized searches always run plain (unpruned) unidirectional expansion.
+#[derive(Clone, Copy)]
+pub struct NodePenalty<'a> {
+    /// One bit per node id (bit `v & 63` of word `v >> 6`); ids past the end are clear.
+    pub bits: &'a [u64],
+    /// Penalty per flagged node entered (ms).
+    pub ms: f32,
+}
+
+impl<'a> NodePenalty<'a> {
+    #[inline(always)]
+    pub fn contains(&self, v: u32) -> bool {
+        match self.bits.get((v >> 6) as usize) {
+            Some(w) => (w >> (v & 63)) & 1 != 0,
+            None => false,
+        }
+    }
+
+    #[inline(always)]
+    pub fn get(&self, v: u32) -> f32 {
+        if self.contains(v) { self.ms } else { 0.0 }
+    }
+
+    fn fingerprint(&self) -> u64 {
+        (self.bits.as_ptr() as u64) ^ ((self.bits.len() as u64) << 40) ^ ((self.ms.to_bits() as u64) << 8) ^ 1
+    }
+
+    /// Remove the penalties a penalized search folded into `res` (`path_g`, `cost`), so
+    /// the result reports real travel costs. `origin_first`: `path[0]` is the search
+    /// origin (never charged) rather than a multi-source seed (charged). Returns the
+    /// number of charged nodes on the path. Subtraction is done in f64 from the exact
+    /// penalty total, so the only residue is the f32 rounding of the accumulation.
+    pub fn strip(&self, res: &mut SearchResult, origin_first: bool) -> u32 {
+        let mut charged = 0u32;
+        for (i, (&v, g)) in res.path.iter().zip(res.path_g.iter_mut()).enumerate() {
+            if self.contains(v) && !(i == 0 && origin_first) {
+                charged += 1;
+            }
+            if charged > 0 {
+                *g = (*g as f64 - charged as f64 * self.ms as f64).max(0.0) as f32;
+            }
+        }
+        if charged > 0 {
+            if let Some(&last) = res.path_g.last() {
+                res.cost = last;
+            }
+        }
+        charged
+    }
+}
+
+/// [`JitterPolicy`] wrapper charging [`NodePenalty`] on every edge's destination.
+#[derive(Clone, Copy)]
+struct Penalized<'a, J: JitterPolicy> {
+    inner: J,
+    pen: NodePenalty<'a>,
+}
+impl<J: JitterPolicy> JitterPolicy for Penalized<'_, J> {
+    const PENALIZED: bool = true;
+    #[inline(always)]
+    fn w(self, from: u32, to: u32, w: f32) -> f32 { self.inner.w(from, to, w) + self.pen.get(to) }
+    #[inline(always)]
+    fn node_pen(self, v: u32) -> f32 { self.pen.get(v) }
+    fn pen_fp(self) -> u64 { self.pen.fingerprint() }
+}
+
+/// Goal SET of a route-to-area search ([`EngineView::astar_set`] /
+/// [`EngineView::astar_bidir_set`]): the search returns the cheapest route to ANY of
+/// these nodes, ending on the first goal node it reaches.
+///
+/// Each node carries a tie rank (lower wins): among goals reached at bit-identical
+/// cost the unidirectional engine ends on the lowest (rank, node id). Membership is a
+/// hashed bit probe plus a binary search on filter hits, so the per-pop and per-relax
+/// goal tests stay a few nanoseconds for sets of thousands of nodes.
+pub struct GoalSet {
+    /// Sorted, deduplicated node ids.
+    nodes: Vec<u32>,
+    /// Tie rank per node (parallel to `nodes`).
+    rank: Vec<u32>,
+    /// Membership prefilter: >= 16 bits per goal (a ~6% false-positive rate at most).
+    bits: Vec<u64>,
+    shift: u32,
+    /// Order-sensitive fingerprint of (nodes, ranks): resume identity.
+    fp: u64,
+}
+
+impl GoalSet {
+    /// A goal set with every tie rank 0 (ties break by lowest node id).
+    pub fn new(nodes: impl IntoIterator<Item = u32>) -> Self {
+        Self::with_ranks(nodes.into_iter().map(|n| (n, 0)))
+    }
+
+    /// A goal set from (node, tie rank) pairs; a node listed twice keeps its lowest rank.
+    pub fn with_ranks(pairs: impl IntoIterator<Item = (u32, u32)>) -> Self {
+        let mut v: Vec<(u32, u32)> = pairs.into_iter().collect();
+        v.sort_unstable();
+        v.dedup_by_key(|p| p.0);
+        let nodes: Vec<u32> = v.iter().map(|p| p.0).collect();
+        let rank: Vec<u32> = v.iter().map(|p| p.1).collect();
+        let log2 = (nodes.len().max(64) * 16).next_power_of_two().trailing_zeros();
+        let shift = 32 - log2;
+        let mut bits = vec![0u64; (1usize << log2) / 64];
+        let mut fp: u64 = 0xcbf29ce484222325 ^ nodes.len() as u64;
+        for (&n, &r) in nodes.iter().zip(&rank) {
+            let h = Self::slot(n, shift);
+            bits[(h >> 6) as usize] |= 1 << (h & 63);
+            fp = (fp ^ n as u64).wrapping_mul(0x100000001b3);
+            fp = (fp ^ r as u64).wrapping_mul(0x100000001b3);
+        }
+        GoalSet { nodes, rank, bits, shift, fp }
+    }
+
+    #[inline(always)]
+    fn slot(id: u32, shift: u32) -> u32 {
+        id.wrapping_mul(0x9E37_79B1) >> shift
+    }
+
+    /// The goal nodes, ascending.
+    pub fn nodes(&self) -> &[u32] {
+        &self.nodes
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    #[inline(always)]
+    pub fn contains(&self, id: u32) -> bool {
+        let h = Self::slot(id, self.shift);
+        (self.bits[(h >> 6) as usize] >> (h & 63)) & 1 != 0 && self.nodes.binary_search(&id).is_ok()
+    }
+
+    /// Index of the first goal node on `path`, if any.
+    pub fn first_on_path(&self, path: &[u32]) -> Option<usize> {
+        path.iter().position(|&n| self.contains(n))
+    }
+
+    /// The goal with the lowest (g, rank, id) among those `g_of` reports finite.
+    fn best_by(&self, g_of: impl Fn(u32) -> f32) -> Option<u32> {
+        let mut best: Option<(f32, u32, u32)> = None;
+        for (&n, &r) in self.nodes.iter().zip(&self.rank) {
+            let g = g_of(n);
+            if !g.is_finite() {
+                continue;
+            }
+            // Ascending ids: a later node only wins on strictly lower (g, rank).
+            if best.is_none_or(|(bg, br, _)| g < bg || (g == bg && r < br)) {
+                best = Some((g, r, n));
+            }
+        }
+        best.map(|b| b.2)
+    }
+}
+
+/// Per-node goal test, monomorphized so single-goal searches keep the plain `==`
+/// (no set probe, no extra branch) and their exact pre-goal-set behaviour.
+trait GoalTest: Copy {
+    fn is_goal(self, id: u32) -> bool;
+    /// The goal id of a single-goal search; None for a goal set.
+    fn single(self) -> Option<u32>;
+    /// Every goal node (one for a single goal).
+    fn nodes(&self) -> &[u32];
+    /// Resume identity of the goal set (0 for a single goal: `QueryTag::goal` covers it).
+    fn fingerprint(self) -> u64;
+    /// The goal with the lowest (g, tie rank, id) among those `g_of` reports finite.
+    fn best_by(self, g_of: impl Fn(u32) -> f32) -> Option<u32>;
+}
+
+#[derive(Clone, Copy)]
+struct OneGoal(u32);
+impl GoalTest for OneGoal {
+    #[inline(always)]
+    fn is_goal(self, id: u32) -> bool { id == self.0 }
+    #[inline(always)]
+    fn single(self) -> Option<u32> { Some(self.0) }
+    fn nodes(&self) -> &[u32] { std::slice::from_ref(&self.0) }
+    fn fingerprint(self) -> u64 { 0 }
+    fn best_by(self, g_of: impl Fn(u32) -> f32) -> Option<u32> {
+        if g_of(self.0).is_finite() { Some(self.0) } else { None }
+    }
+}
+
+impl GoalTest for &GoalSet {
+    #[inline(always)]
+    fn is_goal(self, id: u32) -> bool { self.contains(id) }
+    #[inline(always)]
+    fn single(self) -> Option<u32> { None }
+    fn nodes(&self) -> &[u32] { &self.nodes }
+    fn fingerprint(self) -> u64 { self.fp }
+    fn best_by(self, g_of: impl Fn(u32) -> f32) -> Option<u32> { GoalSet::best_by(self, g_of) }
+}
+
+/// One bounding box per plane over the goal nodes (JPS+ jump cut-offs, see
+/// [`CanonicalGrid::jump_from_boxes`]).
+fn goal_boxes(coords: &[u32], goals: &[u32]) -> Vec<TileBox> {
+    let mut boxes: Vec<TileBox> = Vec::new();
+    for &g in goals {
+        let Some(&c) = coords.get(g as usize) else { continue };
+        let (x, y, p) = unpack_coord(c);
+        match boxes.iter_mut().find(|b| b.plane == p) {
+            Some(b) => {
+                b.x0 = b.x0.min(x);
+                b.y0 = b.y0.min(y);
+                b.x1 = b.x1.max(x);
+                b.y1 = b.y1.max(y);
+            }
+            None => boxes.push(TileBox { plane: p, x0: x, y0: y, x1: x, y1: y }),
+        }
+    }
+    boxes
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchStatus {
+    Found,
+    NotFound,
+    /// The pop budget ran out before optimality was proven. With `found == false` no
+    /// path was discovered (the goal may still be reachable); with `found == true` the
+    /// returned path is valid but NOT proven optimal — a truncated search must never
+    /// masquerade as `Found`, or callers cache/serve unproven costs and the budget
+    /// retry never fires.
+    BudgetExceeded,
+    /// The caller cancelled the search (deadline or client disconnect). Same
+    /// found-true/false semantics as [`SearchStatus::BudgetExceeded`].
+    Cancelled,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub found: bool,
+    pub status: SearchStatus,
+    pub path: Vec<u32>,
+    pub cost: f32,
+    /// Number of heap pops the search performed (diagnostics / budget tuning).
+    pub pops: u32,
+    /// Forward-side expansions (== `pops` for unidirectional searches).
+    pub pops_f: u32,
+    /// Backward-side expansions (0 for unidirectional searches). A backward share far
+    /// above the forward one on a slow query is the weak-backward-bound signature
+    /// (roadmap 4.2) — the signal the bidir/uni demotion policy is tuned against.
+    pub pops_b: u32,
+    /// Cumulative cost from the origin at each `path` node (same length as `path`;
+    /// `path_g[0]` is 0 for on-graph starts, the seed cost for multi-source searches,
+    /// and `path_g.last() == cost`). Lets the service serve any sub-path of a cached
+    /// optimal path — a sub-path of a shortest path is a shortest path — with the exact
+    /// cost `path_g[j] - path_g[i]`, no re-costing.
+    pub path_g: Vec<f32>,
+}
+
+impl SearchResult {
+    fn not_found(status: SearchStatus, pops_f: u32, pops_b: u32) -> Self {
+        SearchResult {
+            found: false,
+            status,
+            path: Vec::new(),
+            path_g: Vec::new(),
+            cost: f32::INFINITY,
+            pops: pops_f + pops_b,
+            pops_f,
+            pops_b,
+        }
+    }
+}
+
+/// Heap entry with a PRECOMPUTED packed ordering key: `k`'s unsigned order is exactly
+/// the pop order — smaller f first, then (on f-ties) LARGER g (deeper entries are
+/// closer to the goal, avoiding breadth-first sweeps of equal-f plateaus). Every key is
+/// non-negative finite (pushes are h.is_finite()-guarded; g sums non-negative weights),
+/// so IEEE `to_bits` is order-preserving. Packing once at push makes each sift
+/// comparison a single integer compare — measured cheaper than the float chains on
+/// plateau-heavy searches (where the f-tie chain ran constantly) AND on cache-warm
+/// short searches (where per-compare packing was a measured 30-45% regression).
+///
+/// 12 bytes: g is NOT stored separately — the low half of `k` is always `g.to_bits()`
+/// (both constructors), so [`Key::g`] recovers it exactly. `packed(4)` drops the
+/// 4 padding bytes a `{u64, u32}` would carry, cutting heap memory and sift traffic by
+/// a quarter. Fields are only ever read by value (never borrowed), as packed requires.
+#[derive(Clone, Copy)]
+#[repr(C, packed(4))]
+pub struct Key {
+    k: u64,
+    id: u32,
+}
+
+impl Key {
+    #[inline(always)]
+    pub fn new(f: f32, g: f32, id: u32) -> Self {
+        Key { k: ((!f.to_bits() as u64) << 32) | g.to_bits() as u64, id }
+    }
+
+    /// Bucketed ordering key (roadmap 3.4): with `bucket_ms > 0` the high half is the
+    /// f bucket index instead of the exact f bits, so entries within one bucket order
+    /// by HIGH g — the plateau dive. `bucket_ms == 0` is exactly [`Key::new`].
+    #[inline(always)]
+    pub fn new_bucketed(f: f32, g: f32, id: u32, bucket_ms: f32) -> Self {
+        let hi = if bucket_ms > 0.0 { !((f / bucket_ms) as u32) } else { !f.to_bits() };
+        Key { k: ((hi as u64) << 32) | g.to_bits() as u64, id }
+    }
+
+    /// The entry's g (exact: the low half of the packed key).
+    #[inline(always)]
+    pub fn g(&self) -> f32 {
+        let k = self.k;
+        f32::from_bits(k as u32)
+    }
+
+    #[inline(always)]
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// A LOWER bound on this entry's f: exact when unbucketed, the bucket's lower edge
+    /// otherwise. Understating the frontier minimum keeps MM's stop rule conservative.
+    #[inline(always)]
+    pub fn f_lower(&self, bucket_ms: f32) -> f32 {
+        let k = self.k;
+        let hi = !((k >> 32) as u32);
+        if bucket_ms > 0.0 { hi as f32 * bucket_ms } else { f32::from_bits(hi) }
+    }
+}
+
+impl PartialEq for Key { fn eq(&self, other: &Self) -> bool { self.cmp(other) == Ordering::Equal } }
+impl Eq for Key {}
+impl PartialOrd for Key { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
+impl Ord for Key {
+    #[inline(always)]
+    fn cmp(&self, other: &Self) -> Ordering {
+        // BinaryHeap is a max-heap: Greater = popped first. The (g, id) pair is unique
+        // per heap (pushes require strictly smaller g), so this total order — and hence
+        // the pop sequence — is identical to the original two-float-chain comparator.
+        let (a, b) = (self.k, other.k);
+        let c = a.cmp(&b);
+        if c != Ordering::Equal { return c; }
+        let (ia, ib) = (self.id, other.id);
+        ia.cmp(&ib).reverse()
+    }
+}
+
+/// Best-effort prefetch of a node's search state (prefetches never fault, so the
+/// unchecked pointer arithmetic is safe for any id). Used to overlap the relax loop's
+/// random hot-record loads and the next stale-check line with current work —
+/// the loop is memory-bound, not branch-bound (measured; PGO showed no win).
+#[inline(always)]
+fn prefetch_node<T>(nodes: &[T], id: u32) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+        _mm_prefetch(nodes.as_ptr().wrapping_add(id as usize) as *const i8, _MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (nodes, id);
+    }
+}
+
+/// Backward-anchor reachability filter (see `EngineView::select_rev`), OFF by default:
+/// `NAVPATH_REV_ANCHOR_FILTER=1` enables it. MEASURED (2026-09-26, v9 SCC-64 packed
+/// snapshot, 600 random pairs, all globals eligible): it restores backward landmark
+/// columns and cuts bidirectional pops ~9%, but bidirectional wall time got 15-30%
+/// WORSE — with h_b = 0 the backward half never gathers a landmark row, which is worth
+/// more than the pops it saves. Kept as an opt-in for profiles/snapshots where the
+/// trade differs.
+fn rev_anchor_filter_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        matches!(std::env::var("NAVPATH_REV_ANCHOR_FILTER").ok().as_deref().map(str::trim), Some("1") | Some("true"))
+    })
+}
+
+/// Prefetch the landmark (ALT) rows of the successors a forward expansion is about to
+/// relax, together with their search-state records (T4.1), so a fresh node's row gather
+/// overlaps the other successors' work instead of stalling its relaxation. Default on;
+/// `NAVPATH_PREFETCH_ROWS=0` disables. MEASURED (2026-09-26, v9 SCC-64 packed, 600
+/// pairs, 3 interleaved rounds): canonical uni +13-17% total, virtual starts +10%,
+/// bidir +3-8%, no configuration slower — once the BACKWARD side stopped prefetching
+/// rows its h_b = 0 bound never reads (that version cost bidir 5-9%).
+fn prefetch_rows_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        !matches!(std::env::var("NAVPATH_PREFETCH_ROWS").ok().as_deref().map(str::trim), Some("0") | Some("false"))
+    })
+}
+
+/// `NAVPATH_JPS=1`: jump-point expansion in the unidirectional engine (Phase E Stage
+/// 3). Requires the canonical grid and an unseeded search, exactly like pruning; the
+/// bidirectional engine keeps plain expansion (two independently jumped canonical
+/// orderings are not guaranteed to share a meeting node, which MM's stop rule needs).
+pub fn jps_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        matches!(std::env::var("NAVPATH_JPS").ok().as_deref().map(str::trim), Some("1") | Some("true"))
+    })
+}
+
+/// Canonical-pruning context for one search: engaged only when the grid exists, the
+/// walk graph is the zero-copy CSR, coords are available, and the search is UNSEEDED
+/// (pruning is cost-exact; jitter both breaks the uniform-cost premise of the table
+/// and exists to explore the tie variety pruning removes).
+#[inline]
+fn canonical_ctx<'a>(
+    view: &'a EngineView,
+    seed: Option<u64>,
+) -> Option<(&'a CanonicalGrid, &'a [u32], &'a [u32], &'a [u32])> {
+    if seed.is_some() {
+        return None;
+    }
+    let cg = view.canonical.as_deref()?;
+    let coords = view.coords?;
+    let WalkGraph::Csr { offsets, dst, .. } = &view.walk else {
+        return None;
+    };
+    Some((cg, coords, offsets, dst))
+}
+
+/// Hot half of the per-node search state (roadmap 2.10): the fields EVERY probe of a
+/// node reads — stale-pop checks, the ~4-6x-more-common failed relax attempts, and the
+/// bidir meet probe all need only (g, gen). 8 B puts eight records per cache line
+/// (vs four for the fused 16 B record), halving line traffic on exactly those reads.
+#[derive(Clone, Copy)]
+pub struct HotState {
+    pub g: f32,
+    pub gen: u32,
+}
+
+/// Cold half: written only on improvements, read on expansion (arrival direction),
+/// h-cache hits, and reconstruction. `h` caches the ALT heuristic for the node, valid
+/// for the same `gen` as the hot record — a grid node can be relaxed from up to 8
+/// predecessors, but pays the landmark gather only once per query.
+///
+/// `link` packs the parent id (low [`LINK_ID_BITS`] bits; all ones = no parent) with the
+/// ARRIVAL DIRECTION CODE (high 4 bits: 0 = entry arrival, else grid direction + 1).
+/// The code is written together with the parent on every improvement, so canonical
+/// pruning and jump-point expansion read their successor-table row straight from the
+/// popped node's own record — no parent-coordinate loads, no separate direction array.
+#[derive(Clone, Copy)]
+pub struct ColdState {
+    pub link: u32,
+    pub h: f32,
+}
+
+/// Parent-id bits of [`ColdState::link`]; snapshots are limited to 2^28 - 1 nodes.
+pub const LINK_ID_BITS: u32 = 28;
+const LINK_ID_MASK: u32 = (1 << LINK_ID_BITS) - 1;
+/// "No parent" link (id field all ones, direction code 0).
+const LINK_NONE: u32 = LINK_ID_MASK;
+
+/// Pack a parent link. `u32::MAX` (no parent) maps to [`LINK_NONE`] with code 0.
+#[inline(always)]
+fn link(parent: u32, dcode: u8) -> u32 {
+    if parent == u32::MAX {
+        LINK_NONE
+    } else {
+        (parent & LINK_ID_MASK) | ((dcode as u32) << LINK_ID_BITS)
+    }
+}
+
+const EMPTY_HOT: HotState = HotState { g: f32::INFINITY, gen: 0 };
+const EMPTY_COLD: ColdState = ColdState { link: LINK_NONE, h: 0.0 };
+
+/// Heap capacity (entries) a pooled context may keep across searches. A 1.5M-pop flood
+/// grows the heap to tens of MB; without a cap every pooled context would pin its
+/// largest-ever heap for the life of the process.
+const HEAP_RETAIN_ENTRIES: usize = 1 << 20;
+
+/// All-zero bytes are valid, semantically-empty state for BOTH halves: `gen == 0`
+/// never matches the live generation (which starts at 1 and the wrap path re-fills),
+/// so `g`/`link` read as INFINITY/unset through the generation guards, and `h` is
+/// only ever read after `set_g`/relax stamp the record (writing the NAN sentinel
+/// first). Allocating zeroed lets the allocator hand back untouched kernel zero
+/// pages: no multi-MB memset on context creation (the recurring cold-thread p99
+/// spike), and physical commit proportional to the touched search corridor.
+fn zeroed_vec<T>(n: usize) -> Vec<T> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let layout = std::alloc::Layout::array::<T>(n).expect("search state array layout");
+    unsafe {
+        let ptr = std::alloc::alloc_zeroed(layout) as *mut T;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        Vec::from_raw_parts(ptr, n, n)
+    }
+}
+
+/// Identity of a budget-stopped search, checked before a `*_resume` call continues it:
+/// the continuation is only bit-identical to a fresh run with the larger budget when
+/// every input except `max_pops` is unchanged.
+#[derive(Clone, Copy, PartialEq)]
+struct QueryTag {
+    bidir: bool,
+    origin: Option<u32>,
+    goal: u32,
+    /// Goal-set fingerprint (0 for single-goal searches).
+    goals_fp: u64,
+    seed: Option<u64>,
+    bucket_bits: u32,
+    seeds_fp: u64,
+    canon: bool,
+    jps: bool,
+    /// Penalty-table identity ([`NodePenalty`]; 0 = unpenalized).
+    pen_fp: u64,
+    /// Bidir: the backward context's generation, so a backward context reused for
+    /// another search in between is detected.
+    other_gen: u32,
+}
+
+/// Loop state of a budget-stopped search (see [`EngineView::astar_resume`]).
+#[derive(Clone, Copy)]
+struct ResumeState {
+    tag: QueryTag,
+    pops: u32,
+    pops_f: u32,
+    pops_b: u32,
+    /// Uni: the incumbent g(goal); bidir: the best meeting cost mu.
+    bound: f32,
+    /// Bidir meeting node (u32::MAX = none).
+    meet: u32,
+    /// The live entry the budget break popped (it was charged but not expanded).
+    pending: Key,
+    pending_forward: bool,
+}
+
+fn seeds_fingerprint(seeds: &[(u32, f32)]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325 ^ seeds.len() as u64;
+    for &(n, g) in seeds {
+        h = (h ^ n as u64).wrapping_mul(0x100000001b3);
+        h = (h ^ g.to_bits() as u64).wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+pub struct SearchContext {
+    pub hot: Vec<HotState>,
+    pub cold: Vec<ColdState>,
+    pub generation: u32,
+    pub open: BinaryHeap<Key>,
+    /// Per-64-node-block generation stamp: `blk[v >> 6] == generation` whenever ANY node
+    /// of the block has been stamped this search. Bidirectional relaxations probe the
+    /// OTHER side's g on every improvement; this 1/64-size array (~73 KB per 1.17M nodes,
+    /// L2-resident) answers "certainly unvisited" for the vast majority of probes
+    /// without the random DRAM read of the other side's hot record. A pure filter, so
+    /// results are bit-identical.
+    pub blk: Vec<u32>,
+    /// Continuation state of the last search when it stopped on its pop budget.
+    resume: Option<ResumeState>,
+}
+
+impl SearchContext {
+    pub fn new(nodes: usize) -> Self {
+        assert!(
+            nodes < LINK_NONE as usize,
+            "search state packs parent ids into {LINK_ID_BITS} bits; {nodes} nodes is too many"
+        );
+        Self {
+            hot: zeroed_vec(nodes),
+            cold: zeroed_vec(nodes),
+            generation: 1,
+            open: BinaryHeap::with_capacity(1024),
+            blk: zeroed_vec(nodes.div_ceil(64)),
+            resume: None,
+        }
+    }
+
+    /// Make every page of the state arrays resident (they are allocated as untouched
+    /// zero pages and would otherwise fault in during the first search that walks
+    /// them). Writes a zero to one byte per page, so the all-zero empty-state
+    /// invariant is preserved and the pool can pre-warm contexts at startup instead
+    /// of paying the fault storm (and, under THP direct compaction, 100+ ms stalls)
+    /// inside the first request on each blocking thread.
+    pub fn prefault(&mut self) {
+        const PAGE: usize = 4096;
+        fn touch<T>(v: &mut Vec<T>) {
+            let bytes = std::mem::size_of_val(v.as_slice());
+            let base = v.as_mut_ptr() as *mut u8;
+            let mut off = 0;
+            while off < bytes {
+                // SAFETY: `off < bytes`, so the pointer stays inside the allocation;
+                // the page is zero already (or holds live state whose byte at this
+                // offset is being rewritten with its own value only when the array is
+                // freshly zeroed, which is the only time prefault is called).
+                unsafe { std::ptr::write_volatile(base.add(off), 0u8) };
+                off += PAGE;
+            }
+        }
+        touch(&mut self.hot);
+        touch(&mut self.cold);
+        touch(&mut self.blk);
+    }
+
+    pub fn reset(&mut self, nodes: usize) {
+        if self.hot.len() != nodes {
+            *self = Self::new(nodes);
+        } else {
+            self.generation = self.generation.wrapping_add(1);
+            if self.generation == 0 {
+                self.hot.fill(EMPTY_HOT);
+                self.cold.fill(EMPTY_COLD);
+                self.blk.fill(0);
+                self.generation = 1;
+            }
+            if self.open.capacity() > HEAP_RETAIN_ENTRIES {
+                self.open = BinaryHeap::with_capacity(1024);
+            } else {
+                self.open.clear();
+            }
+            self.resume = None;
+        }
+    }
+
+    /// Whether the last search on this context stopped on its pop budget and can be
+    /// continued with a `*_resume` call.
+    pub fn resumable(&self) -> bool {
+        self.resume.is_some()
+    }
+
+    #[inline(always)]
+    pub fn get_g(&self, u: usize) -> f32 {
+        let st = self.hot[u];
+        if st.gen == self.generation { st.g } else { f32::INFINITY }
+    }
+
+    #[inline(always)]
+    pub fn set_g(&mut self, u: usize, val: f32) {
+        let gen = self.generation;
+        if self.hot[u].gen != gen {
+            self.hot[u].gen = gen;
+            self.cold[u].h = f32::NAN; // h not yet computed this query
+            self.blk[u >> 6] = gen;
+        }
+        self.hot[u].g = val;
+        // Seeds have no grid parent (used by seeding paths only, never the hot loop).
+        self.cold[u].link = LINK_NONE;
+    }
+
+    #[inline(always)]
+    pub fn set_parent(&mut self, u: usize, p: u32) {
+        // Assume set_g was called first to init generation
+        self.cold[u].link = link(p, 0);
+    }
+
+    /// Parent plus arrival direction code (see [`ColdState::link`]).
+    #[inline(always)]
+    fn set_link(&mut self, u: usize, p: u32, dcode: u8) {
+        self.cold[u].link = link(p, dcode);
+    }
+
+    #[inline(always)]
+    pub fn get_parent(&self, u: usize) -> u32 {
+        if self.hot[u].gen != self.generation {
+            return u32::MAX;
+        }
+        let id = self.cold[u].link & LINK_ID_MASK;
+        if id == LINK_ID_MASK { u32::MAX } else { id }
+    }
+
+    /// Arrival direction code of a node stamped this search (0 = entry arrival).
+    #[inline(always)]
+    fn link_code(&self, u: usize) -> u8 {
+        (self.cold[u].link >> LINK_ID_BITS) as u8
+    }
+
+    /// Cached heuristic for a node already stamped by `set_g` this query; computes and
+    /// stores it on first use (NAN marks "not yet computed").
+    #[inline(always)]
+    fn h_cached(&mut self, u: usize, compute: impl FnOnce() -> f32) -> f32 {
+        let st = &mut self.cold[u];
+        if st.h.is_nan() {
+            st.h = compute();
+        }
+        st.h
+    }
+}
+
+/// Extra edges injected into the search beyond the static walk/macro graph.
+///
+/// - `global` edges are available from *every* node (e.g. global teleports). Their cost is
+///   source-independent, so using one from any node u costs `g(u) + c >= g(start) + c`:
+///   the search relaxes them exactly once from the start node and never merges them into
+///   per-pop neighbor streams.
+/// - Fairy-ring hops are location-specific: nodes listed in `fairy_sources` (sorted) can
+///   hop to every entry in `fairy_dests` (sorted by dst id; the self-hop is skipped during
+///   the merge). Both slices are shared for the whole query — no per-pop allocation.
+///
+/// `Cow` so the service borrows these straight out of its per-profile artifact cache
+/// (no per-request copies) while tests and examples keep assigning owned Vecs.
+pub struct ExtraEdges<'a> {
+    pub global: std::borrow::Cow<'a, [(u32, f32)]>,
+    /// Sorted node ids that have fairy-ring hops available.
+    pub fairy_sources: std::borrow::Cow<'a, [u32]>,
+    /// Sorted (dst, cost) fairy destinations shared by all sources.
+    pub fairy_dests: std::borrow::Cow<'a, [(u32, f32)]>,
+    /// Optional precomputed backward-heuristic aggregate of the global-teleport anchor
+    /// set (see [`LandmarkHeuristic::rev_base`]). A pure function of the profile's
+    /// eligible globals, so the service builds it once per profile instead of the
+    /// bidirectional engine re-aggregating ~125 anchors x all landmarks per search. Used
+    /// only when its fingerprint matches the anchor list the search would aggregate
+    /// (origin mode: `global`; multi-source mode: the seed list), so a stale or
+    /// mismatched base silently falls back to the per-search aggregation (identical
+    /// result either way — min/AND aggregation is order-independent).
+    pub global_rev_base: Option<&'a RevAnchorBase>,
+}
+
+impl Default for ExtraEdges<'_> {
+    fn default() -> Self {
+        ExtraEdges {
+            global: std::borrow::Cow::Borrowed(&[]),
+            fairy_sources: std::borrow::Cow::Borrowed(&[]),
+            fairy_dests: std::borrow::Cow::Borrowed(&[]),
+            global_rev_base: None,
+        }
+    }
+}
+
+/// 1024-bit membership prefilter over the (few dozen) fairy-source ids, built per
+/// search: the per-pop "is this a fairy ring?" test becomes one L1 bit probe, and the
+/// branchy binary search runs only on the ~4% of filter hits. Exact (a filter miss
+/// proves absence).
+struct FairyFilter {
+    bits: [u64; 16],
+}
+
+impl FairyFilter {
+    #[inline(always)]
+    fn slot(id: u32) -> u32 {
+        id.wrapping_mul(0x9E37_79B1) >> 22
+    }
+
+    fn new(sources: &[u32]) -> Self {
+        let mut bits = [0u64; 16];
+        for &s in sources {
+            let h = Self::slot(s);
+            bits[(h >> 6) as usize] |= 1 << (h & 63);
+        }
+        FairyFilter { bits }
+    }
+
+    #[inline(always)]
+    fn contains(&self, sources: &[u32], id: u32) -> bool {
+        let h = Self::slot(id);
+        (self.bits[(h >> 6) as usize] >> (h & 63)) & 1 != 0 && sources.binary_search(&id).is_ok()
+    }
+}
+
+/// Expand a jump-point chain (`path`/`path_g` as reconstructed from parent links)
+/// into the tile-by-tile path, re-accumulating `g` step by step along each run so
+/// the per-tile costs are bit-identical to the jump's own accumulation.
+fn expand_jumps(
+    path: &[u32],
+    path_g: &[f32],
+    cold: &[ColdState],
+    cg: &CanonicalGrid,
+    offsets: &[u32],
+    dst: &[u32],
+    diag_w: f32,
+) -> (Vec<u32>, Vec<f32>) {
+    let mut out = Vec::with_capacity(path.len() * 4);
+    let mut out_g = Vec::with_capacity(path.len() * 4);
+    if path.is_empty() {
+        return (out, out_g);
+    }
+    out.push(path[0]);
+    out_g.push(path_g[0]);
+    for i in 1..path.len() {
+        let (a, b) = (path[i - 1], path[i]);
+        let dcode = (cold[b as usize].link >> LINK_ID_BITS) as u8;
+        if dcode == 0 {
+            out.push(b);
+            out_g.push(path_g[i]);
+            continue;
+        }
+        let d = (dcode - 1) as usize;
+        let w = if d < 4 { WALK_CARDINAL_MS } else { diag_w };
+        let mut cur = a as usize;
+        let mut g = path_g[i - 1];
+        loop {
+            let next = cg
+                .step(cur, d, offsets, dst)
+                .expect("jump link must be a straight walkable run");
+            g += w;
+            out.push(next as u32);
+            out_g.push(g);
+            if next as u32 == b {
+                break;
+            }
+            cur = next;
+        }
+        debug_assert_eq!(g.to_bits(), path_g[i].to_bits(), "jump expansion cost drift");
+    }
+    (out, out_g)
+}
+
+/// Goal-set contract: the path ends on the FIRST goal node it reaches. Optimal searches
+/// already satisfy it (an earlier goal would be strictly cheaper with positive edge
+/// weights); this is the guard for zero-cost edges, cutting the path (and its cost)
+/// at the earlier goal.
+fn end_at_first_goal(res: &mut SearchResult, is_goal: impl Fn(u32) -> bool) {
+    if let Some(i) = res.path.iter().position(|&v| is_goal(v)) {
+        if i + 1 < res.path.len() {
+            res.path.truncate(i + 1);
+            res.path_g.truncate(i + 1);
+            res.cost = res.path_g[i];
+        }
+    }
+}
+
+pub struct EngineView<'a> {
+    pub nodes: usize,
+    pub walk: WalkGraph<'a>,
+    pub macros: Arc<NeighborProvider>,
+    pub lm: LandmarkHeuristic<'a>,
+    pub extra: ExtraEdges<'a>,
+    /// Packed (plane,y,x) coordinates in node-id order — arrival-direction recovery for
+    /// canonical pruning. Set by [`EngineView::from_snapshot`]; None disables pruning.
+    pub coords: Option<&'a [u32]>,
+    /// Canonical strict-domination successor grid (roadmap Phase E Stage 2a), built
+    /// once per snapshot. Pruning engages only for UNSEEDED searches: it is cost-exact
+    /// (every optimal path survives), while seeded jitter both breaks the uniform-cost
+    /// premise of the table and exists precisely to explore tie variety.
+    pub canonical: Option<Arc<CanonicalGrid>>,
+    /// Jump-point expansion for unseeded unidirectional searches (needs `canonical`).
+    /// Defaults to the `NAVPATH_JPS` env switch; harnesses flip it per view.
+    pub jps: bool,
+}
+
+impl<'a> EngineView<'a> {
+    pub fn from_snapshot(s: &'a Snapshot) -> Self {
+        let nodes = s.counts().nodes as usize;
+        let macros = NeighborProvider::new(nodes, s.macro_src(), s.macro_dst(), s.macro_w());
+        EngineView {
+            nodes,
+            walk: WalkGraph::from_snapshot(s),
+            macros: Arc::new(macros),
+            lm: LandmarkHeuristic::from_snapshot(s),
+            extra: ExtraEdges::default(),
+            coords: Some(s.coords_packed()),
+            canonical: None,
+            jps: jps_enabled(),
+        }
+    }
+
+    pub fn from_parts(nodes: usize, walk_src: &'a [u32], walk_dst: &'a [u32], walk_w: &'a [f32], macro_src: &'a [u32], macro_dst: &'a [u32], macro_w: &'a [f32], lm_tab: &'a [u16], landmarks: usize) -> Self {
+        let macros = NeighborProvider::new(nodes, macro_src, macro_dst, macro_w);
+        let lm = LandmarkHeuristic::new(nodes, landmarks, lm_tab, crate::snapshot::ALT_QUANTUM_MS);
+        EngineView {
+            nodes,
+            walk: WalkGraph::from_edges(nodes, walk_src, walk_dst, walk_w),
+            macros: Arc::new(macros),
+            lm,
+            extra: ExtraEdges::default(),
+            coords: None,
+            canonical: None,
+            jps: jps_enabled(),
+        }
+    }
+
+    pub fn astar(&self, params: SearchParams, ctx: &mut SearchContext) -> SearchResult {
+        self.search_core(Some(params.start), &[], params.goal, &params, ctx, false)
+    }
+
+    /// Continue a search that stopped on its pop budget (`ctx` still holding its state,
+    /// see [`SearchContext::resumable`]) under the new `params.max_pops`, with every
+    /// other input unchanged. The result — path, cost, status and the CUMULATIVE `pops`
+    /// counters — is bit-identical to a fresh search run with the larger budget: heap
+    /// keys are unique and totally ordered, so the continued pop sequence is exactly the
+    /// fresh one's; the only state a budget break loses (the live entry it had just
+    /// popped) is re-pushed. Falls back to a fresh search when `ctx` holds no matching
+    /// stopped search (different query, seed, bucket or pruning mode, or a reset since).
+    pub fn astar_resume(&self, params: SearchParams, ctx: &mut SearchContext) -> SearchResult {
+        self.search_core(Some(params.start), &[], params.goal, &params, ctx, true)
+    }
+
+    /// Multi-source search with no on-graph origin: every `(node, initial_g)` seed enters
+    /// the open list with parent = u32::MAX, and the returned path starts at the winning
+    /// seed (`path[0]`). Used for virtual starts, where an out-of-graph origin can enter
+    /// the world through any eligible global teleport — one search replaces one full
+    /// search per teleport. `extra.global` is NOT auto-seeded here; pass it as `seeds`.
+    pub fn astar_multi(&self, seeds: &[(u32, f32)], params: SearchParams, ctx: &mut SearchContext) -> SearchResult {
+        self.search_core(None, seeds, params.goal, &params, ctx, false)
+    }
+
+    /// [`EngineView::astar_multi`] continuation; see [`EngineView::astar_resume`].
+    pub fn astar_multi_resume(&self, seeds: &[(u32, f32)], params: SearchParams, ctx: &mut SearchContext) -> SearchResult {
+        self.search_core(None, seeds, params.goal, &params, ctx, true)
+    }
+
+    /// Dispatch once on the seed so both loop bodies compile without the per-edge
+    /// seed branch (see [`JitterPolicy`]).
+    fn search_core(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        goal_id: u32,
+        params: &SearchParams,
+        ctx: &mut SearchContext,
+        resume: bool,
+    ) -> SearchResult {
+        let gt = OneGoal(goal_id);
+        match params.seed {
+            Some(s) => self.search_core_impl(origin, seeds, goal_id, gt, params, ctx, SeededJitter(s), resume),
+            None => self.search_core_impl(origin, seeds, goal_id, gt, params, ctx, NoJitter, resume),
+        }
+    }
+
+    /// Route to the cheapest node of a goal SET (route to an area). `origin` is the
+    /// on-graph start (its eligible globals relaxed from it, as in
+    /// [`EngineView::astar`]); with `origin = None` the search is multi-source over
+    /// `seeds`, as in [`EngineView::astar_multi`]. `params.goal` is only a
+    /// representative (landmark ranking); `params.start` is ignored.
+    ///
+    /// The result's cost is `min over g in goals of d(origin, g)` and its path ends on
+    /// the first goal node it reaches. Among goals reached at bit-identical cost the
+    /// lowest (rank, node id) wins (see [`GoalSet::with_ranks`]). `resume` continues a
+    /// budget-stopped search exactly like [`EngineView::astar_resume`]. An empty set
+    /// finds nothing.
+    pub fn astar_set(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        goals: &GoalSet,
+        params: SearchParams,
+        ctx: &mut SearchContext,
+        resume: bool,
+    ) -> SearchResult {
+        if goals.is_empty() {
+            ctx.resume = None;
+            return SearchResult::not_found(SearchStatus::NotFound, 0, 0);
+        }
+        let seeds: &[(u32, f32)] = if origin.is_some() { &[] } else { seeds };
+        match params.seed {
+            Some(s) => self.search_core_impl(origin, seeds, params.goal, goals, &params, ctx, SeededJitter(s), resume),
+            None => self.search_core_impl(origin, seeds, params.goal, goals, &params, ctx, NoJitter, resume),
+        }
+    }
+
+    /// Unidirectional search on the graph with `penalty` charged on every node entered
+    /// (see [`NodePenalty`]): exact on the penalized graph, so it avoids flagged nodes
+    /// unless entering them is cheaper than every alternative including the penalties.
+    /// `origin`/`seeds`/`goals` follow [`EngineView::astar_set`] (`goals = None`: the
+    /// single goal `params.goal`; `origin = Some(..)` ignores `seeds`). Canonical
+    /// pruning and jump points never engage. The returned `path_g`/`cost` INCLUDE the
+    /// penalties; [`NodePenalty::strip`] converts them back to real costs. `resume`
+    /// continues a budget-stopped penalized search as in [`EngineView::astar_resume`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn astar_penalized(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        goals: Option<&GoalSet>,
+        params: SearchParams,
+        penalty: NodePenalty,
+        ctx: &mut SearchContext,
+        resume: bool,
+    ) -> SearchResult {
+        let seeds: &[(u32, f32)] = if origin.is_some() { &[] } else { seeds };
+        match (goals, params.seed) {
+            (Some(gs), _) if gs.is_empty() => {
+                ctx.resume = None;
+                SearchResult::not_found(SearchStatus::NotFound, 0, 0)
+            }
+            (Some(gs), Some(s)) => self.search_core_impl(origin, seeds, params.goal, gs, &params, ctx, Penalized { inner: SeededJitter(s), pen: penalty }, resume),
+            (Some(gs), None) => self.search_core_impl(origin, seeds, params.goal, gs, &params, ctx, Penalized { inner: NoJitter, pen: penalty }, resume),
+            (None, Some(s)) => self.search_core_impl(origin, seeds, params.goal, OneGoal(params.goal), &params, ctx, Penalized { inner: SeededJitter(s), pen: penalty }, resume),
+            (None, None) => self.search_core_impl(origin, seeds, params.goal, OneGoal(params.goal), &params, ctx, Penalized { inner: NoJitter, pen: penalty }, resume),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn search_core_impl<J: JitterPolicy, G: GoalTest>(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        goal_id: u32,
+        gt: G,
+        params: &SearchParams,
+        ctx: &mut SearchContext,
+        jit: J,
+        resume: bool,
+    ) -> SearchResult {
+        let n = self.nodes;
+        let goal = goal_id as usize;
+        let bucket = params.bucket_ms;
+        // Penalized pricing is non-uniform: no canonical pruning, no jump points.
+        let canon = if J::PENALIZED { None } else { canonical_ctx(self, params.seed) };
+        let jps = self.jps && canon.is_some_and(|(cg, ..)| cg.has_jps());
+        let tag = QueryTag {
+            bidir: false,
+            origin,
+            goal: goal_id,
+            goals_fp: gt.fingerprint(),
+            seed: params.seed,
+            bucket_bits: bucket.to_bits(),
+            seeds_fp: seeds_fingerprint(seeds),
+            canon: canon.is_some(),
+            jps,
+            pen_fp: jit.pen_fp(),
+            other_gen: 0,
+        };
+        let resumed = if resume { ctx.resume.filter(|r| r.tag == tag) } else { None };
+
+        // Pick the best landmarks for this query once, and cache the goal's landmark row
+        // inside the returned selection. Every heuristic call below evaluates only these
+        // active landmarks, keeping the ALT bound admissible while cutting the per-node
+        // cost from all landmarks to a small constant. Multi-source searches rank by the
+        // goal side only (any goal-finite subset is admissible).
+        let rank_from = origin.unwrap_or(goal_id);
+        let active = match gt.single() {
+            Some(_) => self.lm.select_active(rank_from, goal_id, active_landmarks()),
+            None => self.lm.select_active_set(rank_from, gt.nodes(), active_landmarks()),
+        };
+
+        // Admissibility invariant: the ALT tables must be built over a SUPERSET of the
+        // edges this search relaxes from non-origin nodes. The builder therefore includes
+        // the full fairy-ring clique (per-request eligibility only removes fairy edges,
+        // which keeps the bound valid) and floors quick-tele-adjustable lodestone macro
+        // weights. Globals need no table coverage: they are relaxed only as origin seeds
+        // below, so no other node can use them mid-search.
+        //
+        // h(u) == INFINITY proves u cannot reach the goal through any edge the search may
+        // relax, so such nodes are never pushed. This also prevents an f=INF heap
+        // plateau, where tie-breaking degrades into DFS-like mass reopenings.
+        let h = |u: u32| -> f32 { self.lm.h_active(u, &active) };
+
+        // Arrival direction code of a NON-walk relaxation (macro / fairy / global) for
+        // canonical pruning — the direction the pop-time successor table would recover
+        // from the parent's coordinates. Jump-point mode keeps entry semantics (0) for
+        // every non-walk arrival, exactly as before.
+        let arr = |parent: u32, v: u32| -> u8 {
+            match canon {
+                Some((_, coords, _, _)) if !jps => arrival_code(coords, parent, v),
+                _ => 0,
+            }
+        };
+        let fairy = FairyFilter::new(&self.extra.fairy_sources);
+        let prefetch_rows = prefetch_rows_enabled();
+        // Goal coordinates for jump-point goal checks, unpacked once per search.
+        let goal_xy = match canon {
+            Some((_, coords, _, _)) if jps && goal < coords.len() => unpack_coord(coords[goal]),
+            _ => (i32::MIN, i32::MIN, -1),
+        };
+        // Goal-set jumps stop on entering the goals' bounding boxes instead.
+        let goal_boxes: Vec<TileBox> = match canon {
+            Some((_, coords, _, _)) if jps && gt.single().is_none() => goal_boxes(coords, gt.nodes()),
+            _ => Vec::new(),
+        };
+        // Cheapest g over the goal nodes (the incumbent).
+        let goals_min_g = |ctx: &SearchContext| -> f32 {
+            match gt.single() {
+                Some(g) => ctx.get_g(g as usize),
+                None => gt.nodes().iter().map(|&g| ctx.get_g(g as usize)).fold(f32::INFINITY, f32::min),
+            }
+        };
+
+        let mut pops: u32;
+        // Incumbent-bound push pruning: g(goal) can be finite from pop zero (a global
+        // teleport seed) and only decreases; an entry pushed with f strictly above the
+        // current incumbent can never pop before the goal does (the goal's own key has
+        // f = g(goal) exactly, since h(goal) == 0), so the push is dead work. Pruning
+        // is pop-sequence-invariant — bit-exact for path, cost, and the pops counter.
+        let mut incumbent: f32;
+        if let Some(r) = resumed {
+            ctx.resume = None;
+            // The budget break had popped (and charged) this live entry without
+            // expanding it: put it back and un-charge it; it is the heap maximum again,
+            // so it is popped (and charged) first — exactly the fresh run's next step.
+            ctx.open.push(r.pending);
+            pops = r.pops - 1;
+            incumbent = r.bound;
+        } else {
+            ctx.reset(n);
+
+            if let Some(start_id) = origin {
+                let start = start_id as usize;
+                ctx.set_g(start, 0.0);
+                ctx.set_parent(start, u32::MAX);
+                let h_start = ctx.h_cached(start, || h(start_id));
+                if h_start.is_finite() {
+                    ctx.open.push(Key::new_bucketed(h_start, 0.0, start_id, bucket));
+                }
+
+                // Global teleports cost the same from every node, so taking one at the
+                // start (g = 0) dominates taking it anywhere later. Relax them all exactly
+                // once here instead of merging them into every pop's neighbor stream.
+                for &(dst, w) in self.extra.global.iter() {
+                    if dst as usize >= n { continue; }
+                    let w_jittered = jit.w(start_id, dst, w);
+                    if w_jittered < ctx.get_g(dst as usize) {
+                        ctx.set_g(dst as usize, w_jittered);
+                        ctx.set_link(dst as usize, start_id, arr(start_id, dst));
+                        let hv = ctx.h_cached(dst as usize, || h(dst));
+                        if hv.is_finite() {
+                            ctx.open.push(Key::new_bucketed(w_jittered + hv, w_jittered, dst, bucket));
+                        }
+                    }
+                }
+            }
+
+            for &(node, g0) in seeds {
+                if node as usize >= n { continue; }
+                let g0 = if J::PENALIZED { g0 + jit.node_pen(node) } else { g0 };
+                if g0 < ctx.get_g(node as usize) {
+                    ctx.set_g(node as usize, g0);
+                    ctx.set_parent(node as usize, u32::MAX);
+                    let hv = ctx.h_cached(node as usize, || h(node));
+                    if hv.is_finite() {
+                        ctx.open.push(Key::new_bucketed(g0 + hv, g0, node, bucket));
+                    }
+                }
+            }
+            pops = 0;
+            incumbent = goals_min_g(ctx);
+        }
+
+        let max_pops = params.max_pops.unwrap_or(u32::MAX);
+        let mut ended: Option<SearchStatus> = None;
+        let mut pending: Option<Key> = None;
+        let diag_w = walk_diagonal_ms();
+
+        while let Some(key) = ctx.open.pop() {
+            let (gcur, id) = (key.g(), key.id());
+            let u = id as usize;
+            // Overlap the NEXT iteration's stale-check load with this expansion.
+            if let Some(k) = ctx.open.peek() {
+                prefetch_node(&ctx.hot, k.id());
+            }
+            // Lazy-deletion: skip heap entries that were superseded by a better g.
+            if gcur > ctx.get_g(u) { continue; }
+            if gt.is_goal(id) { break; }
+
+            pops += 1;
+            if pops > max_pops {
+                ended = Some(SearchStatus::BudgetExceeded);
+                pending = Some(key);
+                break;
+            }
+            if pops & CANCEL_CHECK_MASK == 0 {
+                if let Some(c) = params.cancel {
+                    if c.load(std::sync::atomic::Ordering::Relaxed) {
+                        ended = Some(SearchStatus::Cancelled);
+                        break;
+                    }
+                }
+            }
+
+            // Fairy hops exist for only a handful of nodes; membership is a bit probe
+            // (plus a binary search on filter hits), and hits borrow the shared
+            // destination slice.
+            let extra_slice: &[(u32, f32)] =
+                if !self.extra.fairy_sources.is_empty() && fairy.contains(&self.extra.fairy_sources, id) {
+                    &self.extra.fairy_dests
+                } else {
+                    &[]
+                };
+
+            // One fused NodeState access per relaxation: the generation check, g
+            // compare, g/link/h writes, and the h cache all touch the node's records
+            // through a single borrow instead of four accessor round-trips. `ng` is the
+            // full tentative cost (callers add the — possibly jittered — edge weight, or
+            // a whole jump's worth of steps); `dir` is the arrival direction code stored
+            // with the parent link (see [`ColdState::link`]).
+            let relax = |v_id: u32, ng: f32, dir: u8, ctx: &mut SearchContext, incumbent: &mut f32| {
+                let v = v_id as usize;
+                let gen = ctx.generation;
+                let hot = &mut ctx.hot[v];
+                let cur_g = if hot.gen == gen { hot.g } else { f32::INFINITY };
+                if ng < cur_g {
+                    let fresh = hot.gen != gen;
+                    hot.gen = gen;
+                    hot.g = ng;
+                    let cold = &mut ctx.cold[v];
+                    if fresh {
+                        cold.h = f32::NAN;
+                    }
+                    cold.link = link(id, dir);
+                    // f = ng + h >= ng > incumbent (h >= 0): the push below would be
+                    // pruned whatever h is, so skip the landmark row gather. h stays
+                    // NAN (computed lazily if a later relaxation needs it). The goal
+                    // itself is never skipped: an improvement has ng < g(goal) = incumbent.
+                    if ng > *incumbent {
+                        return;
+                    }
+                    let hv = if cold.h.is_nan() {
+                        let hh = h(v_id);
+                        cold.h = hh;
+                        hh
+                    } else {
+                        cold.h
+                    };
+                    if hv.is_finite() {
+                        // ng <= incumbent here (the prune above), so this keeps the min.
+                        if gt.is_goal(v_id) {
+                            *incumbent = ng;
+                        }
+                        let f = ng + hv;
+                        if f <= *incumbent {
+                            ctx.open.push(Key::new_bucketed(f, ng, v_id, bucket));
+                        }
+                    }
+                }
+            };
+
+            if jps {
+                // Jump-point expansion: for each tie-pruned successor direction of the
+                // stored incoming direction, jump along the straight run and relax the
+                // jump point with the run's cost accumulated step by step (the same f32
+                // sequence plain expansion would produce along that run).
+                let (cg, coords, offsets, dst) = canon.unwrap();
+                let mut bits = cg.jps_succ(u, ctx.link_code(u));
+                let tables = !cg.jump_dist.is_empty();
+                let u_xy = unpack_coord(coords[u]);
+                while bits != 0 {
+                    let d = bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    let jumped = match (gt.single(), tables) {
+                        (Some(_), true) => cg.jump_from(u, u_xy, d, goal, goal_xy, coords),
+                        (Some(_), false) => cg.jump_walk(u, d, goal, offsets, dst),
+                        (None, true) => cg.jump_from_boxes(u, u_xy, d, &goal_boxes, coords),
+                        (None, false) => cg.jump_walk_until(u, d, &|v: usize| gt.is_goal(v as u32), offsets, dst),
+                    };
+                    if let Some((j, k)) = jumped {
+                        let w = if d < 4 { WALK_CARDINAL_MS } else { diag_w };
+                        let mut ng = gcur;
+                        for _ in 0..k {
+                            ng += w;
+                        }
+                        relax(j as u32, ng, (d + 1) as u8, ctx, &mut incumbent);
+                    }
+                }
+            } else if let Some((cg, _coords, offsets, dst)) = canon {
+                // Canonical strict-domination pruning: relax only the successor bits
+                // for the node's stored arrival direction, resolved to CSR slots in
+                // O(1); weights derive from the direction bit (0-3 cardinal). The kept
+                // successors' hot records are prefetched together before the
+                // data-dependent relax branches serialize the misses.
+                let mask = cg.masks[u];
+                let mut bits = cg.succ_for(u, ctx.link_code(u)) & mask;
+                let s0 = offsets[u] as usize;
+                let mut tv = [0u32; 8];
+                let mut td = [0u8; 8];
+                let mut k = 0usize;
+                while bits != 0 {
+                    let d = bits.trailing_zeros();
+                    bits &= bits - 1;
+                    let slot = s0 + (mask & ((1u8 << d) - 1)).count_ones() as usize;
+                    let v_id = dst[slot];
+                    prefetch_node(&ctx.hot, v_id);
+                    if prefetch_rows { self.lm.prefetch_row(v_id); }
+                    tv[k] = v_id;
+                    td[k] = d as u8;
+                    k += 1;
+                }
+                for i in 0..k {
+                    let (v_id, d) = (tv[i], td[i]);
+                    let w = if d < 4 { WALK_CARDINAL_MS } else { diag_w };
+                    relax(v_id, gcur + jit.w(id, v_id, w), d + 1, ctx, &mut incumbent);
+                }
+            } else {
+                // Issue all neighbor hot-state loads up front: the relax loop's
+                // improving branch is data-dependent, so hardware alone cannot keep 8
+                // misses in flight across mispredicts.
+                for &d in self.walk.neighbor_ids(id) {
+                    prefetch_node(&ctx.hot, d);
+                }
+                self.walk.for_each_neighbor(id, |v_id, w| relax(v_id, gcur + jit.w(id, v_id, w), 0, ctx, &mut incumbent));
+            }
+            if self.macros.has_macro(id) {
+                for (v_id, w) in self.macros.macro_neighbors(id, params.macro_filter) {
+                    relax(v_id, gcur + jit.w(id, v_id, w), arr(id, v_id), ctx, &mut incumbent);
+                }
+            }
+            for &(v_id, w) in extra_slice {
+                if v_id != id {
+                    relax(v_id, gcur + jit.w(id, v_id, w), arr(id, v_id), ctx, &mut incumbent);
+                }
+            }
+        }
+        if let (Some(SearchStatus::BudgetExceeded), Some(pk)) = (ended, pending) {
+            ctx.resume = Some(ResumeState {
+                tag,
+                pops,
+                pops_f: pops,
+                pops_b: 0,
+                bound: incumbent,
+                meet: u32::MAX,
+                pending: pk,
+                pending_forward: true,
+            });
+        }
+        // The goal the path ends on. A goal set takes the lowest (g, rank, id): after a
+        // normal stop that is a goal at the popped (minimal) cost, and every goal tied
+        // with it is already relaxed at that cost — the ALT bound is STRICTLY below the
+        // true distance at non-goal nodes (its one-quantum slack), so each tied goal's
+        // optimal predecessor had f < cost and was expanded before the stop. After a
+        // budget/cancel break it is the best goal discovered so far.
+        let reached = match gt.single() {
+            Some(g) => g,
+            None => match gt.best_by(|g| ctx.get_g(g as usize)) {
+                Some(g) => g,
+                None => return SearchResult::not_found(ended.unwrap_or(SearchStatus::NotFound), pops, 0),
+            },
+        };
+        let goal = reached as usize;
+        let goal_id = reached;
+        if ctx.get_g(goal) == f32::INFINITY {
+            return SearchResult::not_found(ended.unwrap_or(SearchStatus::NotFound), pops, 0);
+        }
+        let mut path = Vec::new();
+        let mut path_g = Vec::new();
+        let mut cur = goal_id;
+        loop {
+            if let Some(start_id) = origin {
+                if cur == start_id {
+                    path.push(cur);
+                    path_g.push(ctx.get_g(cur as usize));
+                    break;
+                }
+            }
+            path.push(cur);
+            path_g.push(ctx.get_g(cur as usize));
+            let p = ctx.get_parent(cur as usize);
+            if p == u32::MAX { break; }
+            cur = p;
+        }
+        path.reverse();
+        path_g.reverse();
+        if jps {
+            // Parent links are jump points; expand each straight run back into tiles
+            // so the returned path is tile-adjacent exactly as plain expansion yields.
+            let (cg, _coords, offsets, dst) = canon.unwrap();
+            let (p, g) = expand_jumps(&path, &path_g, &ctx.cold, cg, offsets, dst, diag_w);
+            path = p;
+            path_g = g;
+        }
+        // A budget/cancel break can land AFTER a path to the goal was discovered but
+        // BEFORE the goal popped (i.e. before its cost was proven minimal) — e.g. a
+        // global teleport seeds g(goal) at pop zero. Surface the truncation in the
+        // status so callers can retry / refuse to cache instead of trusting the cost.
+        let status = ended.unwrap_or(SearchStatus::Found);
+        let mut res = SearchResult { found: true, status, path, path_g, cost: ctx.get_g(goal), pops, pops_f: pops, pops_b: 0 };
+        if gt.single().is_none() {
+            end_at_first_goal(&mut res, |v| gt.is_goal(v));
+        }
+        res
+    }
+}
+
+
+impl<'a> EngineView<'a> {
+    /// Bidirectional A* in the MM formulation (Holte et al., "Bidirectional Search That
+    /// Is Guaranteed to Meet in the Middle"): each side is ordered by
+    /// pr(n) = max(g(n) + h(n), 2*g(n)) with its own ADMISSIBLE bound (forward:
+    /// d(.,goal) via `h_active`; backward: d(origins,.) via `h_active_rev` anchored on
+    /// start+seeds), and the search stops once the best meeting cost mu <=
+    /// min(prmin_f, prmin_b). The 2g term guarantees neither side expands past the
+    /// midpoint, which is where bidirection wins; correctness needs only admissibility,
+    /// so quantization inconsistency cannot break exactness (unlike average-potential
+    /// formulations).
+    ///
+    /// The walk graph must be symmetric (the builder asserts this at build time);
+    /// backward macro edges come from `bp.macros_rev`; backward fairy predecessors of a
+    /// ring x are all other eligible rings at weight cost(x); globals never appear in
+    /// the backward direction (they are forward seeds only, where g(start)=0 dominates).
+    pub fn astar_bidir(
+        &self,
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+    ) -> SearchResult {
+        self.bidir_core(Some(params.start), &[], bp, params, ctx_f, ctx_b, false)
+    }
+
+    /// Continue a budget-stopped [`EngineView::astar_bidir`] (state lives in `ctx_f`;
+    /// `ctx_b` must be the same backward context, untouched since). Same contract as
+    /// [`EngineView::astar_resume`].
+    pub fn astar_bidir_resume(
+        &self,
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+    ) -> SearchResult {
+        self.bidir_core(Some(params.start), &[], bp, params, ctx_f, ctx_b, true)
+    }
+
+    /// Multi-source bidirectional MM: every `(node, initial_g)` seed enters the
+    /// forward frontier with parent = u32::MAX (unjittered, exactly like
+    /// [`EngineView::astar_multi`]); backward bounds anchor on the seed set. Used for
+    /// virtual starts, closing the last unidirectional-only production path.
+    /// `extra.global` is NOT auto-seeded here; pass it as `seeds`.
+    pub fn astar_bidir_multi(
+        &self,
+        seeds: &[(u32, f32)],
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+    ) -> SearchResult {
+        self.bidir_core(None, seeds, bp, params, ctx_f, ctx_b, false)
+    }
+
+    /// [`EngineView::astar_bidir_multi`] continuation; see [`EngineView::astar_bidir_resume`].
+    pub fn astar_bidir_multi_resume(
+        &self,
+        seeds: &[(u32, f32)],
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+    ) -> SearchResult {
+        self.bidir_core(None, seeds, bp, params, ctx_f, ctx_b, true)
+    }
+
+    /// Dispatch once on the seed (see [`JitterPolicy`] / `search_core`).
+    #[allow(clippy::too_many_arguments)]
+    fn bidir_core(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+        resume: bool,
+    ) -> SearchResult {
+        let gt = OneGoal(params.goal);
+        match params.seed {
+            Some(s) => self.bidir_core_impl(origin, seeds, gt, bp, params, ctx_f, ctx_b, SeededJitter(s), resume),
+            None => self.bidir_core_impl(origin, seeds, gt, bp, params, ctx_f, ctx_b, NoJitter, resume),
+        }
+    }
+
+    /// Bidirectional MM to the cheapest node of a goal SET: the backward frontier is
+    /// seeded with every goal at g = 0 (the mirror of the forward multi-source seeds),
+    /// the forward bound is the set-aggregated ALT bound
+    /// ([`LandmarkHeuristic::select_active_set`]), the backward bound stays anchored on
+    /// the origins, and the stop rule is unchanged. Same `origin`/`seeds`/`resume`
+    /// contract as [`EngineView::astar_set`]; the path ends on the goal whose backward
+    /// tree the meeting node lies in (deterministic, but tied goals are not ranked —
+    /// only the unidirectional engine applies the [`GoalSet`] tie ranks).
+    #[allow(clippy::too_many_arguments)]
+    pub fn astar_bidir_set(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        goals: &GoalSet,
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+        resume: bool,
+    ) -> SearchResult {
+        if goals.is_empty() {
+            ctx_f.resume = None;
+            return SearchResult::not_found(SearchStatus::NotFound, 0, 0);
+        }
+        let seeds: &[(u32, f32)] = if origin.is_some() { &[] } else { seeds };
+        match params.seed {
+            Some(s) => self.bidir_core_impl(origin, seeds, goals, bp, params, ctx_f, ctx_b, SeededJitter(s), resume),
+            None => self.bidir_core_impl(origin, seeds, goals, bp, params, ctx_f, ctx_b, NoJitter, resume),
+        }
+    }
+
+    /// Backward-bound landmark selection for this search's anchor set (origin at 0 plus
+    /// every in-range global at its cost, or the in-range seed list), reusing the
+    /// profile's precomputed global aggregate when its fingerprint matches.
+    ///
+    /// With `NAVPATH_REV_ANCHOR_FILTER=1`, anchors that provably cannot reach the goal
+    /// (forward h = INF) are dropped first (see [`rev_anchor_filter_enabled`] for why it
+    /// is off by default). The backward search only ever touches
+    /// nodes that reach the goal, and an anchor that could reach such a node could
+    /// reach the goal too — so for every node the bound is evaluated on, the dropped
+    /// anchors contribute nothing to d(anchor_set, v): the bound stays admissible and
+    /// gets tighter. It matters a lot: one global landing in a one-way pocket makes an
+    /// anchor's landmark entries UNREACHABLE, which invalidates that landmark's
+    /// aggregate for the whole anchor set — with all globals eligible, 15 pocket
+    /// landings left 0 of 64 backward columns usable (h_b = 0, a blind backward half).
+    fn select_rev(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        goal_id: u32,
+        h_f: &dyn Fn(u32) -> f32,
+    ) -> super::heuristics::ActiveLandmarksRev {
+        let n = self.nodes;
+        let filter = rev_anchor_filter_enabled();
+        let reach = |a: u32| !filter || h_f(a).is_finite();
+        let in_range = |&&(node, _): &&(u32, f32)| (node as usize) < n;
+        if let Some(base) = self.extra.global_rev_base {
+            // The base covers exactly one anchor list: `global` in origin mode, or the
+            // seed list in multi-source mode (the service seeds virtual starts with the
+            // eligible globals).
+            let (covered, rest): (&[(u32, f32)], &[(u32, f32)]) = if origin.is_some() {
+                (self.extra.global.as_ref(), seeds)
+            } else {
+                (seeds, &[])
+            };
+            if base.landmarks() == self.lm.landmarks && base.matches(covered.iter().filter(in_range)) {
+                let mut extra: Vec<(u32, f32)> = Vec::with_capacity(1 + rest.len());
+                if let Some(o) = origin {
+                    if reach(o) {
+                        extra.push((o, 0.0));
+                    }
+                }
+                extra.extend(rest.iter().filter(in_range).copied().filter(|&(a, _)| reach(a)));
+                let keep: Vec<bool> = base.anchors().iter().map(|&(a, _)| reach(a)).collect();
+                if keep.iter().all(|&k| k) {
+                    return self.lm.select_active_rev_based(Some(base), &extra, goal_id, active_landmarks());
+                }
+                return self.lm.select_active_rev_subset(base, &keep, &extra, goal_id, active_landmarks());
+            }
+        }
+        let mut anchors: Vec<(u32, f32)> = Vec::with_capacity(1 + self.extra.global.len() + seeds.len());
+        if let Some(o) = origin {
+            anchors.push((o, 0.0));
+            anchors.extend(self.extra.global.iter().filter(in_range).copied());
+        }
+        anchors.extend(seeds.iter().filter(in_range).copied());
+        if filter {
+            anchors.retain(|&(a, _)| reach(a));
+        }
+        self.lm.select_active_rev(&anchors, goal_id, active_landmarks())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bidir_core_impl<J: JitterPolicy, G: GoalTest>(
+        &self,
+        origin: Option<u32>,
+        seeds: &[(u32, f32)],
+        gt: G,
+        bp: &BidirParams,
+        params: SearchParams,
+        ctx_f: &mut SearchContext,
+        ctx_b: &mut SearchContext,
+        jit: J,
+        resume: bool,
+    ) -> SearchResult {
+        let n = self.nodes;
+        let goal_id = params.goal;
+        let bucket = params.bucket_ms;
+
+        if let Some(o) = origin.filter(|&o| gt.is_goal(o)) {
+            ctx_f.resume = None;
+            return SearchResult { found: true, status: SearchStatus::Found, path: vec![o], path_g: vec![0.0], cost: 0.0, pops: 0, pops_f: 0, pops_b: 0 };
+        }
+
+        let canon = canonical_ctx(self, params.seed);
+        let mut tag = QueryTag {
+            bidir: true,
+            origin,
+            goal: goal_id,
+            goals_fp: gt.fingerprint(),
+            seed: params.seed,
+            bucket_bits: bucket.to_bits(),
+            seeds_fp: seeds_fingerprint(seeds),
+            canon: canon.is_some(),
+            jps: false,
+            pen_fp: 0,
+            other_gen: ctx_b.generation,
+        };
+        let resumed = if resume { ctx_f.resume.filter(|r| r.tag == tag) } else { None };
+
+        let active_f = match gt.single() {
+            Some(_) => self.lm.select_active(origin.unwrap_or(goal_id), goal_id, active_landmarks()),
+            None => self.lm.select_active_set(origin.unwrap_or(goal_id), gt.nodes(), active_landmarks()),
+        };
+        let h_f = |u: u32| -> f32 { self.lm.h_active(u, &active_f) };
+
+        // Backward bound anchors: the forward origins — start at 0 plus globals at
+        // their cost, or (multi-source) the seed set itself.
+        let active_b = self.select_rev(origin, seeds, goal_id, &h_f);
+        let h_b = |u: u32| -> f32 { self.lm.h_active_rev(u, &active_b) };
+
+        // Non-walk arrival direction codes for canonical pruning (see search_core_impl).
+        let arr = |parent: u32, v: u32| -> u8 {
+            match canon {
+                Some((_, coords, _, _)) => arrival_code(coords, parent, v),
+                None => 0,
+            }
+        };
+        let fairy = FairyFilter::new(&self.extra.fairy_sources);
+        let prefetch_rows = prefetch_rows_enabled();
+        // The backward bound reads rows only when it has usable landmark columns (with
+        // h_b = 0 prefetching them is pure waste).
+        let prefetch_rows_b = prefetch_rows && !active_b.indices.is_empty();
+
+        let mut mu: f32;
+        let mut meet: Option<u32>;
+        let mut pops: u32;
+        let mut pops_f: u32;
+        let mut pops_b: u32;
+
+        if let Some(r) = resumed {
+            ctx_f.resume = None;
+            // Re-push the charged-but-unexpanded entry of the budget break (see
+            // search_core_impl) on its own side and un-charge it.
+            pops = r.pops - 1;
+            pops_f = r.pops_f;
+            pops_b = r.pops_b;
+            if r.pending_forward {
+                ctx_f.open.push(r.pending);
+                pops_f -= 1;
+            } else {
+                ctx_b.open.push(r.pending);
+                pops_b -= 1;
+            }
+            mu = r.bound;
+            meet = if r.meet == u32::MAX { None } else { Some(r.meet) };
+        } else {
+            ctx_f.reset(n);
+            ctx_b.reset(n);
+            tag.other_gen = ctx_b.generation;
+            mu = f32::INFINITY;
+            meet = None;
+
+            // --- forward seeding (mirrors the unidirectional path) ---
+            if let Some(origin_id) = origin {
+                let start = origin_id as usize;
+                ctx_f.set_g(start, 0.0);
+                ctx_f.set_parent(start, u32::MAX);
+                let hs = ctx_f.h_cached(start, || h_f(origin_id));
+                if hs.is_finite() {
+                    ctx_f.open.push(Key::new_bucketed(hs.max(0.0), 0.0, origin_id, bucket));
+                }
+                for &(dst, w) in self.extra.global.iter() {
+                    if dst as usize >= n { continue; }
+                    let w_j = jit.w(origin_id, dst, w);
+                    if w_j < ctx_f.get_g(dst as usize) {
+                        ctx_f.set_g(dst as usize, w_j);
+                        ctx_f.set_link(dst as usize, origin_id, arr(origin_id, dst));
+                        let hv = ctx_f.h_cached(dst as usize, || h_f(dst));
+                        if hv.is_finite() {
+                            ctx_f.open.push(Key::new_bucketed((w_j + hv).max(2.0 * w_j), w_j, dst, bucket));
+                        }
+                    }
+                }
+            }
+            for &(node, g0) in seeds {
+                if node as usize >= n { continue; }
+                if g0 < ctx_f.get_g(node as usize) {
+                    ctx_f.set_g(node as usize, g0);
+                    ctx_f.set_parent(node as usize, u32::MAX);
+                    let hv = ctx_f.h_cached(node as usize, || h_f(node));
+                    if hv.is_finite() {
+                        ctx_f.open.push(Key::new_bucketed((g0 + hv).max(2.0 * g0), g0, node, bucket));
+                    }
+                }
+            }
+
+            // --- backward seeding (every goal of a set at g = 0) ---
+            for &gid in gt.nodes() {
+                let g = gid as usize;
+                if g >= n { continue; }
+                ctx_b.set_g(g, 0.0);
+                ctx_b.set_parent(g, u32::MAX);
+                let hg = ctx_b.h_cached(g, || h_b(gid));
+                if hg.is_finite() {
+                    ctx_b.open.push(Key::new_bucketed(hg.max(0.0), 0.0, gid, bucket));
+                }
+                // A forward seed IS a meeting candidate if it is a goal itself.
+                let gf = ctx_f.get_g(g);
+                if gf < mu {
+                    mu = gf;
+                    meet = Some(gid);
+                }
+            }
+            pops = 0;
+            pops_f = 0;
+            pops_b = 0;
+        }
+
+        let fairy_cost_of = |x: u32| -> Option<f32> {
+            self.extra
+                .fairy_dests
+                .binary_search_by(|probe| probe.0.cmp(&x))
+                .ok()
+                .map(|i| self.extra.fairy_dests[i].1)
+        };
+
+        let diag_w = walk_diagonal_ms();
+        let max_pops = params.max_pops.unwrap_or(u32::MAX);
+        let mut ended: Option<SearchStatus> = None;
+        let mut pending: Option<(Key, bool)> = None;
+
+        loop {
+            let tf = ctx_f.open.peek().map(|k| k.f_lower(bucket)).unwrap_or(f32::INFINITY);
+            let tb = ctx_b.open.peek().map(|k| k.f_lower(bucket)).unwrap_or(f32::INFINITY);
+            // MM stopping rule: pr is a lower bound on the cost of any solution still
+            // passing through that side's frontier, so mu <= min proves optimality.
+            if mu <= tf.min(tb) {
+                break;
+            }
+            // An exhausted side with no meeting yet proves there is no path: with mu
+            // infinite nothing was pr-pruned, and only provably-unreachable (h = INF)
+            // pushes were skipped, so an empty forward frontier means every origin-reachable
+            // node that could reach the goal was expanded without touching it (a backward
+            // one: no origin reaches the goal). Without this the other side ran on to
+            // exhaustion (or the pop budget, triggering a pointless retry).
+            if mu == f32::INFINITY && (tf == f32::INFINITY || tb == f32::INFINITY) {
+                break;
+            }
+
+            let forward = tf <= tb;
+            let Some(key) = (if forward { ctx_f.open.pop() } else { ctx_b.open.pop() }) else {
+                break;
+            };
+            let (gcur, id) = (key.g(), key.id());
+            // Overlap the chosen side's NEXT stale-check load with this expansion.
+            if forward {
+                if let Some(k) = ctx_f.open.peek() { prefetch_node(&ctx_f.hot, k.id()); }
+            } else if let Some(k) = ctx_b.open.peek() {
+                prefetch_node(&ctx_b.hot, k.id());
+            }
+            let u = id as usize;
+            // Lazy-deletion: an entry superseded by a better g is not an expansion, so it
+            // must be skipped BEFORE the budget is charged — exactly as the unidirectional
+            // loop does. Charging stale entries makes the effective budget shrink with heap
+            // churn (which seed jitter inflates), so a reachable goal can hit
+            // BudgetExceeded well under `max_pops` real expansions.
+            let g_side = if forward { ctx_f.get_g(u) } else { ctx_b.get_g(u) };
+            if gcur > g_side { continue; }
+
+            pops += 1;
+            if forward { pops_f += 1 } else { pops_b += 1 }
+            if pops > max_pops {
+                ended = Some(SearchStatus::BudgetExceeded);
+                pending = Some((key, forward));
+                break;
+            }
+            if pops & CANCEL_CHECK_MASK == 0 {
+                if let Some(c) = params.cancel {
+                    if c.load(std::sync::atomic::Ordering::Relaxed) {
+                        ended = Some(SearchStatus::Cancelled);
+                        break;
+                    }
+                }
+            }
+
+            if forward {
+                // ---- expand forward ----
+                let fairy_slice: &[(u32, f32)] =
+                    if !self.extra.fairy_sources.is_empty() && fairy.contains(&self.extra.fairy_sources, id)
+                    { &self.extra.fairy_dests } else { &[] };
+
+                // Fused NodeState access + push pruning: an entry whose pr exceeds the
+                // (already-updated) meeting cost mu can never be expanded before the
+                // MM stop rule fires — mu only decreases after the decision, so the
+                // prune is pop-sequence-invariant, hence bit-exact.
+                let relax = |v_id: u32, w: f32, dir: u8, ctx: &mut SearchContext, other: &SearchContext,
+                             mu: &mut f32, meet: &mut Option<u32>| {
+                    let v = v_id as usize;
+                    let w_j = jit.w(id, v_id, w);
+                    let ng = gcur + w_j;
+                    let gen = ctx.generation;
+                    let hot = &mut ctx.hot[v];
+                    let cur_g = if hot.gen == gen { hot.g } else { f32::INFINITY };
+                    if ng < cur_g {
+                        let fresh = hot.gen != gen;
+                        hot.gen = gen;
+                        hot.g = ng;
+                        if fresh {
+                            ctx.blk[v >> 6] = gen;
+                        }
+                        let cold = &mut ctx.cold[v];
+                        if fresh {
+                            cold.h = f32::NAN;
+                        }
+                        cold.link = link(id, dir);
+                        // Meet probe, filtered by the other side's block stamps: an
+                        // unstamped block proves og = INF without the random hot read.
+                        if other.blk[v >> 6] == other.generation {
+                            let og = other.get_g(v);
+                            if og.is_finite() && ng + og < *mu {
+                                *mu = ng + og;
+                                *meet = Some(v_id);
+                            }
+                        }
+                        // pr >= 2*ng > mu: pruned whatever h is — skip the row gather.
+                        if 2.0 * ng > *mu {
+                            return;
+                        }
+                        let hv = if cold.h.is_nan() {
+                            let hh = h_f(v_id);
+                            cold.h = hh;
+                            hh
+                        } else {
+                            cold.h
+                        };
+                        if hv.is_finite() {
+                            let pr = (ng + hv).max(2.0 * ng);
+                            if pr <= *mu {
+                                ctx.open.push(Key::new_bucketed(pr, ng, v_id, bucket));
+                            }
+                        }
+                    }
+                };
+                if let Some((cg, _coords, offsets, dst)) = canon {
+                    let mask = cg.masks[u];
+                    let mut bits = cg.succ_for(u, ctx_f.link_code(u)) & mask;
+                    let s0 = offsets[u] as usize;
+                    let mut tv = [0u32; 8];
+                    let mut td = [0u8; 8];
+                    let mut k = 0usize;
+                    while bits != 0 {
+                        let d = bits.trailing_zeros();
+                        bits &= bits - 1;
+                        let slot = s0 + (mask & ((1u8 << d) - 1)).count_ones() as usize;
+                        let v_id = dst[slot];
+                        prefetch_node(&ctx_f.hot, v_id);
+                        if prefetch_rows { self.lm.prefetch_row(v_id); }
+                        tv[k] = v_id;
+                        td[k] = d as u8;
+                        k += 1;
+                    }
+                    for i in 0..k {
+                        let d = td[i];
+                        let w = if d < 4 { WALK_CARDINAL_MS } else { diag_w };
+                        relax(tv[i], w, d + 1, ctx_f, ctx_b, &mut mu, &mut meet);
+                    }
+                } else {
+                    for &d in self.walk.neighbor_ids(id) {
+                        prefetch_node(&ctx_f.hot, d);
+                    }
+                    self.walk.for_each_neighbor(id, |v_id, w| {
+                        relax(v_id, w, 0, ctx_f, ctx_b, &mut mu, &mut meet)
+                    });
+                }
+                if self.macros.has_macro(id) {
+                    for (v_id, w) in self.macros.macro_neighbors(id, params.macro_filter) {
+                        relax(v_id, w, arr(id, v_id), ctx_f, ctx_b, &mut mu, &mut meet);
+                    }
+                }
+                for &(v_id, w) in fairy_slice {
+                    if v_id != id {
+                        relax(v_id, w, arr(id, v_id), ctx_f, ctx_b, &mut mu, &mut meet);
+                    }
+                }
+            } else {
+                // ---- expand backward (over reversed edges) ----
+                // Backward fairy: predecessors of ring x are all other rings, each via
+                // the forward edge y->x whose weight is cost(x).
+                let fairy_pred_w: Option<f32> =
+                    if !self.extra.fairy_sources.is_empty() && fairy.contains(&self.extra.fairy_sources, id)
+                    { fairy_cost_of(id) } else { None };
+
+                let relax = |y_id: u32, w: f32, dir: u8, ctx: &mut SearchContext, other: &SearchContext,
+                             mu: &mut f32, meet: &mut Option<u32>| {
+                    let y = y_id as usize;
+                    // Forward edge identity is (y -> id): jitter must match the forward
+                    // search's pricing of the same physical edge.
+                    let w_j = jit.w(y_id, id, w);
+                    let ng = gcur + w_j;
+                    let gen = ctx.generation;
+                    let hot = &mut ctx.hot[y];
+                    let cur_g = if hot.gen == gen { hot.g } else { f32::INFINITY };
+                    if ng < cur_g {
+                        let fresh = hot.gen != gen;
+                        hot.gen = gen;
+                        hot.g = ng;
+                        if fresh {
+                            ctx.blk[y >> 6] = gen;
+                        }
+                        let cold = &mut ctx.cold[y];
+                        if fresh {
+                            cold.h = f32::NAN;
+                        }
+                        cold.link = link(id, dir);
+                        if other.blk[y >> 6] == other.generation {
+                            let og = other.get_g(y);
+                            if og.is_finite() && ng + og < *mu {
+                                *mu = ng + og;
+                                *meet = Some(y_id);
+                            }
+                        }
+                        if 2.0 * ng > *mu {
+                            return;
+                        }
+                        let hv = if cold.h.is_nan() {
+                            let hh = h_b(y_id);
+                            cold.h = hh;
+                            hh
+                        } else {
+                            cold.h
+                        };
+                        if hv.is_finite() {
+                            let pr = (ng + hv).max(2.0 * ng);
+                            if pr <= *mu {
+                                ctx.open.push(Key::new_bucketed(pr, ng, y_id, bucket));
+                            }
+                        }
+                    }
+                };
+                // Walk graph is symmetric (asserted at build time): forward neighbor
+                // slice doubles as predecessor slice with identical weights.
+                if let Some((cg, _coords, offsets, dst)) = canon {
+                    // Walk symmetry (builder-asserted) makes the same table valid for
+                    // the reversed graph: predecessors == successors, direction taken
+                    // from the backward arrival exactly as forward.
+                    let mask = cg.masks[u];
+                    let mut bits = cg.succ_for(u, ctx_b.link_code(u)) & mask;
+                    let s0 = offsets[u] as usize;
+                    let mut tv = [0u32; 8];
+                    let mut td = [0u8; 8];
+                    let mut k = 0usize;
+                    while bits != 0 {
+                        let d = bits.trailing_zeros();
+                        bits &= bits - 1;
+                        let slot = s0 + (mask & ((1u8 << d) - 1)).count_ones() as usize;
+                        let y_id = dst[slot];
+                        prefetch_node(&ctx_b.hot, y_id);
+                        if prefetch_rows_b { self.lm.prefetch_row(y_id); }
+                        tv[k] = y_id;
+                        td[k] = d as u8;
+                        k += 1;
+                    }
+                    for i in 0..k {
+                        let d = td[i];
+                        let w = if d < 4 { WALK_CARDINAL_MS } else { diag_w };
+                        relax(tv[i], w, d + 1, ctx_b, ctx_f, &mut mu, &mut meet);
+                    }
+                } else {
+                    for &d in self.walk.neighbor_ids(id) {
+                        prefetch_node(&ctx_b.hot, d);
+                    }
+                    self.walk.for_each_neighbor(id, |y_id, w| {
+                        relax(y_id, w, 0, ctx_b, ctx_f, &mut mu, &mut meet)
+                    });
+                }
+                if bp.macros_rev.has_macro(id) {
+                    for (y_id, w) in bp.macros_rev.macro_neighbors(id, bp.macro_filter_rev) {
+                        relax(y_id, w, arr(id, y_id), ctx_b, ctx_f, &mut mu, &mut meet);
+                    }
+                }
+                if let Some(wx) = fairy_pred_w {
+                    for &(y_id, _) in self.extra.fairy_dests.iter() {
+                        if y_id != id {
+                            relax(y_id, wx, arr(id, y_id), ctx_b, ctx_f, &mut mu, &mut meet);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let (Some(SearchStatus::BudgetExceeded), Some((pk, fwd))) = (ended, pending) {
+            ctx_f.resume = Some(ResumeState {
+                tag,
+                pops,
+                pops_f,
+                pops_b,
+                bound: mu,
+                meet: meet.unwrap_or(u32::MAX),
+                pending: pk,
+                pending_forward: fwd,
+            });
+        }
+
+        let Some(m) = meet else {
+            return SearchResult::not_found(ended.unwrap_or(SearchStatus::NotFound), pops_f, pops_b);
+        };
+
+        // Reconstruct origin/seed->meet from forward parents, meet->goal from backward
+        // parents. Multi-source paths start at the winning seed (parent == u32::MAX).
+        let mut path = Vec::new();
+        let mut path_g = Vec::new();
+        let mut cur = m;
+        loop {
+            path.push(cur);
+            path_g.push(ctx_f.get_g(cur as usize));
+            if origin == Some(cur) { break; }
+            let p = ctx_f.get_parent(cur as usize);
+            if p == u32::MAX { break; }
+            cur = p;
+        }
+        path.reverse();
+        path_g.reverse();
+        let cost = ctx_f.get_g(m as usize) + ctx_b.get_g(m as usize);
+        let mut cur = m;
+        loop {
+            let p = ctx_b.get_parent(cur as usize);
+            if p == u32::MAX { break; }
+            path.push(p);
+            // Origin-to-p cost along this path: total minus the backward remainder.
+            path_g.push(cost - ctx_b.get_g(p as usize));
+            cur = p;
+        }
+        // MM records mu/meet at FIRST frontier contact (or immediately, when a global
+        // teleport seed IS the goal) but proves optimality only at the stop rule; a
+        // budget/cancel break inside that window leaves a valid-but-unproven meeting
+        // path. Surface the truncation instead of reporting Found.
+        let status = ended.unwrap_or(SearchStatus::Found);
+        let mut res = SearchResult { found: true, status, path, path_g, cost, pops, pops_f, pops_b };
+        if gt.single().is_none() {
+            end_at_first_goal(&mut res, |v| gt.is_goal(v));
+        }
+        res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Distinct expansions `bidir_budget_charges_expansions_not_stale_pops` performs.
+    const EXPECTED_BIDIR_POPS: u32 = 20;
+
+    fn line_view<'a>(
+        walk_src: &'a [u32], walk_dst: &'a [u32], walk_w: &'a [f32],
+        macro_src: &'a [u32], macro_dst: &'a [u32], macro_w: &'a [f32],
+        nodes: usize,
+    ) -> EngineView<'a> {
+        EngineView::from_parts(
+            nodes,
+            walk_src, walk_dst, walk_w,
+            macro_src, macro_dst, macro_w,
+            &[], 0,
+        )
+    }
+
+    #[test]
+    fn astar_simple_line_prefers_walk_edges() {
+        let walk_src = [0u32, 1u32];
+        let walk_dst = [1u32, 2u32];
+        let walk_w = [1.0f32, 1.0f32];
+        let macro_src = [0u32];
+        let macro_dst = [2u32];
+        let macro_w = [3.5f32];
+        let view = line_view(&walk_src, &walk_dst, &walk_w, &macro_src, &macro_dst, &macro_w, 3);
+        let mut ctx = SearchContext::new(3);
+        let res = view.astar(SearchParams { start: 0, goal: 2, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+        assert!(res.found);
+        assert_eq!(res.status, SearchStatus::Found);
+        assert_eq!(res.path, vec![0,1,2]);
+        assert!((res.cost - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn global_teleports_relaxed_from_start() {
+        // 0 -1-> 1 -1-> 2 -1-> 3, plus a global teleport to node 3 costing 1.5.
+        // The teleport must win even though it is never merged mid-search.
+        let walk_src = [0u32, 1, 2];
+        let walk_dst = [1u32, 2, 3];
+        let walk_w = [1.0f32, 1.0, 1.0];
+        let mut view = line_view(&walk_src, &walk_dst, &walk_w, &[], &[], &[], 4);
+        view.extra.global = vec![(3, 1.5)].into();
+        let mut ctx = SearchContext::new(4);
+        let res = view.astar(SearchParams { start: 0, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+        assert!(res.found);
+        assert_eq!(res.path, vec![0, 3]);
+        assert!((res.cost - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fairy_hops_only_from_source_nodes() {
+        // 0 -1-> 1 -1-> 2; node 1 is a fairy source and node 3 a fairy destination.
+        let walk_src = [0u32, 1];
+        let walk_dst = [1u32, 2];
+        let walk_w = [1.0f32, 1.0];
+        let mut view = line_view(&walk_src, &walk_dst, &walk_w, &[], &[], &[], 4);
+        view.extra.fairy_sources = vec![1, 3].into();
+        view.extra.fairy_dests = vec![(1, 0.25), (3, 0.25)].into();
+        let mut ctx = SearchContext::new(4);
+        let res = view.astar(SearchParams { start: 0, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+        assert!(res.found);
+        assert_eq!(res.path, vec![0, 1, 3]);
+        assert!((res.cost - 1.25).abs() < 1e-6);
+        // ...but a non-source node cannot hop: from 0 straight to 3 is impossible
+        // without passing through the ring at 1.
+        let res2 = view.astar(SearchParams { start: 2, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+        assert!(!res2.found);
+        assert_eq!(res2.status, SearchStatus::NotFound);
+    }
+
+    #[test]
+    fn multi_source_picks_cheapest_entry() {
+        // Two chains: 0 -1-> 1 -1-> 2 (goal), and 3 -1-> 2. Seeds: node 0 at g=5, node 3
+        // at g=1. Best total is via 3 (1 + 1 = 2); path must start at the winning seed.
+        let walk_src = [0u32, 1, 3];
+        let walk_dst = [1u32, 2, 2];
+        let walk_w = [1.0f32, 1.0, 1.0];
+        let view = line_view(&walk_src, &walk_dst, &walk_w, &[], &[], &[], 4);
+        let mut ctx = SearchContext::new(4);
+        let params = SearchParams { start: 0, goal: 2, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 };
+        let res = view.astar_multi(&[(0, 5.0), (3, 1.0)], params, &mut ctx);
+        assert!(res.found);
+        assert_eq!(res.path, vec![3, 2]);
+        assert!((res.cost - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multi_source_uses_fairy_hops() {
+        // Virtual-start shape: the search enters at seed node 0 (g=2.0) and the goal 3
+        // is reachable only via the fairy hop at node 1. Guards the adapter wiring bug
+        // where virtual-start searches never populated the fairy extras at all.
+        let walk_src = [0u32, 1];
+        let walk_dst = [1u32, 2];
+        let walk_w = [1.0f32, 1.0];
+        let mut view = line_view(&walk_src, &walk_dst, &walk_w, &[], &[], &[], 4);
+        view.extra.fairy_sources = vec![1, 3].into();
+        view.extra.fairy_dests = vec![(1, 0.25), (3, 0.25)].into();
+        let mut ctx = SearchContext::new(4);
+        let params = SearchParams { start: 3, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 };
+        let res = view.astar_multi(&[(0, 2.0)], params, &mut ctx);
+        assert!(res.found);
+        assert_eq!(res.path, vec![0, 1, 3]);
+        assert!((res.cost - 3.25).abs() < 1e-6, "cost {}", res.cost);
+    }
+
+    fn bidir_run(
+        view: &EngineView,
+        start: u32,
+        goal: u32,
+        nodes: usize,
+        seed: Option<u64>,
+        max_pops: Option<u32>,
+    ) -> SearchResult {
+        // Reversed macro provider: swap src/dst of the view's macro CSR.
+        let mut rs = Vec::new();
+        let mut rd = Vec::new();
+        let mut rw = Vec::new();
+        for u in 0..nodes as u32 {
+            for (v, w) in view.macros.macro_neighbors(u, None) {
+                rs.push(v);
+                rd.push(u);
+                rw.push(w);
+            }
+        }
+        let macros_rev = NeighborProvider::new(nodes, &rs, &rd, &rw);
+        let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+        let mut cf = SearchContext::new(nodes);
+        let mut cb = SearchContext::new(nodes);
+        view.astar_bidir(&bp, SearchParams { start, goal, macro_filter: None, seed, max_pops, cancel: None, bucket_ms: 0.0 }, &mut cf, &mut cb)
+    }
+
+    fn bidir_of(view: &EngineView, start: u32, goal: u32, nodes: usize) -> SearchResult {
+        bidir_run(view, start, goal, nodes, None, None)
+    }
+
+    #[test]
+    fn bidir_matches_unidir_on_line_with_macro() {
+        // Symmetric walk line 0..4 plus a directed macro shortcut 0->3.
+        let mut ws = Vec::new(); let mut wd = Vec::new(); let mut ww = Vec::new();
+        for (a, b) in [(0u32,1u32),(1,2),(2,3),(3,4)] {
+            ws.push(a); wd.push(b); ww.push(1.0);
+            ws.push(b); wd.push(a); ww.push(1.0);
+        }
+        let ms = [0u32]; let md = [3u32]; let mw = [1.5f32];
+        let view = line_view(&ws, &wd, &ww, &ms, &md, &mw, 5);
+        let mut ctx = SearchContext::new(5);
+        for (s, g) in [(0u32, 4u32), (4, 0), (1, 3), (0, 3)] {
+            let uni = view.astar(SearchParams { start: s, goal: g, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+            let bi = bidir_of(&view, s, g, 5);
+            assert_eq!(uni.found, bi.found, "{s}->{g}");
+            assert!((uni.cost - bi.cost).abs() < 1e-4, "{s}->{g}: uni {} vs bidir {}", uni.cost, bi.cost);
+        }
+        // 4->0 must NOT use the directed macro (it only exists 0->3).
+        let bi = bidir_of(&view, 4, 0, 5);
+        assert!((bi.cost - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn bidir_uses_global_seeds_and_fairy() {
+        // 0 -1- 1 -1- 2 -1- 3 (symmetric), global teleport to 3 at 1.5, fairy 1<->3.
+        let mut ws = Vec::new(); let mut wd = Vec::new(); let mut ww = Vec::new();
+        for (a, b) in [(0u32,1u32),(1,2),(2,3)] {
+            ws.push(a); wd.push(b); ww.push(1.0);
+            ws.push(b); wd.push(a); ww.push(1.0);
+        }
+        let mut view = line_view(&ws, &wd, &ww, &[], &[], &[], 4);
+        view.extra.global = vec![(3, 1.5)].into();
+        view.extra.fairy_sources = vec![1, 3].into();
+        view.extra.fairy_dests = vec![(1, 0.25), (3, 0.25)].into();
+        let mut ctx = SearchContext::new(4);
+        for (s, g) in [(0u32, 3u32), (0, 2), (3, 0), (2, 0)] {
+            let uni = view.astar(SearchParams { start: s, goal: g, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+            let bi = bidir_of(&view, s, g, 4);
+            assert_eq!(uni.found, bi.found, "{s}->{g}");
+            assert!((uni.cost - bi.cost).abs() < 1e-4, "{s}->{g}: uni {} vs bidir {}", uni.cost, bi.cost);
+        }
+        // Path sanity for 0->3: teleport (1.5) beats walk (3.0) and fairy (1+0.25).
+        let bi = bidir_of(&view, 0, 3, 4);
+        assert!((bi.cost - 1.25).abs() < 1e-4, "cost {}", bi.cost);
+        assert_eq!(bi.path, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn bucketed_tiebreak_bounded_suboptimality() {
+        // Diamond with near-equal paths: 0-1-3 costs 2.0, 0-2-3 costs 2.4. With a
+        // 5.0 bucket both paths share a bucket, so the high-g dive may return either —
+        // the served cost must stay within one bucket of the optimum (and exact mode
+        // must return the optimum exactly). Checks uni and bidir.
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for (a, b, w) in [(0u32, 1u32, 1.0f32), (1, 3, 1.0), (0, 2, 1.2), (2, 3, 1.2)] {
+            ws.push(a); wd.push(b); ww.push(w);
+            ws.push(b); wd.push(a); ww.push(w);
+        }
+        let view = line_view(&ws, &wd, &ww, &[], &[], &[], 4);
+        let mut ctx = SearchContext::new(4);
+        let params = |bucket: f32| SearchParams {
+            start: 0, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None,
+            bucket_ms: bucket,
+        };
+        let exact = view.astar(params(0.0), &mut ctx);
+        assert!((exact.cost - 2.0).abs() < 1e-6);
+        let bucketed = view.astar(params(5.0), &mut ctx);
+        assert!(bucketed.found);
+        assert!(
+            bucketed.cost >= exact.cost - 1e-6 && bucketed.cost <= exact.cost + 5.0 + 1e-6,
+            "bucketed cost {} outside [optimum, optimum + bucket]", bucketed.cost
+        );
+
+        let macros_rev = NeighborProvider::new(4, &[], &[], &[]);
+        let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+        let mut cf = SearchContext::new(4);
+        let mut cb = SearchContext::new(4);
+        let bi = view.astar_bidir(&bp, params(5.0), &mut cf, &mut cb);
+        assert!(bi.found);
+        assert!(
+            bi.cost >= exact.cost - 1e-6 && bi.cost <= exact.cost + 5.0 + 1e-6,
+            "bidir bucketed cost {} outside bound", bi.cost
+        );
+    }
+
+    #[test]
+    fn bidir_multi_matches_astar_multi() {
+        // Symmetric chains: 0-1-2 and 3-2. Seeds: node 0 at g=5, node 3 at g=1; best
+        // total is via 3 (1 + 1 = 2) and the path must start at the winning seed —
+        // exactly the astar_multi contract, now bidirectional.
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for (a, b) in [(0u32, 1u32), (1, 2), (3, 2)] {
+            ws.push(a); wd.push(b); ww.push(1.0);
+            ws.push(b); wd.push(a); ww.push(1.0);
+        }
+        let view = line_view(&ws, &wd, &ww, &[], &[], &[], 4);
+        let seeds = [(0u32, 5.0f32), (3, 1.0)];
+        let params = || SearchParams { start: 2, goal: 2, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 };
+
+        let mut ctx = SearchContext::new(4);
+        let uni = view.astar_multi(&seeds, params(), &mut ctx);
+
+        let macros_rev = NeighborProvider::new(4, &[], &[], &[]);
+        let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+        let mut cf = SearchContext::new(4);
+        let mut cb = SearchContext::new(4);
+        let bi = view.astar_bidir_multi(&seeds, &bp, params(), &mut cf, &mut cb);
+
+        assert!(uni.found && bi.found);
+        assert!((uni.cost - bi.cost).abs() < 1e-4, "uni {} vs bidir {}", uni.cost, bi.cost);
+        assert_eq!(bi.path.first(), Some(&3), "path must start at the winning seed");
+        assert_eq!(bi.path.last(), Some(&2));
+        // A seed that IS the goal must win outright when cheapest.
+        let bi2 = view.astar_bidir_multi(&[(2, 0.5)], &bp, params(), &mut cf, &mut cb);
+        assert!(bi2.found);
+        assert!((bi2.cost - 0.5).abs() < 1e-6, "cost {}", bi2.cost);
+    }
+
+    #[test]
+    fn bidir_multi_uses_fairy_hops() {
+        // Virtual-start shape with fairy: seed at 0 (g=2), goal 3 reachable only via
+        // the fairy hop at 1 (symmetric walk 0-1-2; fairy 1<->3).
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for (a, b) in [(0u32, 1u32), (1, 2)] {
+            ws.push(a); wd.push(b); ww.push(1.0);
+            ws.push(b); wd.push(a); ww.push(1.0);
+        }
+        let mut view = line_view(&ws, &wd, &ww, &[], &[], &[], 4);
+        view.extra.fairy_sources = vec![1, 3].into();
+        view.extra.fairy_dests = vec![(1, 0.25), (3, 0.25)].into();
+        let macros_rev = NeighborProvider::new(4, &[], &[], &[]);
+        let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+        let mut cf = SearchContext::new(4);
+        let mut cb = SearchContext::new(4);
+        let params = SearchParams { start: 3, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 };
+        let res = view.astar_bidir_multi(&[(0, 2.0)], &bp, params, &mut cf, &mut cb);
+        assert!(res.found);
+        assert_eq!(res.path, vec![0, 1, 3]);
+        assert!((res.cost - 3.25).abs() < 1e-6, "cost {}", res.cost);
+    }
+
+    #[test]
+    fn bidir_budget_charges_expansions_not_stale_pops() {
+        // Node 2 is first reached at g=5 (direct 0-2 edge), then improved to g=2 (via 1),
+        // leaving a stale heap entry at g=5 (pr=10). The 2..20 tail keeps the meeting cost
+        // mu (=20) above that pr, so MM really does pop the stale entry. A stale pop is a
+        // skip, not an expansion, and must not be charged against the budget: charging it
+        // shrinks the effective budget by however much heap churn a query happens to
+        // produce (seed jitter multiplies exactly that), which is how a reachable goal
+        // ends up reported as BudgetExceeded.
+        let mut edges: Vec<(u32, u32, f32)> = vec![(0, 1, 1.0), (1, 2, 1.0), (0, 2, 5.0)];
+        for a in 2..20u32 {
+            edges.push((a, a + 1, 1.0));
+        }
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for (a, b, w) in edges {
+            ws.push(a); wd.push(b); ww.push(w);
+            ws.push(b); wd.push(a); ww.push(w);
+        }
+        let view = line_view(&ws, &wd, &ww, &[], &[], &[], 21);
+
+        let res = bidir_of(&view, 0, 20, 21);
+        assert!(res.found);
+        assert!((res.cost - 20.0).abs() < 1e-4, "cost {}", res.cost);
+        // Every node is expanded at most once per side here (h=0 is consistent), so the
+        // charge is bounded by the distinct expansions the run performs. Measured on the
+        // stale-free accounting; the pre-fix loop charged the stale pops on top.
+        assert_eq!(res.pops, EXPECTED_BIDIR_POPS);
+
+        // A budget of exactly that many expansions is therefore enough to find the route
+        // and prove it optimal — no BudgetExceeded, no truncated path.
+        let macros_rev = NeighborProvider::new(21, &[], &[], &[]);
+        let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+        let mut cf = SearchContext::new(21);
+        let mut cb = SearchContext::new(21);
+        let budgeted = view.astar_bidir(
+            &bp,
+            SearchParams { start: 0, goal: 20, macro_filter: None, seed: None, max_pops: Some(EXPECTED_BIDIR_POPS), cancel: None, bucket_ms: 0.0 },
+            &mut cf,
+            &mut cb,
+        );
+        assert_eq!(budgeted.status, SearchStatus::Found);
+        assert!((budgeted.cost - 20.0).abs() < 1e-4, "cost {}", budgeted.cost);
+    }
+
+    #[test]
+    fn truncated_found_reports_budget_exceeded_not_found_status() {
+        // Walk chain 0-1-2-3 costs 3.0; a global teleport seeds g(goal)=10.0 at pop
+        // zero. A 1-pop budget truncates before the cheaper walk route is proven, so
+        // the returned teleport path is valid but NOT optimal — the status must say
+        // BudgetExceeded (found stays true), or callers cache the unproven cost and
+        // the budget retry never fires.
+        let walk_src = [0u32, 1, 2];
+        let walk_dst = [1u32, 2, 3];
+        let walk_w = [1.0f32, 1.0, 1.0];
+        let mut view = line_view(&walk_src, &walk_dst, &walk_w, &[], &[], &[], 4);
+        view.extra.global = vec![(3, 10.0)].into();
+        let mut ctx = SearchContext::new(4);
+
+        let truncated = view.astar(
+            SearchParams { start: 0, goal: 3, macro_filter: None, seed: None, max_pops: Some(1), cancel: None, bucket_ms: 0.0 },
+            &mut ctx,
+        );
+        assert!(truncated.found);
+        assert_eq!(truncated.status, SearchStatus::BudgetExceeded);
+        assert_eq!(truncated.path, vec![0, 3]);
+        assert!((truncated.cost - 10.0).abs() < 1e-6, "cost {}", truncated.cost);
+
+        // Unbudgeted, the walk route wins and the status is a genuine Found.
+        let full = view.astar(
+            SearchParams { start: 0, goal: 3, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 },
+            &mut ctx,
+        );
+        assert_eq!(full.status, SearchStatus::Found);
+        assert_eq!(full.path, vec![0, 1, 2, 3]);
+        assert!((full.cost - 3.0).abs() < 1e-6, "cost {}", full.cost);
+    }
+
+    #[test]
+    fn bidir_truncated_found_reports_budget_exceeded() {
+        // Same shape, symmetric walk for bidir: the teleport seed IS the goal, so MM
+        // records mu=10 before the first pop; a 1-pop budget breaks inside the
+        // first-meet-to-proof window and must not report the unproven mu as Found.
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for (a, b) in [(0u32, 1u32), (1, 2), (2, 3)] {
+            ws.push(a); wd.push(b); ww.push(1.0);
+            ws.push(b); wd.push(a); ww.push(1.0);
+        }
+        let mut view = line_view(&ws, &wd, &ww, &[], &[], &[], 4);
+        view.extra.global = vec![(3, 10.0)].into();
+
+        let truncated = {
+            let macros_rev = NeighborProvider::new(4, &[], &[], &[]);
+            let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+            let mut cf = SearchContext::new(4);
+            let mut cb = SearchContext::new(4);
+            view.astar_bidir(
+                &bp,
+                SearchParams { start: 0, goal: 3, macro_filter: None, seed: None, max_pops: Some(1), cancel: None, bucket_ms: 0.0 },
+                &mut cf,
+                &mut cb,
+            )
+        };
+        assert!(truncated.found);
+        assert_eq!(truncated.status, SearchStatus::BudgetExceeded);
+        assert!((truncated.cost - 10.0).abs() < 1e-6, "cost {}", truncated.cost);
+
+        let full = bidir_run(&view, 0, 3, 4, None, None);
+        assert_eq!(full.status, SearchStatus::Found);
+        assert!((full.cost - 3.0).abs() < 1e-6, "cost {}", full.cost);
+    }
+
+    #[test]
+    fn seeded_uni_and_bidir_agree_and_are_deterministic() {
+        // Symmetric diamond: 0-1-3 and 0-2-3, all edges 1.0 both ways. Base costs tie
+        // at 2.0; per-seed jitter picks a unique winner, which uni and bidir must both
+        // return (cost and path), deterministically across repeat runs. This pins the
+        // load-bearing backward jitter identity — backward relaxations must price the
+        // FORWARD edge (edge_jitter(seed, y, id)) — which no other test exercises.
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for (a, b) in [(0u32, 1u32), (1, 3), (0, 2), (2, 3)] {
+            ws.push(a); wd.push(b); ww.push(1.0);
+            ws.push(b); wd.push(a); ww.push(1.0);
+        }
+        let view = line_view(&ws, &wd, &ww, &[], &[], &[], 4);
+        let mut ctx = SearchContext::new(4);
+
+        let mut winners: std::collections::HashSet<Vec<u32>> = std::collections::HashSet::new();
+        for seed in [1u64, 2, 3, 5, 8, 13, 21, 42] {
+            let top = 2.0 + edge_jitter(seed, 0, 1) + edge_jitter(seed, 1, 3);
+            let bot = 2.0 + edge_jitter(seed, 0, 2) + edge_jitter(seed, 2, 3);
+            let params = || SearchParams { start: 0, goal: 3, macro_filter: None, seed: Some(seed), max_pops: None, cancel: None, bucket_ms: 0.0 };
+            let uni = view.astar(params(), &mut ctx);
+            let uni2 = view.astar(params(), &mut ctx);
+            let bi = bidir_run(&view, 0, 3, 4, Some(seed), None);
+            assert!(uni.found && bi.found, "seed {seed}");
+            assert_eq!(uni.cost.to_bits(), uni2.cost.to_bits(), "seed {seed}: nondeterministic cost");
+            assert_eq!(uni.path, uni2.path, "seed {seed}: nondeterministic path");
+            assert!(
+                (uni.cost - bi.cost).abs() < 1e-4,
+                "seed {seed}: uni {} vs bidir {}", uni.cost, bi.cost
+            );
+            if (top - bot).abs() > 1e-6 {
+                let expected = if top < bot { vec![0u32, 1, 3] } else { vec![0u32, 2, 3] };
+                assert_eq!(uni.path, expected, "seed {seed}: wrong jitter winner (uni)");
+                assert_eq!(bi.path, expected, "seed {seed}: wrong jitter winner (bidir)");
+            }
+            winners.insert(uni.path.clone());
+        }
+        // The fixture's purpose: different seeds really do select different paths.
+        assert!(winners.len() > 1, "every seed picked the same diamond path");
+    }
+
+    /// Symmetric 8-connected-ish grid (4-neighbour, unit weights) of `w` x `h` nodes.
+    fn grid_edges(w: u32, h: u32) -> (Vec<u32>, Vec<u32>, Vec<f32>) {
+        let (mut ws, mut wd, mut ww) = (Vec::new(), Vec::new(), Vec::new());
+        for y in 0..h {
+            for x in 0..w {
+                let u = y * w + x;
+                let mut add = |v: u32, c: f32| {
+                    ws.push(u); wd.push(v); ww.push(c);
+                    ws.push(v); wd.push(u); ww.push(c);
+                };
+                if x + 1 < w { add(u + 1, 1.0 + (x % 3) as f32 * 0.25); }
+                if y + 1 < h { add(u + w, 1.0 + (y % 2) as f32 * 0.5); }
+            }
+        }
+        (ws, wd, ww)
+    }
+
+    fn same(a: &SearchResult, b: &SearchResult) {
+        assert_eq!(a.status, b.status);
+        assert_eq!(a.found, b.found);
+        assert_eq!(a.cost.to_bits(), b.cost.to_bits());
+        assert_eq!(a.path, b.path);
+        assert_eq!(a.pops, b.pops);
+        assert_eq!(a.pops_f, b.pops_f);
+        assert_eq!(a.pops_b, b.pops_b);
+        let (ga, gb): (Vec<u32>, Vec<u32>) = (a.path_g.iter().map(|g| g.to_bits()).collect(), b.path_g.iter().map(|g| g.to_bits()).collect());
+        assert_eq!(ga, gb);
+    }
+
+    /// T1.2: a budget-stopped search continued under a larger budget is bit-identical
+    /// (path, costs, status, CUMULATIVE pop counters) to a fresh run with that budget —
+    /// unidirectional, multi-source and bidirectional, seeded and unseeded, including a
+    /// continuation that stops on its budget again and is continued once more.
+    #[test]
+    fn resumed_search_equals_fresh_search_with_larger_budget() {
+        let (w, h) = (23u32, 17u32);
+        let n = (w * h) as usize;
+        let (ws, wd, ww) = grid_edges(w, h);
+        let mut view = line_view(&ws, &wd, &ww, &[], &[], &[], n);
+        view.extra.global = vec![(200, 9.0), (330, 14.5)].into();
+        let macros_rev = NeighborProvider::new(n, &[], &[], &[]);
+        let bp = BidirParams { macros_rev: &macros_rev, macro_filter_rev: None };
+        let (start, goal) = (3u32, (w * h - 2) as u32);
+        for seed in [None, Some(7u64)] {
+            let params = |max_pops: Option<u32>| SearchParams { start, goal, macro_filter: None, seed, max_pops, cancel: None, bucket_ms: 0.0 };
+            // Unidirectional.
+            let mut ctx = SearchContext::new(n);
+            let fresh = view.astar(params(None), &mut ctx);
+            assert_eq!(fresh.status, SearchStatus::Found);
+            let first = view.astar(params(Some(40)), &mut ctx);
+            assert_eq!(first.status, SearchStatus::BudgetExceeded);
+            assert!(ctx.resumable());
+            let second = view.astar_resume(params(Some(120)), &mut ctx);
+            assert_eq!(second.status, SearchStatus::BudgetExceeded);
+            same(&second, &view.astar(params(Some(120)), &mut SearchContext::new(n)));
+            let cont = view.astar_resume(params(None), &mut ctx);
+            same(&cont, &fresh);
+            // A resume without a matching stopped search is simply a fresh search.
+            let other = view.astar_resume(params(None), &mut ctx);
+            same(&other, &fresh);
+
+            // Multi-source.
+            let seeds = [(0u32, 3.0f32), (40, 1.0)];
+            let fresh_m = view.astar_multi(&seeds, params(None), &mut ctx);
+            let _ = view.astar_multi(&seeds, params(Some(30)), &mut ctx);
+            same(&view.astar_multi_resume(&seeds, params(None), &mut ctx), &fresh_m);
+
+            // Bidirectional.
+            let (mut cf, mut cb) = (SearchContext::new(n), SearchContext::new(n));
+            let fresh_b = view.astar_bidir(&bp, params(None), &mut cf, &mut cb);
+            assert_eq!(fresh_b.status, SearchStatus::Found);
+            let first_b = view.astar_bidir(&bp, params(Some(25)), &mut cf, &mut cb);
+            assert_eq!(first_b.status, SearchStatus::BudgetExceeded);
+            let mid_b = view.astar_bidir_resume(&bp, params(Some(60)), &mut cf, &mut cb);
+            same(&mid_b, &view.astar_bidir(&bp, params(Some(60)), &mut SearchContext::new(n), &mut SearchContext::new(n)));
+            same(&view.astar_bidir_resume(&bp, params(None), &mut cf, &mut cb), &fresh_b);
+            // Reusing the backward context for another search invalidates the resume.
+            let _ = view.astar_bidir(&bp, params(Some(25)), &mut cf, &mut cb);
+            let _ = view.astar(params(None), &mut cb);
+            same(&view.astar_bidir_resume(&bp, params(None), &mut cf, &mut cb), &fresh_b);
+
+            // Bidirectional multi-source.
+            let fresh_bm = view.astar_bidir_multi(&seeds, &bp, params(None), &mut cf, &mut cb);
+            let _ = view.astar_bidir_multi(&seeds, &bp, params(Some(20)), &mut cf, &mut cb);
+            same(&view.astar_bidir_multi_resume(&seeds, &bp, params(None), &mut cf, &mut cb), &fresh_bm);
+        }
+    }
+
+    #[test]
+    fn budget_exceeded_reports_distinct_status() {
+        // Long chain, unreachable goal (node 5 disconnected).
+        let walk_src = [0u32, 1, 2, 3];
+        let walk_dst = [1u32, 2, 3, 4];
+        let walk_w = [1.0f32, 1.0, 1.0, 1.0];
+        let view = line_view(&walk_src, &walk_dst, &walk_w, &[], &[], &[], 6);
+        let mut ctx = SearchContext::new(6);
+        let res = view.astar(SearchParams { start: 0, goal: 5, macro_filter: None, seed: None, max_pops: Some(2), cancel: None, bucket_ms: 0.0 }, &mut ctx);
+        assert!(!res.found);
+        assert_eq!(res.status, SearchStatus::BudgetExceeded);
+        // Without a budget the same query exhausts the heap and reports NotFound.
+        let res2 = view.astar(SearchParams { start: 0, goal: 5, macro_filter: None, seed: None, max_pops: None, cancel: None, bucket_ms: 0.0 }, &mut ctx);
+        assert!(!res2.found);
+        assert_eq!(res2.status, SearchStatus::NotFound);
+    }
+}
