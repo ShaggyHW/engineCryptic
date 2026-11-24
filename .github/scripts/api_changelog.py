@@ -69,6 +69,7 @@ INTERNAL_TYPES = {
     "com.projectx.ui.LiveDetailsPreference",
     "com.projectx.webwalker.AbyssPassage",
     "com.projectx.webwalker.DramenStaff",
+    "com.projectx.webwalker.IntIntMap",
     "com.projectx.webwalker.JujuSpiritbag",
     "com.projectx.webwalker.MasterFarmerHat",
     "com.projectx.webwalker.WebItemStep",
