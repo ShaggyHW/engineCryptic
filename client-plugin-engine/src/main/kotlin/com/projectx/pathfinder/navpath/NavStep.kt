@@ -170,7 +170,12 @@ internal data class NavRoute(
     val enteredByTeleport: Boolean,
     /** The planner's requirement ids behind each step, by index: what its rows and its macro chain list. */
     val requirements: List<List<Int>> = emptyList(),
+    /** The edge behind each step, by index, which a later request can exclude. */
+    val macros: List<NavMacro?> = emptyList(),
 )
+
+/** One edge of navpath's graph, by its table kind and first node: what `exclude_macros` takes back. */
+internal data class NavMacro(val kind: String, val id: Long)
 
 /** A parsed `/route_area` answer: [goalReached] is the area tile the route ends on, absent when none was found. */
 internal data class NavAreaRoute(

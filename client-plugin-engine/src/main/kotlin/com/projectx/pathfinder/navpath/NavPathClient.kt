@@ -14,7 +14,7 @@ internal data class NavReply(val status: Int, val body: String)
 
 /** Sends one request and returns the reply; throws on a connection failure or a timeout. */
 internal fun interface NavTransport {
-    fun post(url: String, token: String, body: String): NavReply
+    fun post(url: String, body: String): NavReply
 }
 
 /** Everything a `/route` request carries, gathered on the game thread so the planner thread reads no game state. */
@@ -27,6 +27,7 @@ internal data class NavRequest(
     val dive: Boolean,
     val diveAvailableInMs: Long,
     val seed: Int,
+    val exclude: Set<NavMacro> = emptySet(),
 ) {
     fun toJson(): String = toJsonObject().toString()
 
@@ -57,6 +58,14 @@ internal data class NavRequest(
             addProperty("cooldown_ms", ABILITY_COOLDOWN_MS)
         })
         body.addProperty("seed", seed)
+        if (exclude.isNotEmpty()) {
+            body.add("exclude_macros", JsonArray().apply {
+                for (macro in exclude.sortedWith(compareBy({ it.kind }, { it.id }))) add(JsonObject().apply {
+                    addProperty("kind", macro.kind)
+                    addProperty("id", macro.id)
+                })
+            })
+        }
         return body
     }
 
@@ -100,7 +109,7 @@ private fun jsonTile(tile: Tile) = JsonObject().apply {
     addProperty("plane", tile.plane)
 }
 
-/** HTTP for the hosted planner: a short connect timeout and a short whole-request one, so an outage costs seconds. */
+/** HTTP to the local navpath: short timeouts, since it answers in milliseconds when it is up. */
 internal object NavHttp : NavTransport {
     private const val CONNECT_TIMEOUT_MS = 1_500L
     private const val REQUEST_TIMEOUT_MS = 3_000L
@@ -109,11 +118,10 @@ internal object NavHttp : NavTransport {
         HttpClient.newBuilder().connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS)).build()
     }
 
-    override fun post(url: String, token: String, body: String): NavReply {
+    override fun post(url: String, body: String): NavReply {
         val request = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
             .header("Content-Type", "application/json")
-            .header("Authorization", "Bearer $token")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
         val response = client.send(request, HttpResponse.BodyHandlers.ofString())

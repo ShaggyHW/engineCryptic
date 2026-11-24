@@ -6,34 +6,25 @@ import world.gregs.voidps.type.Tile
 import java.io.IOException
 
 /**
- * Plans on the hosted navpathService and says when the local planner should be used instead. A busy server (503) is
- * asked again once or twice after a short pause; anything else that goes wrong - no token, a refused token, a timeout,
- * a dropped connection, an answer that does not parse or holds a step this walker cannot take - hands the walk to the
- * local planner at once. After [BREAKER_FAILURES] failures in a row the server is left alone for [BREAKER_MS], so an
- * outage never stalls walking. Runs on the planner thread only.
+ * Plans on the navpath the launcher runs on this machine. A planner still warming up (503) is asked again once or
+ * twice after a short pause; anything else that goes wrong is the answer, with the reason. Runs on the planner thread
+ * only.
  */
-internal class HostedPlanner(
+internal class NavPlanner(
     private val transport: NavTransport,
-    private val baseUrl: () -> String,
-    private val token: () -> String?,
-    private val clock: () -> Long = System::currentTimeMillis,
+    private val baseUrl: () -> String?,
     private val pause: (Long) -> Unit = { Thread.sleep(it) },
+    private val clock: () -> Long = System::currentTimeMillis,
     private val log: (String) -> Unit = ::println,
 ) {
     sealed interface Outcome {
         data class Planned(val path: WebPath) : Outcome
 
-        data class Fallback(val reason: String) : Outcome
+        data class Failed(val reason: String) : Outcome
     }
 
-    private var failures = 0
-    private var openUntil = 0L
     private var lastLogged: String? = null
     private var lastLoggedAt = 0L
-
-    /** True while the breaker holds the server off. */
-    @Synchronized
-    fun resting(): Boolean = clock() < openUntil
 
     @Synchronized
     fun plan(request: NavRequest, acceptsTeleports: Boolean): Outcome =
@@ -58,19 +49,18 @@ internal class HostedPlanner(
         read: (String) -> NavRoute,
         refuse: (WebPath) -> String?,
     ): Outcome {
-        if (resting()) return Outcome.Fallback("the hosted planner is resting after failures")
-        val bearer = token()?.takeIf { it.isNotBlank() } ?: return fallback("no store token", rest = BREAKER_MS)
+        val base = baseUrl()?.takeIf { it.isNotBlank() } ?: return failed(NOT_RUNNING)
         var attempt = 0
         while (true) {
             val reply = try {
-                transport.post(baseUrl().trimEnd('/') + path, bearer, body)
+                transport.post(base.trimEnd('/') + path, body)
             } catch (e: IOException) {
-                return failure("unreachable (${e.javaClass.simpleName})")
+                return failed("$NOT_RUNNING (${e.javaClass.simpleName})")
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return failure("interrupted")
+                return failed("interrupted")
             } catch (e: RuntimeException) {
-                return failure("request failed (${e.javaClass.simpleName})")
+                return failed("the request failed (${e.javaClass.simpleName})")
             }
             when {
                 reply.status == 503 && attempt < BUSY_RETRIES -> {
@@ -78,57 +68,40 @@ internal class HostedPlanner(
                     pause(nonProfiledGaussian(BUSY_BACKOFF_MS, BUSY_BACKOFF_VARIANCE).toLong().coerceIn(BUSY_BACKOFF_MIN_MS, BUSY_BACKOFF_MAX_MS))
                     continue
                 }
-                reply.status == 401 || reply.status == 403 -> return fallback("the store token was refused (HTTP ${reply.status})", rest = AUTH_REST_MS)
-                reply.status == 400 -> return fallback("the planner refused the request: ${reply.body.take(120)}")
-                reply.status !in 200..299 -> return failure("HTTP ${reply.status}")
+                reply.status == 400 -> return failed("navpath refused the request: ${reply.body.take(120)}")
+                reply.status !in 200..299 -> return failed("navpath answered HTTP ${reply.status}")
             }
             val route = try {
                 read(reply.body)
             } catch (e: NavParseException) {
-                return failure("an answer that does not parse: ${e.message}")
+                return failed("an answer that does not parse: ${e.message}")
             }
-            succeeded()
             return when (val mapped = NavRouteMapper.map(start, route)) {
-                is NavRouteMapper.Mapped.Refused -> fallback(mapped.reason)
+                is NavRouteMapper.Mapped.Refused -> failed(mapped.reason)
                 is NavRouteMapper.Mapped.Route -> when {
                     !acceptsTeleports && (1 until mapped.path.size).any { mapped.path.linkAt(it)?.isGlobal == true } ->
-                        fallback("the route starts with a teleport this walk may not use")
-                    else -> refuse(mapped.path)?.let(::fallback) ?: Outcome.Planned(mapped.path)
+                        failed("the route starts with a teleport this walk may not use")
+                    else -> refuse(mapped.path)?.let(::failed) ?: Outcome.Planned(mapped.path)
                 }
             }
         }
     }
 
-    private fun succeeded() {
-        failures = 0
-    }
-
-    private fun failure(reason: String): Outcome {
-        if (++failures >= BREAKER_FAILURES) {
-            failures = 0
-            return fallback("$reason; resting for ${BREAKER_MS / 1000} s", rest = BREAKER_MS)
-        }
-        return fallback(reason)
-    }
-
-    private fun fallback(reason: String, rest: Long = 0): Outcome {
-        if (rest > 0) openUntil = clock() + rest
+    private fun failed(reason: String): Outcome {
         val now = clock()
         if (reason != lastLogged || now - lastLoggedAt > LOG_REPEAT_MS) {
-            log("[WebWalk] hosted planner: $reason; planning locally")
+            log("[WebWalk] navpath: $reason")
             lastLogged = reason
             lastLoggedAt = now
         }
-        return Outcome.Fallback(reason)
+        return Outcome.Failed(reason)
     }
 
     companion object {
         const val ROUTE_PATH = "/route"
         const val AREA_PATH = "/route_area"
         const val BUSY_RETRIES = 2
-        const val BREAKER_FAILURES = 3
-        const val BREAKER_MS = 60_000L
-        const val AUTH_REST_MS = 300_000L
+        const val NOT_RUNNING = "navpath isn't running on this machine; start the Project X launcher"
         private const val BUSY_BACKOFF_MS = 250
         private const val BUSY_BACKOFF_VARIANCE = 80 * 80
         private const val BUSY_BACKOFF_MIN_MS = 100L

@@ -3,6 +3,7 @@ package com.projectx.pathfinder.navpath
 import com.projectx.script.api.TeleportSpell
 import com.projectx.webwalker.DramenStaff
 import com.projectx.webwalker.WebArea
+import com.projectx.webwalker.WebGrid
 import com.projectx.webwalker.WebInterfaceStep
 import com.projectx.webwalker.WebItemStep
 import com.projectx.webwalker.WebLink
@@ -10,13 +11,12 @@ import com.projectx.webwalker.WebLinkKind
 import com.projectx.webwalker.WebLinks
 import com.projectx.webwalker.WebObjectStep
 import com.projectx.webwalker.WebPath
-import com.projectx.webwalker.WebPathfinder
 import com.projectx.webwalker.WebStep
 import com.projectx.webwalker.WebTarget
-import world.gregs.voidps.type.Tile
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import world.gregs.voidps.type.Tile
 
 /**
  * Turns a hosted route into the [WebPath] the web walker already knows how to walk: walked tiles one per step, and
@@ -37,6 +37,7 @@ internal object NavRouteMapper {
         val ys = arrayListOf(start.y)
         val planes = arrayListOf(start.plane)
         val links = arrayListOf<WebLink?>(null)
+        val macros = arrayListOf<NavMacro?>(null)
 
         val last: Tile get() = Tile.of(xs.last(), ys.last(), planes.last())
 
@@ -59,19 +60,21 @@ internal object NavRouteMapper {
             walk(to)
         }
 
-        fun link(approach: Tile?, landing: Tile, link: WebLink) {
+        fun link(approach: Tile?, landing: Tile, link: WebLink, macro: NavMacro?) {
             if (approach != null && !link.isGlobal) walk(approach)
-            add(landing.x, landing.y, landing.plane, link)
+            add(landing.x, landing.y, landing.plane, link, macro)
         }
 
-        private fun add(x: Int, y: Int, plane: Int, link: WebLink?) {
+        private fun add(x: Int, y: Int, plane: Int, link: WebLink?, macro: NavMacro? = null) {
             xs += x
             ys += y
             planes += plane
             links += link
+            macros += macro
         }
 
         fun build(): WebPath = WebPath(xs.toIntArray(), ys.toIntArray(), planes.toIntArray(), BooleanArray(xs.size), links.toTypedArray())
+            .also { it.macros = macros.toTypedArray() }
     }
 
     fun map(start: Tile, route: NavRoute): Mapped {
@@ -79,14 +82,14 @@ internal object NavRouteMapper {
         if (route.enteredByTeleport) return Mapped.Refused("the start is off the planner's graph")
         val builder = Builder(start)
         route.steps.forEachIndexed { index, step ->
-            val refused = add(builder, step, route.requirements.getOrNull(index).orEmpty())
+            val refused = add(builder, step, route.requirements.getOrNull(index).orEmpty(), route.macros.getOrNull(index))
             if (refused != null) return Mapped.Refused(refused)
         }
         return Mapped.Route(builder.build())
     }
 
     /** Adds [step]; the reason it cannot be walked, or null. */
-    private fun add(builder: Builder, step: NavStep, requirements: List<Int>): String? {
+    private fun add(builder: Builder, step: NavStep, requirements: List<Int>, macro: NavMacro?): String? {
         when (step) {
             is NavStep.Move -> builder.walk(step.tile)
             is NavStep.TileExact -> builder.walk(step.tile)
@@ -95,19 +98,20 @@ internal object NavRouteMapper {
             is NavStep.Unsupported -> return "a ${step.type} step (${step.reason})"
             is NavStep.FairyRing -> {
                 val link = fairyRing(step, builder.last) ?: return "a fairy ring with no known ring object"
-                builder.link(step.from, step.to, link)
+                builder.link(step.from, step.to, link, macro)
             }
             is NavStep.Chained -> {
                 val landing = step.to ?: return "a ${step.type} step with no landing"
                 val link = chained(step, step.from ?: builder.last, landing) ?: return "a ${step.type} step this walker cannot perform"
                 if (DramenStaff.REQUIREMENT_ID in requirements) DramenStaff.requireFor(link)
-                builder.link(step.from, landing, link)
+                builder.link(step.from, landing, link, macro)
             }
         }
         return null
     }
 
     private fun chained(step: NavStep.Chained, approach: Tile, landing: Tile): WebLink? {
+        if (step is NavStep.Loc) answering(step, landing)?.let { return it }
         val chain = chain(step.chain) ?: return null
         val link = when (step) {
             is NavStep.Door -> link(WebLinkKind.DOOR, approach, NavArea.of(landing), landing, step.openAction ?: "Open", step.realIdClosed ?: step.realIdOpen ?: return null, null)
@@ -130,12 +134,18 @@ internal object NavRouteMapper {
         return if (chain.isEmpty() || step is NavStep.IFSlot) link else link.then(*chain.toTypedArray())
     }
 
+    // A prompt answered by its text (Kharid-et's "Choose destination.") is only in our measured links, not the map's chain.
+    private fun answering(step: NavStep.Loc, landing: Tile): WebLink? = WebLinks.all.firstOrNull {
+        it.kind == WebLinkKind.OBJECT && it.choice != null && it.objectId == step.id &&
+            it.action.equals(step.action, ignoreCase = true) && it.to.contains(landing.x, landing.y, landing.plane)
+    }
+
     private fun link(kind: WebLinkKind, approach: Tile, area: NavArea?, landing: Tile, action: String, objectId: Int, radius: Int?): WebLink =
         WebLink(
             kind = kind,
             from = WebArea(approach.x, approach.x, approach.y, approach.y, approach.plane),
             to = area(area, landing),
-            cost = WebPathfinder.STEP_COST,
+            cost = WebGrid.STEP_COST,
             action = action,
             objectId = objectId,
             searchRadius = (radius ?: DEFAULT_SEARCH_RADIUS).coerceIn(1, 64),
@@ -160,7 +170,7 @@ internal object NavRouteMapper {
             kind = WebLinkKind.FAIRY_RING,
             from = WebArea(from.x - RING_REACH, from.x + RING_REACH, from.y - RING_REACH, from.y + RING_REACH, from.plane),
             to = WebArea(step.to.x - RING_REACH, step.to.x + RING_REACH, step.to.y - RING_REACH, step.to.y + RING_REACH, step.to.plane),
-            cost = WebPathfinder.STEP_COST,
+            cost = WebGrid.STEP_COST,
             action = known?.action ?: step.action.ifBlank { DEFAULT_RING_ACTION },
             objectId = step.objectId,
             searchRadius = RING_SEARCH,

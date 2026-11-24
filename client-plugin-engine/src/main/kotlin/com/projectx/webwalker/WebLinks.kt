@@ -135,7 +135,7 @@ object WebLinks {
     /** The links that can be taken standing on this tile, or an empty list. */
     fun from(x: Int, y: Int, plane: Int): List<WebLink> {
         ensureLoaded()
-        return byTile[WebPathfinder.key(x, y, plane)] ?: emptyList()
+        return byTile[WebGrid.key(x, y, plane)] ?: emptyList()
     }
 
     /**
@@ -172,7 +172,7 @@ object WebLinks {
             kind = WebLinkKind.OBJECT,
             from = WebArea(fromX, fromX, fromY, fromY, fromPlane),
             to = WebArea(toX, toX, toY, toY, toPlane),
-            cost = costTiles.coerceAtLeast(1) * WebPathfinder.STEP_COST,
+            cost = costTiles.coerceAtLeast(1) * WebGrid.STEP_COST,
             action = action,
             objectId = objectId,
             searchRadius = searchRadius.coerceIn(1, 64),
@@ -184,7 +184,7 @@ object WebLinks {
         val from = link.from
         for (x in from.minX..from.maxX) {
             for (y in from.minY..from.maxY) {
-                val key = WebPathfinder.key(x, y, from.plane)
+                val key = WebGrid.key(x, y, from.plane)
                 byTile.compute(key) { _, existing -> if (existing == null) listOf(link) else existing + link }
             }
         }
@@ -258,7 +258,7 @@ object WebLinks {
             kind = kind,
             from = if (kind.isGlobal) NOWHERE else WebArea(raw.fromMinX, raw.fromMaxX, raw.fromMinY, raw.fromMaxY, raw.fromPlane),
             to = WebArea(raw.toMinX, raw.toMaxX, raw.toMinY, raw.toMaxY, raw.toPlane),
-            cost = raw.costTiles.coerceAtLeast(1) * WebPathfinder.STEP_COST,
+            cost = raw.costTiles.coerceAtLeast(1) * WebGrid.STEP_COST,
             action = raw.action ?: "Use",
             objectId = raw.objectId,
             searchRadius = raw.searchRadius.coerceIn(1, 64),
@@ -305,7 +305,7 @@ object WebLinks {
                         kind = WebLinkKind.FAIRY_RING,
                         from = WebArea(from.x - FAIRY_RING_REACH, from.x + FAIRY_RING_REACH, from.y - FAIRY_RING_REACH, from.y + FAIRY_RING_REACH, from.plane),
                         to = WebArea(to.x - FAIRY_RING_REACH, to.x + FAIRY_RING_REACH, to.y - FAIRY_RING_REACH, to.y + FAIRY_RING_REACH, to.plane),
-                        cost = from.costTiles.coerceAtLeast(1) * WebPathfinder.STEP_COST,
+                        cost = from.costTiles.coerceAtLeast(1) * WebGrid.STEP_COST,
                         action = from.action ?: "Configure",
                         objectId = from.objectId,
                         searchRadius = FAIRY_RING_SEARCH,
@@ -332,7 +332,7 @@ object WebLinks {
                 kind = WebLinkKind.FAIRY_RING,
                 from = NOWHERE,
                 to = WebArea(ring.x - FAIRY_RING_REACH, ring.x + FAIRY_RING_REACH, ring.y - FAIRY_RING_REACH, ring.y + FAIRY_RING_REACH, ring.plane),
-                cost = (ring.costTiles.coerceAtLeast(1) + PORTABLE_RING_EXTRA_TILES) * WebPathfinder.STEP_COST,
+                cost = (ring.costTiles.coerceAtLeast(1) + PORTABLE_RING_EXTRA_TILES) * WebGrid.STEP_COST,
                 action = PORTABLE_RING_ACTION,
                 objectId = ring.objectId,
                 searchRadius = FAIRY_RING_SEARCH,

@@ -56,12 +56,14 @@ internal object NavResultsParser {
         }
         val steps = ArrayList<NavStep>(actions.size())
         val requirements = ArrayList<List<Int>>(actions.size())
+        val macros = ArrayList<NavMacro?>(actions.size())
         var enteredByTeleport = false
         actions.forEachIndexed { index, element ->
             val action = element.takeIf { it.isJsonObject }?.asJsonObject ?: throw NavParseException("action $index is not an object")
             if (index == 0 && str(obj(action, "metadata"), "reason") == "start_coordinate_not_found") enteredByTeleport = true
             steps += step(index, action)
             requirements += requirementIds(action)
+            macros += macroOf(action)
         }
         return NavRoute(
             found = envelope?.get("found")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: true,
@@ -71,7 +73,15 @@ internal object NavResultsParser {
             steps = steps,
             enteredByTeleport = enteredByTeleport,
             requirements = requirements,
+            macros = macros,
         )
+    }
+
+    private fun macroOf(action: JsonElement): NavMacro? {
+        val macro = action.takeIf { it.isJsonObject }?.asJsonObject?.let { obj(it, "macro") } ?: return null
+        val kind = str(macro, "kind") ?: return null
+        val id = macro.get("id")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong ?: return null
+        return NavMacro(kind, id)
     }
 
     private fun step(index: Int, o: JsonObject): NavStep {

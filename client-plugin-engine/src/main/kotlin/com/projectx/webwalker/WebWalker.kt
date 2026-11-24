@@ -1,16 +1,17 @@
 package com.projectx.webwalker
 
+import com.projectx.game.magic.SpellTeleports
 import com.projectx.game.nxt.entity.location.SceneObject
 import com.projectx.pathfinder.LiveWalkMap
-import com.projectx.pathfinder.navpath.HostedPlanner
 import com.projectx.pathfinder.navpath.NavGoalSet
+import com.projectx.pathfinder.navpath.NavMacro
+import com.projectx.pathfinder.navpath.NavPlanner
 import com.projectx.pathfinder.navpath.NavProfile
 import com.projectx.pathfinder.navpath.NavRequest
 import com.projectx.pathfinder.navpath.Navpath
 import com.projectx.profiling.PlayerProfiles
 import com.projectx.quest.runtime.RecentChat
 import com.projectx.script.Script
-import com.projectx.game.magic.SpellTeleports
 import com.projectx.script.api.Lodestone
 import com.projectx.script.api.TeleportSpell
 import com.projectx.script.api.continueDialogueContaining
@@ -22,15 +23,15 @@ import com.projectx.script.api.localPlayer
 import com.projectx.script.api.surge
 import com.projectx.script.api.walkTo
 import com.projectx.traversal.walk.LiveRouteWalker
-import org.projectx.core.game.combat.Ability
 import com.projectx.util.random
-import world.gregs.voidps.type.Tile
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import org.projectx.core.game.combat.Ability
+import world.gregs.voidps.type.Tile
 
 /**
  * Walks to any tile on the world map, planning the route from cache collision.
@@ -62,6 +63,7 @@ object WebWalker {
     private const val MISROUTE_MEMORY_MS = 30 * 60_000L
     private const val LANDING_SLACK = 10
     private val misrouted = ConcurrentHashMap<WebLink, Long>()
+    private val misroutedMacros = ConcurrentHashMap<NavMacro, Long>()
 
     private fun landedNear(area: WebArea): Boolean {
         val me = localPlayer.tile
@@ -136,17 +138,15 @@ object WebWalker {
     @Volatile
     var useAccelerationPotion: Boolean = true
 
-    /**
-     * Whether routes are planned on the hosted planner first, with the local planner as the fallback whenever it is
-     * unreachable, refuses the store token or answers with something this walker cannot take. On by default; off with
-     * `-Dprojectx.navpath=local`, or set false here to plan locally only.
-     */
+    /** Routes are always planned on the navpath the launcher runs on this machine; setting this has no effect. */
+    @Deprecated("Routes are always planned on the launcher's navpath")
     @Volatile
-    var useHostedPlanner: Boolean = System.getProperty("projectx.navpath") != "local"
+    var useHostedPlanner: Boolean = true
 
     // A movement ability hops at most ten tiles; Surge only ever goes its full distance, so it needs a straight run
     // that long, and the character must already face that way, which three steps walked in it settle.
     private const val ABILITY_REACH = 10
+    private const val MAX_RING_REPLANS = 4
     private const val MIN_DIVE_TILES = 4
     private const val WALK_BEFORE_SURGE = 3
     private const val ABILITY_BARRIER_GAP = 2
@@ -170,10 +170,13 @@ object WebWalker {
         destY: Int,
         plane: Int,
         arriveDistance: Int = 0,
-    ): CompletableFuture<WebWalkResult> = CompletableFuture.supplyAsync(
-        { plan(startX, startY, destX, destY, plane, plane, arriveDistance, WebLinkPermissions.UNRESTRICTED) },
-        planner,
-    )
+    ): CompletableFuture<WebWalkResult> {
+        val from = Tile.of(startX, startY, plane)
+        val goal = WalkGoal.Near(Tile.of(destX, destY, plane), arriveDistance.coerceAtLeast(0))
+        val request = request(from, goal, teleports = false, withoutSpells = emptySet())
+        val goals = request?.let { goal.goalSet(from) }
+        return CompletableFuture.supplyAsync({ navpath(from, goal, request, goals, teleports = false) }, planner)
+    }
 
     /**
      * Plans a route and blocks until it is ready. Never call it from a script body, which runs on the game thread;
@@ -193,28 +196,16 @@ object WebWalker {
         from: Tile,
         goal: WalkGoal,
         teleports: Boolean,
-        excluded: Set<WebLink>,
-        lockedDoors: Set<Long> = emptySet(),
-        hostedAllowed: Boolean = true,
         withoutSpells: Set<TeleportSpell> = emptySet(),
+        avoid: Set<NavMacro> = emptySet(),
     ): WebWalkResult {
         if (goal is WalkGoal.Tiles && goal.isEmpty) return WebWalkResult(WebWalkStatus.NO_PATH, "The area holds no tiles")
         // Requirements read varbits, levels, the money pouch and what is carried, which may only be touched here on
-        // the game thread; the planner runs on its own thread and consults the snapshot instead.
+        // the game thread; the planner runs on its own thread.
         val permissions = runCatching { WebLinkPermissions.snapshot() }.getOrDefault(WebLinkPermissions.UNRESTRICTED)
-        val request = if (hostedAllowed && useHostedPlanner && !Navpath.planner.resting() && from.x < INSTANCE_MIN_X && goal.maxX < INSTANCE_MIN_X) {
-            runCatching { NavProfile.request(from, goal.centre, teleports, useItemTeleports, useMovementAbilities, withoutSpells) }.getOrNull()
-        } else {
-            null
-        }
+        val request = request(from, goal, teleports, withoutSpells)?.copy(exclude = avoid)
         val goals = request?.let { goal.goalSet(from) }
-        val future = CompletableFuture.supplyAsync(
-            {
-                hosted(request, goals, teleports)?.takeIf { it.path?.let { path -> ringsAllowed(path, permissions) } != false }
-                    ?: planLocally(from, goal, permissions, teleports, excluded, lockedDoors)
-            },
-            planner,
-        )
+        val future = CompletableFuture.supplyAsync({ planAllowed(from, goal, request, goals, teleports, permissions) }, planner)
         script.delayUntil(SEARCH_TIMEOUT_MS, SEARCH_POLL_MS) { future.isDone || script.stopped }
         if (!future.isDone) {
             future.cancel(false)
@@ -224,7 +215,7 @@ object WebWalker {
     }
 
     internal suspend fun findPath(script: Script, from: Tile, goal: WalkGoal): WebWalkResult =
-        findPath(script, from, goal, teleports = false, excluded = emptySet())
+        findPath(script, from, goal, teleports = false)
 
     /** Walks until the player stands in [goal]; the route aims at whichever of its tiles is cheapest to reach. */
     internal suspend fun walk(script: Script, goal: WalkGoal, useLodestones: Boolean): WebWalkResult = walk(script, goal, useLodestones) { false }
@@ -243,8 +234,9 @@ object WebWalker {
         val keptBack = setAside.size
         val started = System.currentTimeMillis()
         misrouted.values.removeIf { started - it > MISROUTE_MEMORY_MS }
+        misroutedMacros.values.removeIf { started - it > MISROUTE_MEMORY_MS }
         setAside += misrouted.keys
-        val lockedDoors = HashSet<Long>()
+        val avoid = HashSet<NavMacro>(misroutedMacros.keys)
         val walker = LiveRouteWalker("WebWalk").apply {
             surgeEnabled = useMovementAbilities
             diveEnabled = useMovementAbilities
@@ -280,11 +272,8 @@ object WebWalker {
 
             if (path == null || path.distance(path.nearestIndex(me.x, me.y, me.plane), me.x, me.y) > OFF_PATH_DISTANCE || stalls >= MAX_STALLS) {
                 if (++plans > MAX_PLANS) return WebWalkResult(WebWalkStatus.STUCK, "No progress after $MAX_PLANS routes", path, lodestone)
-                // A link set aside or a locked door is something only the local planner can route around; a spell set
-                // aside is left out of the hosted planner's requirements instead.
                 val spellsAside = setAside.mapNotNullTo(HashSet()) { it.spell }
-                val hostedAllowed = setAside.size - spellsAside.size == keptBack && lockedDoors.isEmpty()
-                val planned = findPath(script, me, goal, useLodestones, setAside, lockedDoors, hostedAllowed, spellsAside)
+                val planned = findPath(script, me, goal, useLodestones, spellsAside, avoid)
                 if (planned.status != WebWalkStatus.PATH_FOUND) return planned.via(lodestone)
                 path = planned.path!!
                 stalls = 0
@@ -321,6 +310,7 @@ object WebWalker {
                     }
                     println("[WebWalk] Could not take $step$why; planning around it")
                     setAside += step
+                    route.macroAt(link)?.let(avoid::add)
                     linkAttempts = 0
                     linkStartedAt = Long.MAX_VALUE
                     path = null
@@ -334,6 +324,10 @@ object WebWalker {
                         println("[WebWalk] $step left us at ${localPlayer.tile}, not its destination; leaving it out for now")
                         misrouted[step] = System.currentTimeMillis()
                         setAside += step
+                        route.macroAt(link)?.let {
+                            misroutedMacros[it] = System.currentTimeMillis()
+                            avoid += it
+                        }
                         path = null
                     }
                     linkAttempts = 0
@@ -345,6 +339,7 @@ object WebWalker {
                     // A hit closes a teleport's menu, so clicking it open again while under attack only repeats that.
                     println("[WebWalk] $step's menu did not hold in combat; planning around it")
                     setAside += step
+                    route.macroAt(link)?.let(avoid::add)
                     linkAttempts = 0
                     linkStartedAt = Long.MAX_VALUE
                     path = null
@@ -361,7 +356,7 @@ object WebWalker {
                     DoorOutcome.PASSED -> doorAttempts = 0
                     DoorOutcome.LOCKED -> {
                         println("[WebWalk] The door at ${route.getX(door)},${route.getY(door)} is locked; planning around it")
-                        lockedDoors += lockedEdge(route, door)
+                        route.macroAt(door)?.let(avoid::add)
                         doorAttempts = 0
                         path = null
                     }
@@ -441,15 +436,6 @@ object WebWalker {
     private fun closeEnoughToOpen(route: WebPath, door: Int): Boolean =
         LiveWalkMap.distance(localPlayer.tile, route.tile(door - 1), DOOR_EARLY_STEPS) in 0..DOOR_EARLY_STEPS
 
-    private fun lockedEdge(route: WebPath, door: Int): Long {
-        val near = route.tile(door - 1)
-        val far = route.tile(door)
-        val dir = (0 until WebPathfinder.CARDINALS).first {
-            near.x + WebPathfinder.DX[it] == far.x && near.y + WebPathfinder.DY[it] == far.y
-        }
-        return WebPathfinder.doorEdge(near.x, near.y, near.plane, dir)
-    }
-
     /**
      * Dives, or failing that Surges, along the stretch of route ahead when it is straight enough and the ability is
      * ready. Never within a couple of steps of a door or link, which have to be walked up to. A hop the game ignored,
@@ -507,66 +493,49 @@ object WebWalker {
         }
     }
 
-    /** The hosted planner's route, on `/route_area` when there are [goals], or null when the local planner should plan instead. */
-    // The hosted planner's rings carry no requirements, so one this account can't use is checked against our own data.
-    private fun ringsAllowed(path: WebPath, permissions: WebLinkPermissions): Boolean = (0 until path.size).all { index ->
-        val code = path.linkAt(index)?.takeIf { it.kind == WebLinkKind.FAIRY_RING }?.fairyCode ?: return@all true
-        val ours = WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING && it.fairyCode == code }
-        ours.isEmpty() || ours.any(permissions::allows)
-    }
-
-    private fun hosted(request: NavRequest?, goals: NavGoalSet?, teleports: Boolean): WebWalkResult? {
-        request ?: return null
-        return when (val outcome = runCatching { Navpath.planner.plan(request, goals, teleports) }.getOrNull()) {
-            is HostedPlanner.Outcome.Planned -> WebWalkResult(WebWalkStatus.PATH_FOUND, "Route found by the hosted planner", outcome.path)
-            else -> null
-        }
-    }
-
-    /** A tile set is tried tile by tile, nearest standable first, until the local planner reaches one. */
-    private fun planLocally(
+    /** Plans, leaving out and planning again around any fairy ring on the route this account can't use. */
+    private fun planAllowed(
         from: Tile,
         goal: WalkGoal,
-        permissions: WebLinkPermissions,
+        request: NavRequest?,
+        goals: NavGoalSet?,
         teleports: Boolean,
-        excluded: Set<WebLink>,
-        lockedDoors: Set<Long>,
-    ): WebWalkResult = when (goal) {
-        is WalkGoal.Near -> {
-            val to = goal.destination
-            plan(from.x, from.y, to.x, to.y, from.plane, to.plane, goal.distance, permissions, teleports, excluded, lockedDoors)
+        permissions: WebLinkPermissions,
+    ): WebWalkResult {
+        var asked = request
+        repeat(MAX_RING_REPLANS) {
+            val planned = navpath(from, goal, asked, goals, teleports)
+            val path = planned.path ?: return planned
+            val ring = forbiddenRing(path, permissions) ?: return planned
+            val macro = path.macroAt(ring) ?: return WebWalkResult(WebWalkStatus.NO_PATH, "The route needs ${path.linkAt(ring)}, which this account can't use")
+            asked = asked?.let { it.copy(exclude = it.exclude + macro) }
         }
-        is WalkGoal.Tiles -> {
-            val probe = WebPathfinder()
-            var result = WebWalkResult(WebWalkStatus.NO_PATH, "No tile of $goal can be stood on")
-            for (to in goal.candidates(from) { probe.walkable(it.x, it.y, it.plane) }) {
-                result = plan(from.x, from.y, to.x, to.y, from.plane, to.plane, 0, permissions, teleports, excluded, lockedDoors)
-                if (result.isSuccess || result.status == WebWalkStatus.NOT_IN_WORLD) break
-            }
-            result
-        }
+        return WebWalkResult(WebWalkStatus.NO_PATH, "Every route found needs a fairy ring this account can't use")
     }
 
-    private fun plan(
-        startX: Int,
-        startY: Int,
-        destX: Int,
-        destY: Int,
-        plane: Int,
-        destPlane: Int,
-        arriveDistance: Int,
-        permissions: WebLinkPermissions,
-        teleports: Boolean = false,
-        excluded: Set<WebLink> = emptySet(),
-        lockedDoors: Set<Long> = emptySet(),
-    ): WebWalkResult {
-        if (startX >= INSTANCE_MIN_X || destX >= INSTANCE_MIN_X) {
+    // Rings in the map carry no requirements of their own, so one this account can't use is checked against our data.
+    private fun forbiddenRing(path: WebPath, permissions: WebLinkPermissions): Int? = (0 until path.size).firstOrNull { index ->
+        val code = path.linkAt(index)?.takeIf { it.kind == WebLinkKind.FAIRY_RING }?.fairyCode ?: return@firstOrNull false
+        val ours = WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING && it.fairyCode == code }
+        ours.isNotEmpty() && ours.none(permissions::allows)
+    }
+
+    /** What this account can use on the way, read on the game thread; null inside an instance or when it can't be read. */
+    private fun request(from: Tile, goal: WalkGoal, teleports: Boolean, withoutSpells: Set<TeleportSpell>): NavRequest? {
+        if (from.x >= INSTANCE_MIN_X || goal.maxX >= INSTANCE_MIN_X) return null
+        return runCatching { NavProfile.request(from, goal.centre, teleports, useItemTeleports, useMovementAbilities, withoutSpells) }.getOrNull()
+    }
+
+    private fun navpath(from: Tile, goal: WalkGoal, request: NavRequest?, goals: NavGoalSet?, teleports: Boolean): WebWalkResult {
+        if (from.x >= INSTANCE_MIN_X || goal.maxX >= INSTANCE_MIN_X) {
             return WebWalkResult(WebWalkStatus.NOT_IN_WORLD, "Web walking does not work inside instances")
         }
-        return try {
-            WebPathfinder().find(startX, startY, plane, destX, destY, destPlane, arriveDistance, permissions, teleports, excluded, lockedDoors)
-        } catch (t: Throwable) {
-            WebWalkResult(WebWalkStatus.NO_PATH, "Route planning failed: ${t.javaClass.simpleName}: ${t.message}")
+        request ?: return WebWalkResult(WebWalkStatus.NO_PATH, "Couldn't read what this account can use on the way")
+        val outcome = runCatching { Navpath.planner.plan(request, goals, teleports) }
+            .getOrElse { NavPlanner.Outcome.Failed("route planning failed: ${it.javaClass.simpleName}") }
+        return when (outcome) {
+            is NavPlanner.Outcome.Planned -> WebWalkResult(WebWalkStatus.PATH_FOUND, "Route found", outcome.path)
+            is NavPlanner.Outcome.Failed -> WebWalkResult(WebWalkStatus.NO_PATH, "No route: ${outcome.reason}")
         }
     }
 

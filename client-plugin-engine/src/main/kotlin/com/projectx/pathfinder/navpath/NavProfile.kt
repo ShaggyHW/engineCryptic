@@ -1,5 +1,6 @@
 package com.projectx.pathfinder.navpath
 
+import com.google.gson.JsonParser
 import com.projectx.game.bootstrap.GameThread
 import com.projectx.game.cs2.CS2Executor
 import com.projectx.game.magic.SpellTeleports
@@ -12,7 +13,6 @@ import com.projectx.script.api.equipment
 import com.projectx.script.api.inventory
 import com.projectx.script.api.localPlayer
 import com.projectx.script.api.varps
-import com.projectx.store.Entitlements
 import com.projectx.util.FeatureIds
 import com.projectx.webwalker.AbyssPassage
 import com.projectx.webwalker.DramenStaff
@@ -22,6 +22,7 @@ import com.projectx.webwalker.WebLinks
 import org.projectx.core.game.combat.Ability
 import world.gregs.voidps.gameval.Gameval
 import world.gregs.voidps.type.Tile
+import java.io.File
 import java.util.concurrent.ThreadLocalRandom
 
 /**
@@ -188,29 +189,24 @@ internal object NavProfile {
     private const val COMBAT_LEVEL = 60
 }
 
-/** The live hosted planner, its address and the player's store token. */
+/** The navpath the launcher runs on this machine, found through the endpoint file it writes. */
 internal object Navpath {
     private const val URL_PROPERTY = "projectx.navpath.url"
-    private const val TOKEN_TTL_MS = 60_000L
+    private val endpointFile = File(System.getProperty("user.home"), ".projectx/navpath/endpoint.json")
 
     @Volatile
-    private var cachedToken: String? = null
+    private var cached: Pair<Long, String?> = -1L to null
 
-    @Volatile
-    private var tokenReadAt = 0L
+    val planner = NavPlanner(transport = NavHttp, baseUrl = ::url)
 
-    val planner = HostedPlanner(
-        transport = NavHttp,
-        baseUrl = { System.getProperty(URL_PROPERTY)?.takeIf { it.isNotBlank() } ?: (Entitlements.storeBase().trimEnd('/') + "/api/navpath") },
-        token = ::token,
-    )
-
-    private fun token(): String? {
-        val now = System.currentTimeMillis()
-        if (now - tokenReadAt > TOKEN_TTL_MS) {
-            cachedToken = Entitlements.token()
-            tokenReadAt = now
-        }
-        return cachedToken
+    private fun url(): String? {
+        System.getProperty(URL_PROPERTY)?.takeIf { it.isNotBlank() }?.let { return it }
+        val modified = endpointFile.lastModified()
+        if (modified == 0L) return null
+        val (readAt, url) = cached
+        if (readAt == modified) return url
+        val fresh = runCatching { JsonParser.parseString(endpointFile.readText()).asJsonObject.get("url")?.asString }.getOrNull()
+        cached = modified to fresh
+        return fresh
     }
 }

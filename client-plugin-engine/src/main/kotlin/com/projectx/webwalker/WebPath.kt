@@ -1,5 +1,6 @@
 package com.projectx.webwalker
 
+import com.projectx.pathfinder.navpath.NavMacro
 import world.gregs.voidps.type.Tile
 import kotlin.math.abs
 import kotlin.math.max
@@ -49,6 +50,11 @@ class WebPath internal constructor(
 
     /** The link taken to reach [index], or null when the step was walked. */
     fun linkAt(index: Int): WebLink? = links[index]
+
+    internal var macros: Array<NavMacro?>? = null
+
+    /** The navpath edge the link at [index] came from, which a later route can be told to avoid. */
+    internal fun macroAt(index: Int): NavMacro? = macros?.getOrNull(index)
 
     /** The first step at or after [fromIndex] that passes a cache door, or -1. */
     fun nextDoor(fromIndex: Int): Int {

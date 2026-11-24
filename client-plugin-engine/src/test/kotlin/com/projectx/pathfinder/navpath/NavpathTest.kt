@@ -222,19 +222,17 @@ class NavpathTest {
         assertEquals(77, body.get("seed").asInt)
     }
 
-    // ---- fallback, retry and breaker ----
+    // ---- answers, retries and failures ----
 
     private class FakeTransport(vararg replies: () -> NavReply) : NavTransport {
         val queue = ArrayDeque(replies.toList())
         var calls = 0
-        var lastToken: String? = null
         var lastUrl: String? = null
         var lastBody: String? = null
 
-        override fun post(url: String, token: String, body: String): NavReply {
+        override fun post(url: String, body: String): NavReply {
             calls++
             lastBody = body
-            lastToken = token
             lastUrl = url
             return (queue.removeFirstOrNull() ?: { NavReply(200, "") })()
         }
@@ -242,75 +240,78 @@ class NavpathTest {
 
     private val request = NavRequest(Tile.of(3198, 3200, 0), Tile.of(3213, 3202, 1), emptyList(), false, 1, false, 0, 1)
 
-    private fun planner(transport: NavTransport, now: () -> Long = { 0L }, token: String? = "secret") =
-        HostedPlanner(transport, { "https://example.test/api/navpath/" }, { token }, now, pause = {}, log = {})
+    private fun planner(transport: NavTransport, url: String? = "http://127.0.0.1:18889/") =
+        NavPlanner(transport, { url }, pause = {}, log = {})
 
     @Test
-    fun `a good answer becomes a route, sent with the bearer token`() {
+    fun `a good answer becomes a route from the local navpath`() {
         val transport = FakeTransport({ NavReply(200, fixture("walk-door-stairs.json")) })
         val outcome = planner(transport).plan(request, true)
-        assertIs<HostedPlanner.Outcome.Planned>(outcome)
-        assertEquals("secret", transport.lastToken)
-        assertEquals("https://example.test/api/navpath/route", transport.lastUrl)
+        assertIs<NavPlanner.Outcome.Planned>(outcome)
+        assertEquals("http://127.0.0.1:18889/route", transport.lastUrl)
     }
 
     @Test
-    fun `a busy server is asked again, then given up on`() {
+    fun `a planner still warming up is asked again, then given up on`() {
         val busyThenGood = FakeTransport({ NavReply(503, "busy") }, { NavReply(200, fixture("walk-door-stairs.json")) })
-        assertIs<HostedPlanner.Outcome.Planned>(planner(busyThenGood).plan(request, true))
+        assertIs<NavPlanner.Outcome.Planned>(planner(busyThenGood).plan(request, true))
         assertEquals(2, busyThenGood.calls)
 
         val alwaysBusy = FakeTransport({ NavReply(503, "busy") }, { NavReply(503, "busy") }, { NavReply(503, "busy") })
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(alwaysBusy).plan(request, true))
-        assertEquals(1 + HostedPlanner.BUSY_RETRIES, alwaysBusy.calls)
+        assertIs<NavPlanner.Outcome.Failed>(planner(alwaysBusy).plan(request, true))
+        assertEquals(1 + NavPlanner.BUSY_RETRIES, alwaysBusy.calls)
     }
 
     @Test
-    fun `a refused token falls back at once and rests the server`() {
-        var now = 0L
-        val transport = FakeTransport({ NavReply(401, "") })
-        val p = planner(transport, { now })
-        assertIs<HostedPlanner.Outcome.Fallback>(p.plan(request, true))
-        assertTrue(p.resting())
-        assertIs<HostedPlanner.Outcome.Fallback>(p.plan(request, true))
-        assertEquals(1, transport.calls)
-        now = HostedPlanner.AUTH_REST_MS + 1
-        assertFalse(p.resting())
-    }
-
-    @Test
-    fun `no token never calls the server`() {
+    fun `no endpoint says navpath isn't running and never calls`() {
         val transport = FakeTransport()
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(transport, token = null).plan(request, true))
+        val outcome = assertIs<NavPlanner.Outcome.Failed>(planner(transport, url = null).plan(request, true))
+        assertEquals(NavPlanner.NOT_RUNNING, outcome.reason)
         assertEquals(0, transport.calls)
     }
 
     @Test
-    fun `repeated failures open the breaker for a minute`() {
-        var now = 0L
-        val fail: () -> NavReply = { throw HttpTimeoutException("slow") }
-        val transport = FakeTransport(fail, { throw IOException("reset") }, { NavReply(502, "") }, { NavReply(200, fixture("walk-door-stairs.json")) })
-        val p = planner(transport, { now })
-        repeat(HostedPlanner.BREAKER_FAILURES) { assertIs<HostedPlanner.Outcome.Fallback>(p.plan(request, true)) }
-        assertTrue(p.resting())
-        assertIs<HostedPlanner.Outcome.Fallback>(p.plan(request, true))
-        assertEquals(HostedPlanner.BREAKER_FAILURES, transport.calls)
-        now = HostedPlanner.BREAKER_MS + 1
-        assertIs<HostedPlanner.Outcome.Planned>(p.plan(request, true))
+    fun `a connection failure says navpath isn't running`() {
+        val outcome = planner(FakeTransport({ throw IOException("refused") })).plan(request, true)
+        assertTrue(assertIs<NavPlanner.Outcome.Failed>(outcome).reason.startsWith(NavPlanner.NOT_RUNNING))
     }
 
     @Test
-    fun `a garbled or unwalkable answer falls back`() {
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ NavReply(200, "{oops") })).plan(request, true))
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ NavReply(200, fixture("generic-teleport.json")) })).plan(request, true))
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ NavReply(400, "goal tile not found in snapshot") })).plan(request, true))
+    fun `a garbled or unwalkable answer fails with its reason`() {
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport({ NavReply(200, "{oops") })).plan(request, true))
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport({ NavReply(200, fixture("generic-teleport.json")) })).plan(request, true))
+        val refused = planner(FakeTransport({ NavReply(400, "goal tile not found in snapshot") })).plan(request, true)
+        assertTrue(assertIs<NavPlanner.Outcome.Failed>(refused).reason.contains("goal tile not found"))
     }
 
     @Test
     fun `a teleport is refused when the walk may not use one`() {
         val transport = FakeTransport({ NavReply(200, fixture("teleport-npc-item.json")) })
         val outcome = planner(transport).plan(request.copy(start = Tile.of(3000, 3000, 0)), acceptsTeleports = false)
-        assertIs<HostedPlanner.Outcome.Fallback>(outcome)
+        assertIs<NavPlanner.Outcome.Failed>(outcome)
+    }
+
+    @Test
+    fun `excluded edges are sent sorted, and an empty set sends none`() {
+        assertFalse(request.toJsonObject().has("exclude_macros"))
+        val body = request.copy(exclude = setOf(NavMacro("object", 2), NavMacro("door", 7))).toJsonObject()
+        val sent = body.getAsJsonArray("exclude_macros").map { it.asJsonObject.get("kind").asString to it.asJsonObject.get("id").asLong }
+        assertEquals(listOf("door" to 7L, "object" to 2L), sent)
+    }
+
+    @Test
+    fun `each link remembers the edge it came from`() {
+        val answer = JsonParser.parseString(fixture("walk-door-stairs.json")).asJsonObject
+        val actions = answer.getAsJsonArray("actions")
+        for ((index, kind) in listOf(2 to "door", 5 to "object")) {
+            actions[index].asJsonObject.add("macro", JsonObject().apply {
+                addProperty("kind", kind)
+                addProperty("id", 40 + index)
+            })
+        }
+        val path = assertIs<NavPlanner.Outcome.Planned>(planner(FakeTransport({ NavReply(200, answer.toString()) })).plan(request, true)).path
+        val remembered = (0 until path.size).filter { path.linkAt(it) != null }.map { path.linkAt(it)!!.kind to path.macroAt(it) }
+        assertEquals(listOf(WebLinkKind.DOOR to NavMacro("door", 42), WebLinkKind.OBJECT to NavMacro("object", 45)), remembered)
     }
 
     // ---- routing to an area ----
@@ -366,8 +367,8 @@ class NavpathTest {
         val goals = WalkGoal.Near(destination, 4).goalSet(request.start)
         val transport = FakeTransport({ NavReply(200, fixture("area-walk.json")) })
         val outcome = planner(transport).plan(request.copy(goal = destination), goals, true)
-        val path = assertIs<HostedPlanner.Outcome.Planned>(outcome).path
-        assertEquals("https://example.test/api/navpath/route_area", transport.lastUrl)
+        val path = assertIs<NavPlanner.Outcome.Planned>(outcome).path
+        assertEquals("http://127.0.0.1:18889/route_area", transport.lastUrl)
         val body = body(transport)
         assertEquals(WebArea(3201, 3209, 3196, 3204, 0), goalArea(body))
         assertEquals(destination, body.tile("goal"))
@@ -380,8 +381,8 @@ class NavpathTest {
     fun `no arrive distance stays on the single-tile route`() {
         assertNull(WalkGoal.Near(tile(3213, 3202, 1), 0).goalSet(request.start))
         val transport = FakeTransport({ NavReply(200, fixture("walk-door-stairs.json")) })
-        assertIs<HostedPlanner.Outcome.Planned>(planner(transport).plan(request, null, true))
-        assertEquals("https://example.test/api/navpath/route", transport.lastUrl)
+        assertIs<NavPlanner.Outcome.Planned>(planner(transport).plan(request, null, true))
+        assertEquals("http://127.0.0.1:18889/route", transport.lastUrl)
         assertFalse(body(transport).has("goal_area"))
     }
 
@@ -389,30 +390,29 @@ class NavpathTest {
     fun `area planning falls back like single-tile planning`() {
         val goals = WalkGoal.Near(tile(3205, 3200), 4).goalSet(request.start)
         val alwaysBusy = FakeTransport({ NavReply(503, "busy") }, { NavReply(503, "busy") }, { NavReply(503, "busy") })
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(alwaysBusy).plan(request, goals, true))
-        assertEquals(1 + HostedPlanner.BUSY_RETRIES, alwaysBusy.calls)
+        assertIs<NavPlanner.Outcome.Failed>(planner(alwaysBusy).plan(request, goals, true))
+        assertEquals(1 + NavPlanner.BUSY_RETRIES, alwaysBusy.calls)
 
         val busyThenGood = FakeTransport({ NavReply(503, "busy") }, { NavReply(200, fixture("area-walk.json")) })
-        assertIs<HostedPlanner.Outcome.Planned>(planner(busyThenGood).plan(request, goals, true))
+        assertIs<NavPlanner.Outcome.Planned>(planner(busyThenGood).plan(request, goals, true))
 
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ throw IOException("reset") })).plan(request, goals, true))
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ NavReply(400, "goal_area too large") })).plan(request, goals, true))
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ NavReply(200, fixture("not-found.json")) })).plan(request, goals, true))
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport()).plan(request, goals, true))
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport({ throw IOException("reset") })).plan(request, goals, true))
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport({ NavReply(400, "goal_area too large") })).plan(request, goals, true))
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport({ NavReply(200, fixture("not-found.json")) })).plan(request, goals, true))
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport()).plan(request, goals, true))
 
         val elsewhere = NavGoalSet(WebArea(3300, 3310, 3300, 3310, 0), emptyList())
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(FakeTransport({ NavReply(200, fixture("area-walk.json")) })).plan(request, elsewhere, true))
+        assertIs<NavPlanner.Outcome.Failed>(planner(FakeTransport({ NavReply(200, fixture("area-walk.json")) })).plan(request, elsewhere, true))
     }
 
     @Test
-    fun `area failures count towards the breaker`() {
+    fun `area failures are answered one call each, then planning works again`() {
         val goals = WalkGoal.Near(tile(3205, 3200), 4).goalSet(request.start)
-        val transport = FakeTransport({ throw IOException("reset") }, { NavReply(502, "") }, { throw HttpTimeoutException("slow") })
+        val transport = FakeTransport({ throw IOException("reset") }, { NavReply(502, "") }, { NavReply(200, fixture("area-walk.json")) })
         val p = planner(transport)
-        repeat(HostedPlanner.BREAKER_FAILURES) { assertIs<HostedPlanner.Outcome.Fallback>(p.plan(request, goals, true)) }
-        assertTrue(p.resting())
-        assertIs<HostedPlanner.Outcome.Fallback>(p.plan(request, goals, true))
-        assertEquals(HostedPlanner.BREAKER_FAILURES, transport.calls)
+        repeat(2) { assertIs<NavPlanner.Outcome.Failed>(p.plan(request, goals, true)) }
+        assertIs<NavPlanner.Outcome.Planned>(p.plan(request, goals, true))
+        assertEquals(3, transport.calls)
     }
 
     @Test
@@ -591,7 +591,7 @@ class NavpathTest {
     fun `a spell this engine does not know refuses the route, and a walk without teleports refuses any spell`() {
         assertIs<NavRouteMapper.Mapped.Refused>(NavRouteMapper.map(tile(3222, 3218), NavResultsParser.parse(fixture("spell-unknown.json"))))
         val transport = FakeTransport({ NavReply(200, fixture("spell-teleport.json")) })
-        assertIs<HostedPlanner.Outcome.Fallback>(planner(transport).plan(request, false))
+        assertIs<NavPlanner.Outcome.Failed>(planner(transport).plan(request, false))
     }
 
     @Test

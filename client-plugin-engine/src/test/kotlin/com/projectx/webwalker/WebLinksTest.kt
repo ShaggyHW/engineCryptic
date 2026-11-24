@@ -221,11 +221,11 @@ class WebLinksTest {
     fun `tile keys survive a round trip at the edges of the world`() {
         for (plane in 0..3) {
             for ((x, y) in listOf(0 to 0, 3222 to 3218, 16383 to 16383, 6400 to 12000)) {
-                val key = WebPathfinder.key(x, y, plane)
+                val key = WebGrid.key(x, y, plane)
                 assertTrue(key >= 0, "key for $x,$y,$plane went negative")
-                assertEquals(x, WebPathfinder.tileX(key))
-                assertEquals(y, WebPathfinder.tileY(key))
-                assertEquals(plane, WebPathfinder.tilePlane(key))
+                assertEquals(x, WebGrid.tileX(key))
+                assertEquals(y, WebGrid.tileY(key))
+                assertEquals(plane, WebGrid.tilePlane(key))
             }
         }
     }
@@ -243,7 +243,7 @@ class WebLinksTest {
 
     @Test
     fun `a locked door is the same edge from either side`() {
-        assertEquals(WebPathfinder.doorEdge(3200, 3200, 0, 2), WebPathfinder.doorEdge(3201, 3200, 0, 0))
-        assertNotEquals(WebPathfinder.doorEdge(3200, 3200, 0, 2), WebPathfinder.doorEdge(3200, 3200, 0, 1))
+        assertEquals(WebGrid.doorEdge(3200, 3200, 0, 2), WebGrid.doorEdge(3201, 3200, 0, 0))
+        assertNotEquals(WebGrid.doorEdge(3200, 3200, 0, 2), WebGrid.doorEdge(3200, 3200, 0, 1))
     }
 }
