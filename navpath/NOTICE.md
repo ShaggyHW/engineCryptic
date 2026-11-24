@@ -4,7 +4,7 @@ The route planner the web walker plans on. The launcher runs one copy per machin
 
 The source is ShaggyHW's navpathService (https://github.com/ShaggyHW/navpathService), vendored at
 commit 47d6a57141a80af2cfdc70bb04f5bfffcdfa5211 (2026-11-24). The upstream repository has no licence;
-we build and ship it to players with its author's permission. Don't copy it into any public repository.
+we build it, ship it to players and keep its source here, in this public repository, with its author's permission.
 
 Our changes on top of upstream:
 - `rust/navpath-core/src/snapshot/reader.rs`: the memory-map advice and locking calls are Unix-only
