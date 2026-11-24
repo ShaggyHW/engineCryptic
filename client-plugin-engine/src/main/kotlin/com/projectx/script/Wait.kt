@@ -357,6 +357,17 @@ sealed class Wait {
         @JvmOverloads
         fun performEmote(name: String, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.performEmote(name) }
 
+        /** Solve the open sliding-tile puzzle box and close it; [onResult] gets whether it was solved. Kotlin: `solvePuzzleBox`. */
+        @JvmStatic
+        @JvmOverloads
+        fun solvePuzzleBox(onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.solvePuzzleBox() }
+
+        /** Take one [itemName] out of the Charos' clue carrier; [onResult] gets whether it arrived. Kotlin: `takeFromClueCarrier`. */
+        @JvmStatic
+        @JvmOverloads
+        fun takeFromClueCarrier(itemName: String, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.takeFromClueCarrier(itemName) }
+
         /** Turn [prayer] on or off, then wait for the change. Kotlin: `togglePrayer`. */
         @JvmStatic
         fun togglePrayer(prayer: Prayer, shouldBeActive: Boolean): Wait = call(null) { this.togglePrayer(prayer, shouldBeActive) }
