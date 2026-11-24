@@ -73,9 +73,7 @@ data class Item(
     fun click(option: String): Boolean {
         var op = -1
         if (slot.interfaceId == equipment.interfaceId) {
-            op = getDef().getEquipOpIdForName(option)
-            if (op == -1) return false
-            op += 2
+            op = if (option == "Remove") 1 else getDef().getEquipOpIdForName(option).let { if (it == -1) return false else it + 2 }
         } else
             if (slot.interfaceId == inventory.interfaceId) {
                 op = getDef().getInvOpIdForName(option)
@@ -98,10 +96,6 @@ data class Item(
                     else -> 1
                 }
             }
-        if (op != -1) {
-            click(op)
-            return true
-        }
-        return false
+        return op != -1 && click(op)
     }
 }
