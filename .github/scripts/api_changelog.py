@@ -73,6 +73,7 @@ INTERNAL_TYPES = {
     "com.projectx.webwalker.MasterFarmerHat",
     "com.projectx.webwalker.WebItemStep",
     "com.projectx.webwalker.WalkGoal",
+    "com.projectx.webwalker.WebGrid",
     "com.projectx.webwalker.WebLinkActions",
     "com.projectx.webwalker.WebPathfinder",
 }

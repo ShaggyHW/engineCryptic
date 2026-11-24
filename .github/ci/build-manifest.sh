@@ -41,6 +41,10 @@ launchers='[]'
 engine='null'
 supervisor='null'
 bootstraps='[]'
+# The route planner the launcher runs on localhost: one archive per platform, plus the map it plans on, which is
+# the same file everywhere.
+navpath='[]'
+navpath_map='null'
 
 # The manifest platform tag a native bootstrap filename implies.
 bootstrap_platform() {
@@ -82,6 +86,21 @@ for path in "$DIST"/*; do
                 '. + [{platform: $platform, file: $file, version: $version,
                        sha256: $sha256, size: $size, url: $url}]')"
             ;;
+        navpath-map-"$PROJECTX_VERSION".db)
+            navpath_map="$(jq -n --arg file "$file" --arg version "$PROJECTX_VERSION" \
+                --arg sha256 "$sha" --argjson size "$size" --arg url "$url" \
+                '{platform: "any", file: $file, version: $version, sha256: $sha256, size: $size, url: $url}')"
+            ;;
+        navpath-"$PROJECTX_VERSION"-*.tar.gz|navpath-"$PROJECTX_VERSION"-*.zip)
+            platform="${file#navpath-"$PROJECTX_VERSION"-}"
+            platform="${platform%.tar.gz}"
+            platform="${platform%.zip}"
+            navpath="$(printf '%s' "$navpath" | jq \
+                --arg platform "$platform" --arg file "$file" --arg version "$PROJECTX_VERSION" \
+                --arg sha256 "$sha" --argjson size "$size" --arg url "$url" \
+                '. + [{platform: $platform, file: $file, version: $version,
+                       sha256: $sha256, size: $size, url: $url}]')"
+            ;;
         project-x-launcher-*)
             platform="${file#project-x-launcher-}"
             platform="${platform%.tar.gz}"
@@ -106,8 +125,11 @@ jq -n \
     --argjson engine "$engine" \
     --argjson supervisor "$supervisor" \
     --argjson bootstrap "$bootstraps" \
+    --argjson navpath "$navpath" \
+    --argjson navpathMap "$navpath_map" \
     '{schema: 1, version: $version, project: $project, pipeline: $pipeline,
       plugins: $plugins, launcher: $launcher, engine: $engine,
-      supervisor: $supervisor, bootstrap: $bootstrap}' > "$OUT"
+      supervisor: $supervisor, bootstrap: $bootstrap,
+      navpath: $navpath, navpathMap: $navpathMap}' > "$OUT"
 
 cat "$OUT"

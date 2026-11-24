@@ -224,30 +224,30 @@ def ordered(link):
     return {k: link[k] for k in FIELD_ORDER if k in link} | {k: v for k, v in link.items() if k not in FIELD_ORDER}
 
 
-def convert(db):
-    requirements = {
-        str(r["id"]): {"about": r["metaInfo"], "key": r["key"], "value": r["value"], "comparison": r["comparison"]}
-        for r in db.execute("select * from teleports_requirements order by id")
-    }
+def chained_into(db):
     incoming = set()
     for table in TABLES.values():
         columns = [c[1] for c in db.execute(f'pragma table_info("{table}")')]
         if "next_node_type" in columns:
             for r in db.execute(f'select next_node_type, next_node_id from "{table}" where next_node_type is not null'):
                 incoming.add((node_kind(r[0]), r[1]))
+    return incoming
 
-    links, dropped = [], 0
+
+def ways(db):
+    """Every chain start as (link, kind, row id), or (None, kind, row id) when it cannot be flattened."""
+    incoming = chained_into(db)
     for kind in LOCAL_STARTS:
-        for row in db.execute(f'select * from "{TABLES[kind]}" order by id'):
+        for row in db.execute(f'select * from "{TABLES[kind]}" order by id').fetchall():
             if (kind, row["id"]) in incoming:
                 continue
             start = origin(kind, row)
             link = flatten(db, kind, row["id"])
             if start is None or link is None:
-                dropped += 1
+                yield None, kind, row["id"]
                 continue
             link.update(start)
-            links.append(link)
+            yield link, kind, row["id"]
             if kind == "door" and row["tile_inside_x"] is not None:
                 back = first_step("door", row)
                 back.update(area("from", row["tile_inside_x"], row["tile_inside_x"], row["tile_inside_y"],
@@ -255,16 +255,27 @@ def convert(db):
                 back.update({key.replace("from", "to"): value for key, value in start.items()})
                 back["costTiles"] = cost_tiles(row["cost"])
                 back["requirements"] = requirement_ids(row["requirements"])
-                links.append(back)
+                yield back, kind, row["id"]
     for kind in GLOBAL_STARTS:
-        for row in db.execute(f'select * from "{TABLES[kind]}" order by id'):
+        for row in db.execute(f'select * from "{TABLES[kind]}" order by id').fetchall():
             if (kind, row["id"]) in incoming:
                 continue
             link = flatten(db, kind, row["id"])
-            if link is None:
-                dropped += 1
-                continue
-            link["global"] = True
+            if link is not None:
+                link["global"] = True
+            yield link, kind, row["id"]
+
+
+def convert(db):
+    requirements = {
+        str(r["id"]): {"about": r["metaInfo"], "key": r["key"], "value": r["value"], "comparison": r["comparison"]}
+        for r in db.execute("select * from teleports_requirements order by id")
+    }
+    links, dropped = [], 0
+    for link, _, _ in ways(db):
+        if link is None:
+            dropped += 1
+        else:
             links.append(link)
 
     rings = [{"objectId": row["object_id"], "x": row["x"], "y": row["y"], "plane": row["plane"],

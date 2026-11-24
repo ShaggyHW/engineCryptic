@@ -232,6 +232,131 @@ jobs:
           py="$(command -v python3 || command -v python)"
           "$py" .github/ci/bootstrap-smoke.py "$lib" "incoming/engine-jar/projectx-supervisor-$v.jar"
 
+  # The route planner the launcher runs on localhost, built from the vendored source (used with its author's
+  # permission; only the binaries ship). x86-64-v3 by default, plus baseline copies for CPUs without AVX2.
+  navpath:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+          - name: windows-x86_64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          sparse-checkout: navpath
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: navpath
+          key: ${{ hashFiles('navpath/Cargo.lock') }}
+      - name: Build
+        shell: bash
+        working-directory: navpath
+        run: |
+          set -eu
+          cargo build --release --locked -p navpath-service -p navpath-builder
+          RUSTFLAGS="-C target-cpu=x86-64" cargo build --release --locked -p navpath-service -p navpath-builder \
+            --features navpath-core/allow-baseline-cpu --target-dir target/baseline
+      - name: Stage
+        shell: bash
+        run: |
+          set -eu
+          v='${{ needs.version.outputs.version }}'
+          n='${{ matrix.name }}'
+          x=''
+          case "$n" in windows-*) x='.exe' ;; esac
+          mkdir -p stage dist
+          for bin in navpath-service navpath-builder; do
+            cp "navpath/target/release/$bin$x" "stage/$bin$x"
+            cp "navpath/target/baseline/release/$bin$x" "stage/$bin-baseline$x"
+          done
+          case "$n" in
+            windows-*) (cd stage && 7z a -tzip "../dist/navpath-$v-$n.zip" *) ;;
+            *)         (cd stage && tar -czf "../dist/navpath-$v-$n.tar.gz" *) ;;
+          esac
+          cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navpath-${{ matrix.name }}
+          path: dist/
+          retention-days: 3
+
+  # Upstream's map at the commit navpath/UPSTREAM pins, with links.json merged in. Platform-independent, so built once.
+  navpath-map:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          sparse-checkout: |
+            .github
+            navpath
+            client-plugin-engine/src/main/resources/webwalker
+      - name: Test the merge
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Merge links.json
+        run: |
+          set -eu
+          v='${{ needs.version.outputs.version }}'
+          mkdir -p dist
+          python3 .github/scripts/navpath_map.py navpath/worldReachableTiles.db \
+            client-plugin-engine/src/main/resources/webwalker/links.json "dist/navpath-map-$v.db"
+          cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navpath-map
+          path: dist/
+          retention-days: 3
+
+  # The shipped archive and map, run the way the launcher runs them: a snapshot built with each builder, its service
+  # started, /health answered and a route planned. Gates the release and the launcher publish like bootstrap-smoke.
+  navpath-smoke:
+    needs: [version, navpath, navpath-map]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            name: linux-x86_64
+          - runner: windows-latest
+            name: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          sparse-checkout: .github
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{navpath-${{ matrix.name }},navpath-map}"
+          path: incoming
+      - name: Build a snapshot, serve and route
+        shell: bash
+        run: |
+          set -eu
+          v='${{ needs.version.outputs.version }}'
+          n='${{ matrix.name }}'
+          mkdir -p navpath
+          case "$n" in
+            windows-*) 7z x -onavpath "incoming/navpath-$n/navpath-$v-$n.zip" ;;
+            *)         tar -xzf "incoming/navpath-$n/navpath-$v-$n.tar.gz" -C navpath ;;
+          esac
+          ls -la navpath
+          py="$(command -v python3 || command -v python)"
+          "$py" .github/ci/navpath-smoke.py navpath "incoming/navpath-map/navpath-map-$v.db"
+
   launcher:
     needs: version
     strategy:
@@ -373,7 +498,7 @@ jobs:
           retention-days: 3
 
   release:
-    needs: [version, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke, launcher, bundle]
+    needs: [version, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke, launcher, bundle, navpath, navpath-map, navpath-smoke]
     if: needs.version.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -429,7 +554,7 @@ jobs:
   # distribution repository that holds no source, giving users permanent
   # `releases/latest/download/...` links.
   publish-launcher:
-    needs: [version, bundle, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke]
+    needs: [version, bundle, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke, navpath, navpath-map, navpath-smoke]
     if: needs.version.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
