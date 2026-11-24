@@ -1,16 +1,15 @@
 package com.projectx.webwalker
 
-import com.projectx.pathfinder.navpath.NavMacro
+import com.projectx.traversal.pathing.NavMacro
 import world.gregs.voidps.type.Tile
 import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * A walkable route, one tile per step from the start to the destination.
+ * A planned route as a web walk's result describes it, one tile per step from the start to the destination.
  *
- * [crossesDoor] marks each step that passes a door found in the cache, so the walker can stop before it and open
- * it. [linkAt] marks each step reached by a [WebLink] - a staircase, ladder, shortcut or curated door - which the
- * walker performs instead of walking onto. A route may change plane only at a link, so [getPlane] is per step.
+ * [linkAt] marks each step reached by a [WebLink] (a staircase, ladder, shortcut, door or teleport) rather than
+ * walked; a door is one of them. A route may change plane only at a link, so [getPlane] is per step.
  *
  * Tiles are reachable from Java through [getX], [getY] and [getPlane]; Kotlin callers can use [tiles].
  */
@@ -25,6 +24,7 @@ class WebPath internal constructor(
 
     val lastIndex: Int get() = xs.size - 1
 
+    @Deprecated("Always reports no door: navpath routes carry doors as links. Use linkAt or nextLink.")
     val doorCount: Int get() = doors.count { it }
 
     val linkCount: Int get() = links.count { it != null }
@@ -45,7 +45,7 @@ class WebPath internal constructor(
 
     fun tile(index: Int): Tile = Tile.of(xs[index], ys[index], planes[index])
 
-    /** True when stepping onto [index] from the tile before it passes a door the cache knows about. */
+    @Deprecated("Always reports no door: navpath routes carry doors as links. Use linkAt or nextLink.")
     fun crossesDoor(index: Int): Boolean = doors[index]
 
     /** The link taken to reach [index], or null when the step was walked. */
@@ -56,7 +56,7 @@ class WebPath internal constructor(
     /** The navpath edge the link at [index] came from, which a later route can be told to avoid. */
     internal fun macroAt(index: Int): NavMacro? = macros?.getOrNull(index)
 
-    /** The first step at or after [fromIndex] that passes a cache door, or -1. */
+    @Deprecated("Always reports no door: navpath routes carry doors as links. Use linkAt or nextLink.")
     fun nextDoor(fromIndex: Int): Int {
         for (i in fromIndex.coerceAtLeast(1) until xs.size) if (doors[i]) return i
         return -1
@@ -94,5 +94,5 @@ class WebPath internal constructor(
     fun distance(index: Int, x: Int, y: Int): Int = max(abs(xs[index] - x), abs(ys[index] - y))
 
     override fun toString(): String =
-        "WebPath($size tiles, $doorCount doors, $linkCount links, plane $plane${if (changesPlane) "+" else ""})"
+        "WebPath($size tiles, $linkCount links, plane $plane${if (changesPlane) "+" else ""})"
 }

@@ -1,153 +1,179 @@
 package com.projectx.traversal.nodes
 
-import world.gregs.voidps.type.Tile
-import com.projectx.game.bootstrap.Bootstrap
-import com.projectx.pathfinder.LiveWalkMap
-import com.projectx.profiling.PlayerProfiles
 import com.projectx.script.Script
-import com.projectx.script.api.localPlayer
-import com.projectx.script.api.walkTo
 import com.projectx.traversal.TraversalNode
+import com.projectx.traversal.TraversalOutcome
 import com.projectx.traversal.WalkEquivalent
-import com.projectx.traversal.walk.LiveRouteWalker
-import com.projectx.traversal.walk.NodeWalker
-import com.projectx.util.random
+import com.projectx.traversal.local.LocalNav
+import world.gregs.voidps.type.Tile
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
-import kotlin.math.round
+import kotlin.math.roundToInt
 
+/**
+ * A walk through keypoints. With a trusted live map the clicks come from [RouteWalker] over the route's tiles
+ * ([givenRouteTiles], the move batch, when the route gave them; otherwise [end] itself): walking distance, through open doors, an early
+ * hand-over, and the hops [abilities] allow. Untrusted, the keypoint walk runs. In a tour it walks to each of [stops]
+ * rather than past it.
+ */
 class ChebychevNode(
     val start: Tile,
     val end: List<Tile>,
     val fallBack: (() -> Boolean)? = null,
-    val reached: (() -> Boolean)? = null
+    val reached: (() -> Boolean)? = null,
+    givenRouteTiles: List<Tile>? = null,
+    val abilities: ClientAbilities = ClientAbilities.NONE,
 ) : TraversalNode(), WalkEquivalent {
+    private val givenRouteTiles: List<Tile>? = givenRouteTiles?.takeIf { it.isNotEmpty() }?.toList()
     private var route: List<Tile>
-    private var nextClick: Long = 0
+    private var nextClick = 0L
     private var maxDistanceUsed: Int
-    private val walker = NodeWalker("ChebychevNode")
+    private var currentTargetTile: Tile? = null
+    private val walker = RouteWalker("ChebychevNode", abilities)
+
+    /** The tour's waypoints still to be visited, shared by its walk nodes; null outside a tour. */
+    var stops: TourStops? = null
+        private set
 
     init {
-        this.maxDistanceUsed = random(
-            PlayerProfiles.get().futurePathStepMin,
-            PlayerProfiles.get().futurePathStepMax
-        )
-        this.route = smoothPathChebyshev(start, end, maxDistanceUsed, fallBack)
+        maxDistanceUsed = TraversalSupport.randomInt(TraversalSupport.FUTURE_PATH_STEP_MIN, TraversalSupport.FUTURE_PATH_STEP_MAX)
+        route = smoothPathChebyshev(start, end, maxDistanceUsed, fallBack)
     }
 
     private fun interpolateTilesChebyshevEx(a: Tile, b: Tile, maxDistance: Int, includeEnd: Boolean): List<Tile> {
         val dx = b.x - a.x
         val dy = b.y - a.y
-        val chebyshev = max(abs(dx), abs(dy))
-        val steps = ceil(chebyshev.toDouble() / maxDistance.toDouble()).toInt()
+        val steps = ceil(max(abs(dx), abs(dy)).toDouble() / maxDistance).toInt()
         if (steps <= 0) return if (includeEnd) listOf(b) else emptyList()
-
-        val result = mutableListOf<Tile>()
+        val result = ArrayList<Tile>()
         val last = if (includeEnd) steps else steps - 1
         for (i in 1..last) {
-            val t = i.toDouble() / steps.toDouble()
-            val x = round(a.x.toDouble() + dx.toDouble() * t).toInt()
-            val y = round(a.y.toDouble() + dy.toDouble() * t).toInt()
-            result.add(Tile.of(x, y, a.plane))
+            val t = i.toDouble() / steps
+            result += Tile.of((a.x + dx * t).roundToInt(), (a.y + dy * t).roundToInt(), a.plane)
         }
         return result
     }
 
-    fun smoothPathChebyshev(
-        startingTile: Tile,
-        steps: List<Tile>,
-        maxDistance: Int,
-        fallBack: (() -> Boolean)? = null
-    ): List<Tile> {
+    /** [steps] with keypoints at most twice [maxDistance] apart; [fallBack] runs when the player is nowhere near them. */
+    fun smoothPathChebyshev(startingTile: Tile, steps: List<Tile>, maxDistance: Int, fallBack: (() -> Boolean)? = null): List<Tile> {
         if (steps.isEmpty()) return listOf(startingTile)
-        val result = mutableListOf<Tile>()
-
+        val result = ArrayList<Tile>()
         var current = steps.first()
-        result.add(current)
-
+        result += current
         for (next in steps) {
-            if (current.withinDistance(next, maxDistance)) {
-                result.add(next)
-            } else {
-                result.addAll(interpolateTilesChebyshevEx(current, next, maxDistance, true))
-            }
+            if (current.withinDistance(next, maxDistance * 2)) result += next else result += interpolateTilesChebyshevEx(current, next, maxDistance * 2, true)
             current = result.last()
         }
-
         if (fallBack != null) {
-            var hasToTP = true
-            for (tile in result) {
-                if (localPlayer.tile.getDistance(tile) < PlayerProfiles.get().futurePathStepMax * 2) {
-                    hasToTP = false
-                    break
-                }
-            }
-            if (hasToTP)
-                fallBack.invoke()
+            val me = TraversalSupport.serverTileOrNull()
+            val hasToTeleport = me == null || result.none { me.getDistance(it) < TraversalSupport.FUTURE_PATH_STEP_MAX * 2 }
+            if (hasToTeleport) fallBack()
         }
-
         return result
     }
 
+    override fun traversalStopped(outcome: TraversalOutcome) = walker.traversalStopped(outcome)
+
     override suspend fun process(script: Script): Boolean {
+        if (route.isNotEmpty()) {
+            val step = walker.step(
+                script, this, routeTiles(), (maxDistanceUsed * 2.0).roundToInt(), { reached(script) },
+                ::traversalStopRequested, ::requestTraversalRepath, stops, endsTraversal(),
+            )
+            if (step == RouteWalker.Step.CONTINUE) return true
+            if (step == RouteWalker.Step.ADVANCE) return false
+        }
+        // Only a map not trusted yet hands the leg back once it is; the walker's own fallbacks keep theirs.
+        val untrusted = givenRouteTiles != null && TraversalSupport.serverTileOrNull()?.let { LocalNav.usableForHops(it) } != true
+        return keypointWalk(script, untrusted)
+    }
+
+    /**
+     * The keypoint walk: straight-line look-ahead over the smoothed keypoints. With [untilTrusted], the leg's wait ends as
+     * soon as the live map is trusted at the player, so the live-map walk and its hops take over.
+     */
+    private suspend fun keypointWalk(script: Script, untilTrusted: Boolean): Boolean {
         if (route.isEmpty()) {
             fallBack?.invoke()
             return false
         }
-
-        when (walker.step(this, script, routeTiles(), maxDistanceUsed * 2) { reached(script) || traversalStopRequested() }) {
-            LiveRouteWalker.Step.CONTINUE -> return true
-            LiveRouteWalker.Step.ADVANCE -> return false
-            LiveRouteWalker.Step.STUCK -> if (requestTraversalRepath()) return true
-            LiveRouteWalker.Step.FALLBACK -> {}
+        val current = currentTargetTile
+        if (current != null && !near(current) && TraversalSupport.isMoving()) return true
+        if (System.currentTimeMillis() <= nextClick) return true
+        val clickTile = getNextClickPoint()
+        if (clickTile == null) {
+            println("[ChebychevNode] No click tile found (route=$route)")
+            return true
         }
-
-        if (System.currentTimeMillis() > nextClick) {
-            val clickTile = getNextClickPoint()
-            if (clickTile == null) {
-                println("No click tile found")
-                return true
-            }
-            val untilTrusted = !LiveWalkMap.trusted(localPlayer.tile)
-            walkTo(clickTile, random(100) >= PlayerProfiles.get().minimapWalkPerc)
-            nextClick = System.currentTimeMillis() + NodeWaits.clickGap(KEYPOINT_CLICK_GAP_MS)
-            script.delayUntil(8000) {
-                traversalStopRequested() || NodeWaits.within(localPlayer.tile, clickTile, 5) || reached(script) ||
-                    untilTrusted && LiveWalkMap.trusted(localPlayer.tile)
+        currentTargetTile = clickTile
+        val minimap = TraversalSupport.rollMinimap()
+        nextClick = System.currentTimeMillis() + TraversalSupport.clickGapMs(TraversalSupport.WALK_PATH_CLICK_TIME / 2)
+        if (TraversalSupport.walkTo(clickTile, minimap)) {
+            TraversalSupport.awaitWalk(TraversalSupport.WALK_START_TIMEOUT_MS, TraversalSupport.WALK_LEG_TIMEOUT_MS) {
+                traversalStopRequested() || near(clickTile) || untilTrusted && TraversalSupport.serverTileOrNull()?.let { LocalNav.usableForHops(it) } == true
             }
         }
         return true
     }
 
+    private fun near(t: Tile) = TraversalSupport.within(TraversalSupport.serverTileOrNull(), t, NEAR_TILES)
+
     fun getNextClickPoint(): Tile? {
-        val path = route
-        if (path.isEmpty()) return null
-
-        val myPos = Bootstrap.client.loggedInPlayer.self.tile
-        val closest = path.minByOrNull { myPos.getDistance(it) } ?: return null
-
-        val futureTiles = path.dropWhile { !closest.matches(it) }
-        if (futureTiles.isEmpty()) return null
-
-        val within = futureTiles
-            .takeWhile { myPos.withinDistance(it, round(maxDistanceUsed * 2.5).toInt()) }
-            .ifEmpty { listOf(closest) }
-        val target = within.last()
-        return Tile.of(target, PlayerProfiles.get().walkPathDeviation)
+        if (route.isEmpty()) return null
+        val me = TraversalSupport.serverTileOrNull() ?: return null
+        val keys = TourStops.keypointsUntilStop(route, routeTiles(), stops, me)
+        var closest = keys.first()
+        var bestDistance = Int.MAX_VALUE
+        for (t in keys) {
+            val d = me.getDistance(t)
+            if (d < bestDistance) {
+                bestDistance = d
+                closest = t
+            }
+        }
+        val future = keys.subList(max(keys.indexOf(closest), 0), keys.size)
+        if (future.isEmpty()) return null
+        val stepLimit = (maxDistanceUsed * 2.0).roundToInt()
+        var within = closest
+        for (t in future) {
+            if (me.withinDistance(t, stepLimit)) within = t else break
+        }
+        return Tile.of(within.x, within.y, within.plane)
     }
 
-    override fun reached(script: Script): Boolean =
-        reached?.invoke() == true || NodeWaits.within(localPlayer.tile, end.last(), 5)
+    override fun reached(script: Script): Boolean {
+        if (reached?.invoke() == true) return true
+        // A tour that comes back near its own end is not done until its stops are.
+        if (holdsStop()) return false
+        val server = TraversalSupport.serverTileOrNull()
+        val last = end.lastOrNull() ?: return true
+        // The traversal's last node ends ON its tile: "within 3" would complete the walk short of the goal.
+        if (endsTraversal()) return server != null && server.matches(last)
+        return TraversalSupport.within(server, last, NEAR_TILES)
+    }
 
-    override fun routeTiles(): List<Tile> = NodeWalker.densify(route)
+    /** No node follows this one: its end tile is the traversal's final tile. */
+    fun endsTraversal(): Boolean = next == null
+
+    override fun routeTiles(): List<Tile> = givenRouteTiles ?: end
 
     override fun passableNow(): Boolean = true
 
-    override fun copy(): TraversalNode = ChebychevNode(start, end).also {
+    /** Walks to each of [stops] on its tiles rather than past them. */
+    fun withStops(stops: TourStops?) = apply { this.stops = stops }
+
+    override fun holdsStop(): Boolean = stops?.holds(routeTiles(), TraversalSupport.serverTileOrNull()) == true
+
+    override fun copy(): TraversalNode = ChebychevNode(start, end, null, null, givenRouteTiles, abilities).also {
         it.maxDistanceUsed = this.maxDistanceUsed
         it.route = this.route
+        it.stops = this.stops
+    }
+
+    override fun toString(): String = "[Chebychev $start -> $end]"
+
+    private companion object {
+        const val NEAR_TILES = 3
     }
 }
-
-private const val KEYPOINT_CLICK_GAP_MS = 300L

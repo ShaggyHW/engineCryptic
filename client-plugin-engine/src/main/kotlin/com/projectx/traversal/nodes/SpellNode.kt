@@ -4,41 +4,55 @@ import com.projectx.game.magic.CastResult
 import com.projectx.game.magic.SpellTeleports
 import com.projectx.script.Script
 import com.projectx.script.api.TeleportSpell
-import com.projectx.script.api.localPlayer
 import com.projectx.traversal.TraversalNode
-import com.projectx.util.Area
+import com.projectx.script.api.Area as WorldArea
+import com.projectx.util.Area as FlatArea
 
 /**
- * Casts a teleport spell, a Spellbook Swap first when it is on another book, then waits to land in [destination] and
+ * Casts a teleport spell, a Spellbook Swap first when it is on another book, then waits to land in its destination and
  * for the arrival animation. A spell that can no longer be cast, or that fails [MAX_ATTEMPTS] times, asks the
  * traversal to re-route.
  */
-class SpellNode(
+class SpellNode private constructor(
     private val spell: TeleportSpell,
-    private val destination: Area? = null,
-    private val customReached: (() -> Boolean)? = null,
+    action: String?,
+    private val destination: NodeDestination?,
+    private val customReached: (() -> Boolean)?,
 ) : TraversalNode() {
+    /** The book slot op this node casts, such as an alternate destination; null casts with "Cast". */
+    val action: String? = action?.trim()?.takeUnless { it.isEmpty() || it.equals("Cast", ignoreCase = true) }
+
     private var attempts = 0
     private var nextTry = 0L
+
+    @JvmOverloads
+    constructor(spell: TeleportSpell, destination: FlatArea? = null, customReached: (() -> Boolean)? = null) :
+        this(spell, null, NodeDestination.of(destination), customReached)
+
+    constructor(spell: TeleportSpell, action: String?, destination: FlatArea?, customReached: (() -> Boolean)?) :
+        this(spell, action, NodeDestination.of(destination), customReached)
+
+    constructor(spell: TeleportSpell, action: String?, destination: WorldArea, customReached: (() -> Boolean)?) :
+        this(spell, action, NodeDestination.of(destination), customReached)
 
     override suspend fun process(script: Script): Boolean {
         if (reached(script)) return false
         if (System.currentTimeMillis() < nextTry) return true
         if (inDestination()) {
-            script.delayUntil(ARRIVAL_ANIMATION_MS) { traversalStopRequested() || !localPlayer.isAnimating }
+            awaitArrivalAnimation()
             return true
         }
-        val result = SpellTeleports.cast(script, spell) { traversalStopRequested() }
+        val result = SpellTeleports.cast(script, spell, action) { traversalStopRequested() }
         when (result) {
             CastResult.STOPPED -> return false
             CastResult.NOT_USABLE -> {
-                giveUp("$spell can no longer be cast: ${SpellTeleports.check(spell).reason}")
+                giveUp("$spell is no longer castable: ${SpellTeleports.check(spell).reason}")
                 return false
             }
             CastResult.STARTED -> {
-                script.delayUntil(LANDING_MS) { traversalStopRequested() || inDestination() }
-                if (inDestination()) {
-                    script.delayUntil(ARRIVAL_ANIMATION_MS) { traversalStopRequested() || !localPlayer.isAnimating }
+                val landed = TraversalSupport.delayUntil(LANDING_MS) { traversalStopRequested() || inDestination() }
+                if (landed && !traversalStopRequested()) {
+                    awaitArrivalAnimation()
                     return true
                 }
                 if (destination == null) return true
@@ -46,29 +60,33 @@ class SpellNode(
             else -> {}
         }
         if (++attempts >= MAX_ATTEMPTS) {
-            giveUp("$spell failed $attempts times (last: $result)")
+            giveUp("$this failed $attempts times (last: $result)")
             return false
         }
         println("[Spell] $spell: $result, retrying ($attempts/$MAX_ATTEMPTS)")
-        nextTry = System.currentTimeMillis() + NodeWaits.clickGap(RETRY_PACING_MS)
+        nextTry = System.currentTimeMillis() + RETRY_PACING_MS
         return true
     }
 
+    private suspend fun awaitArrivalAnimation() {
+        TraversalSupport.delayUntil(ARRIVAL_ANIMATION_MS) { traversalStopRequested() || !TraversalSupport.isAnimating() }
+    }
+
     private fun giveUp(why: String) {
-        println("[Spell] $why; re-routing")
+        println("[Spell] $why - re-routing")
         if (!requestTraversalRepath()) failTraversal(why)
     }
 
-    private fun inDestination(): Boolean = destination?.inside(localPlayer.tile) == true
+    private fun inDestination(): Boolean = destination?.contains(TraversalSupport.serverTileOrNull()) == true
 
     override fun reached(script: Script): Boolean {
-        if (destination != null) return inDestination() && !localPlayer.isAnimating
+        if (destination != null) return inDestination() && !TraversalSupport.isAnimating()
         return customReached?.invoke() == true
     }
 
-    override fun copy(): TraversalNode = SpellNode(spell, destination, customReached)
+    override fun copy(): TraversalNode = SpellNode(spell, action, destination, customReached)
 
-    override fun toString(): String = "[Spell: $spell]"
+    override fun toString(): String = "[Spell: $spell${action?.let { " [$it]" }.orEmpty()}]"
 
     private companion object {
         private const val MAX_ATTEMPTS = 3

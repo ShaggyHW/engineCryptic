@@ -32,6 +32,12 @@ abstract class StateMachineScript<T : StateMachineScript<T>> : Script() {
     override fun onEvent(event: Event) {
         currentState.onEvent(this as T, event)
     }
+
+    /** An override must call super, or the current state's [State.stateTickLoop] stops running. */
+    @Suppress("UNCHECKED_CAST")
+    override fun onTickLoop() {
+        currentState.tickLoop(this as T)
+    }
 }
 
 abstract class State<T : StateMachineScript<T>>() {
@@ -39,7 +45,11 @@ abstract class State<T : StateMachineScript<T>>() {
     abstract suspend fun T.stateLoop()
     open fun T.onStateEvent(event: Event) { }
 
+    /** Called once per server tick while this is the current state, even while its pass waits. Never wait in it. */
+    open fun T.stateTickLoop() { }
+
     suspend fun checkNextState(script: T): State<T>? = script.checkNext()
     suspend fun loop(script: T) = script.stateLoop()
     fun onEvent(script: T, event: Event) = script.onStateEvent(event)
+    fun tickLoop(script: T) = script.stateTickLoop()
 }

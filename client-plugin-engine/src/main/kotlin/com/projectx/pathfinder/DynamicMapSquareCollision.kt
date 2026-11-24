@@ -234,9 +234,8 @@ object DynamicMapSquareCollision {
 
     private fun zoneKey(zoneX: Int, zoneY: Int, plane: Int) = (zoneX shl 11) or zoneY or (plane shl 22)
 
-    // A 255-zone (protocol-max) op93 region spans up to ~32 map squares, so the sanity bound on the
-    // build-area offset span must cover that; a garbage offset read still yields a far larger/negative
-    // span and is rejected. (Was 16 — too small, rejected larger quest-zone instances.)
+    // The largest region a rebuild can send spans about 32 map squares, so the bound covers that while a garbage
+    // read still yields a far larger or negative span and is rejected.
     private const val MAX_BUILD_AREA_MAPSQUARES = 40
     private const val SETTLE_CALLS = 6
     private const val ZONE_RECLIP_TICKS = 4

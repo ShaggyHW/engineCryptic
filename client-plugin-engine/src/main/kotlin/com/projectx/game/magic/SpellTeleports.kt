@@ -26,6 +26,8 @@ internal enum class CastResult { STARTED, NOT_USABLE, NOT_LISTED, SWAP_FAILED, N
 internal object SpellTeleports {
     private const val SWAP_MS = 3_000L
     private const val READY_MS = 1_800L
+    private const val SLOT_MS = 1_800L
+    private const val CAST_OP = "Cast"
     private const val START_MS = 2_400L
     private const val LANDING_MS = 8_000L
     private const val ARRIVAL_ANIMATION_MS = 3_000L
@@ -74,7 +76,16 @@ internal object SpellTeleports {
         SpellChecks.check(spell, SpellCatalogue.info(spell.abilityId), state, SpellCatalogue::swap)
 
     /** Casts [spell], a Spellbook Swap first when it needs one; [CastResult.STARTED] once the teleport visibly began. */
-    suspend fun cast(script: Script, spell: TeleportSpell, stop: () -> Boolean): CastResult {
+    suspend fun cast(script: Script, spell: TeleportSpell, stop: () -> Boolean): CastResult = cast(script, spell, null, stop)
+
+    /**
+     * [cast] through the book slot's op named [action], a spell's alternative destination such as Varrock Teleport's
+     * "Grand Exchange". Null, blank or "Cast" is op 1, the default destination. A named op is only on the book slot,
+     * never on an action bar. A slot showing only "Cast" has no second destination unlocked, so any action casts op 1;
+     * a slot with other ops but not this one is [CastResult.NOT_LISTED].
+     */
+    suspend fun cast(script: Script, spell: TeleportSpell, action: String?, stop: () -> Boolean): CastResult {
+        val named = action != null && action.isNotBlank() && !action.trim().equals(CAST_OP, ignoreCase = true)
         var check = check(spell)
         var plan = check.plan
         if (!check.usable || plan == null) {
@@ -100,7 +111,10 @@ internal object SpellTeleports {
         if (stop()) return CastResult.STOPPED
         script.delay(REACTION_MS, REACTION_VARIANCE)
         val from = localPlayer.tile
-        if (!click(plan.spell, plan.fromBar)) return CastResult.NOT_LISTED
+        if (named) {
+            val option = bookOption(script, spell, action.trim(), stop) ?: return if (stop()) CastResult.STOPPED else CastResult.NOT_LISTED
+            if (bookSlot(spell.abilityId)?.click(option) != true) return CastResult.NOT_LISTED
+        } else if (!click(plan.spell, plan.fromBar)) return CastResult.NOT_LISTED
         script.delayUntil(jittered(START_MS)) { stop() || localPlayer.isAnimating || localPlayer.tile != from }
         if (stop()) return CastResult.STOPPED
         return if (localPlayer.isAnimating || localPlayer.tile != from) CastResult.STARTED else CastResult.NOT_STARTED
@@ -113,6 +127,32 @@ internal object SpellTeleports {
         if (!landed()) return false
         script.delayUntil(jittered(ARRIVAL_ANIMATION_MS)) { stop() || !localPlayer.isAnimating }
         return true
+    }
+
+    private suspend fun bookOption(script: Script, spell: TeleportSpell, action: String, stop: () -> Boolean): Int? {
+        script.delayUntil(jittered(SLOT_MS)) { stop() || listedInBook(spell.abilityId) }
+        if (stop() || !listedInBook(spell.abilityId)) return null
+        val slot = bookSlot(spell.abilityId) ?: return null
+        val option = slot.optionIndexOf(action)
+        if (option > 0) return option
+        val ops = slot.ops
+        if (onlyCast(ops)) return 1
+        println("[Spell] $spell: no '$action' op on the book slot $ops")
+        return null
+    }
+
+    /** Whether a book slot's ops name no destination, only "Cast". */
+    fun onlyCast(ops: List<String>): Boolean = ops.all { it.isBlank() || it.equals(CAST_OP, ignoreCase = true) }
+
+    private fun bookSlot(abilityId: Int): IFSlot? {
+        val known = ids.get() ?: return null
+        return IFSlot(known.bookInterface, known.bookComponent, abilityId)
+    }
+
+    private fun listedInBook(abilityId: Int): Boolean {
+        val known = ids.get() ?: return false
+        val grid = interfaces.getComponent(known.bookInterface, known.bookComponent) ?: return false
+        return grid.createdChildren.firstOrNull { it.slotId == abilityId }?.let { it.opCount > 0 } == true
     }
 
     private fun click(spell: SpellInfo, fromBar: Boolean): Boolean {

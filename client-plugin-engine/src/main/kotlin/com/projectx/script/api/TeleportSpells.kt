@@ -104,3 +104,13 @@ suspend fun Script.castTeleportSpell(spell: TeleportSpell): Boolean {
     if (SpellTeleports.cast(this, spell) { stopped } != CastResult.STARTED) return false
     return SpellTeleports.awaitLanding(this, from) { stopped }
 }
+
+/**
+ * [castTeleportSpell] to the destination the Magic book slot's op [action] names, e.g. Varrock Teleport's
+ * "Grand Exchange"; "Cast" or blank is the default destination. The spell must be listed in the open Magic book.
+ */
+suspend fun Script.castTeleportSpell(spell: TeleportSpell, action: String): Boolean {
+    val from = localPlayer.tile
+    if (SpellTeleports.cast(this, spell, action) { stopped } != CastResult.STARTED) return false
+    return SpellTeleports.awaitLanding(this, from) { stopped }
+}

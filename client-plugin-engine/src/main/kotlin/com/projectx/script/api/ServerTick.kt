@@ -17,6 +17,9 @@ object ServerTick {
     @Volatile
     private var lastTickAt = 0L
 
+    @Volatile
+    private var lastTickNanos = 0L
+
     /** Server ticks seen since the engine loaded. */
     @JvmStatic
     val count: Long get() = ticks
@@ -25,10 +28,36 @@ object ServerTick {
     @JvmStatic
     val millisSinceTick: Long get() = lastTickAt.let { if (it == 0L) Long.MAX_VALUE else System.currentTimeMillis() - it }
 
-    internal fun onTickEnd() {
-        lastTickAt = System.currentTimeMillis()
-        ticks++
+    /** Milliseconds into the current tick on the [System.nanoTime] clock, or -1 before the first tick. */
+    @JvmStatic
+    val millisIntoTick: Long get() = lastTickNanos.let { if (it == 0L) -1L else (System.nanoTime() - it) / NANOS_PER_MILLI }
+
+    /** When the last tick ended on the [System.nanoTime] clock, or 0 before the first one. */
+    @JvmStatic
+    val lastTickNanoTime: Long get() = lastTickNanos
+
+    /**
+     * How far into its tick an action asked for now will be sent, given the [ActionPacer] holds it to a reaction after
+     * the tick and a gap after the last action. Past [TICK_MILLIS] when it will go in a later tick; -1 before the first.
+     */
+    @JvmStatic
+    fun millisIntoTickAtSend(): Long {
+        val tick = lastTickNanos
+        if (tick == 0L) return -1L
+        val now = System.nanoTime()
+        return (maxOf(now, ActionPacer.ACTIONS.nextSendNanos(now)) - tick) / NANOS_PER_MILLI
     }
+
+    internal fun onTickEnd() {
+        val nanos = System.nanoTime()
+        lastTickAt = System.currentTimeMillis()
+        lastTickNanos = nanos
+        ticks++
+        ActionPacer.serverTick(nanos)
+    }
+
+    const val TICK_MILLIS = 600L
+    private const val NANOS_PER_MILLI = 1_000_000L
 }
 
 /** Waits for the next server tick to end. Returns false if none arrived within [timeoutMillis]. */

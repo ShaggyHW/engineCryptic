@@ -59,7 +59,8 @@ enum class Effect(val structId: Int) {
     // New entries go last so the shipped entries keep their ordinals.
     BLOAT(48338),
     HAUNTED(48344),
-    DEATH_MARK(48345);
+    DEATH_MARK(48345),
+    POWERBURST_OF_ACCELERATION(38070);
 
     val type: EffectType get() = EffectRegistry[structId] ?: EffectType(structId)
     val isDebuff: Boolean get() = type.isDebuff

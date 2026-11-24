@@ -28,6 +28,7 @@ import com.projectx.game.nxt.entity.player.Player
 import com.projectx.pathfinder.*
 import com.projectx.script.Script
 import com.projectx.script.api.Relics.NONE
+import com.projectx.traversal.local.LocalNav
 import com.projectx.util.gaussian
 import com.projectx.webwalker.WalkGoal
 import com.projectx.webwalker.WebWalkResult
@@ -567,6 +568,9 @@ fun interactClosestReachableNPC(npcName: String, option: String, range: Int = 20
 @JvmOverloads
 fun findNPC(range: Int = 20, predicate: (NPC) -> Boolean) = npcs.values.firstOrNull { predicate.invoke(it) }
 
+/** The NPC in the scene with [serverIndex], or null when it is not there. */
+fun npcByServerIndex(serverIndex: Int): NPC? = npcs[serverIndex]
+
 /**
  * Walking utilities
  */
@@ -595,7 +599,7 @@ fun diveToTile(x: Int, y: Int) = dive(Tile.of(x, y, localPlayer.plane))
  */
 @JvmOverloads
 fun walkingDistanceTo(x: Int, y: Int, plane: Int = localPlayer.plane, maxSteps: Int = 96): Int =
-    LiveWalkMap.distance(localPlayer.tile, Tile.of(x, y, plane), maxSteps)
+    LocalNav.distance(localPlayer.tile, Tile.of(x, y, plane), maxSteps)
 
 fun diveToTile(x: Int, y: Int, plane: Int) = dive(Tile.of(x, y, plane))
 
@@ -845,6 +849,10 @@ fun interactComponent(optionNum: Int, interfaceId: Int, componentId: Int, slotId
     val slot = IFSlot(interfaceId, componentId, slotId)
     return slot.click(optionNum)
 }
+
+/** Whether component [componentId] of [interfaceId] is attached and actually drawn now, not just its interface open. */
+fun isComponentOnScreen(interfaceId: Int, componentId: Int): Boolean =
+    runCatching { interfaces.getComponentRaw(interfaceId, componentId)?.onScreen == true }.getOrDefault(false)
 
 fun openAreaLoot() = interactComponent(1, 1678, 7)
 fun lootAllAreaLoot() = interactComponent(1, 1622, 21)

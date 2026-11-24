@@ -47,6 +47,12 @@ abstract class JavaStateMachineScript<S : JavaStateMachineScript<S>> : JavaScrip
     override fun onEvent(event: Event) {
         currentState.onEvent(this as S, event)
     }
+
+    /** An override must call super, or the current state's [JavaState.onTickLoop] stops running. */
+    @Suppress("UNCHECKED_CAST")
+    override fun onTickLoop() {
+        currentState.onTickLoop(this as S)
+    }
 }
 
 /** One phase of a [JavaStateMachineScript]. */
@@ -59,4 +65,7 @@ interface JavaState<S : JavaStateMachineScript<S>> {
 
     /** Events that arrive while this is the current state. */
     fun onEvent(script: S, event: Event) {}
+
+    /** Called once per server tick while this is the current state, even while its [onLoop] wait runs. Never block in it. */
+    fun onTickLoop(script: S) {}
 }

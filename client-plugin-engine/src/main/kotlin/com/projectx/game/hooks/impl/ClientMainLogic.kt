@@ -24,7 +24,7 @@ import com.projectx.mcp.MainLogicTickQueue
 import com.projectx.puzzle.invention.InventionDiscoveryFeature
 import com.projectx.script.ScriptExecutor
 import com.projectx.store.RunReports
-import com.projectx.webwalker.MasterFarmerHat
+import com.projectx.traversal.MasterFarmerHat
 import com.projectx.ui.UIState
 import com.projectx.ui.backend.rendering.UiFrameProducer
 import java.lang.foreign.MemorySegment

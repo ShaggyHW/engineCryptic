@@ -22,6 +22,13 @@ internal object CacheQuests {
      */
     fun progress(name: String): Int {
         val quest = Cache.quests.firstOrNull { q -> q.name?.let { sameName(it, name) } == true && hasProgress(q) } ?: return 0
+        return progress(quest)
+    }
+
+    /** [progress] of quest [id]: 0 when it has no progress var, -1 when there is no such quest. */
+    fun progress(id: Int): Int = Cache.quest(id)?.let(::progress) ?: -1
+
+    private fun progress(quest: QuestType): Int {
         quest.varpProgress?.firstOrNull()?.let { return varps.getVar(it.varId) }
         return quest.varbitProgress?.firstOrNull()?.let { varps.getVarBit(it.varId) } ?: 0
     }

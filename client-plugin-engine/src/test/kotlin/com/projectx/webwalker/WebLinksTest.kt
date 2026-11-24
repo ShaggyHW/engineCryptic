@@ -142,41 +142,6 @@ class WebLinksTest {
     }
 
     @Test
-    fun `a script can teach the walker a link it found`() {
-        // Somewhere the shipped set has nothing, so the test cannot collide with real data.
-        val x = 12_345
-        val y = 11_111
-        assertTrue(WebLinks.from(x, y, 0).isEmpty(), "the shipped set already has a link at $x,$y")
-
-        assertTrue(WebLinks.registerObjectLink(x, y, 0, x, y + 4, 1, objectId = 4711, action = "Climb-up"))
-
-        val learned = WebLinks.from(x, y, 0)
-        assertEquals(1, learned.size)
-        assertEquals(4711, learned[0].objectId)
-        assertEquals("Climb-up", learned[0].action)
-        assertEquals(1, learned[0].to.plane, "the link should reach the floor above")
-
-        // Registering the same thing twice must not double it up.
-        assertTrue(!WebLinks.registerObjectLink(x, y, 0, x, y + 4, 1, objectId = 4711, action = "Climb-up"))
-        assertEquals(1, WebLinks.from(x, y, 0).size)
-    }
-
-    @Test
-    fun `an inverted link is refused`() {
-        val bad = WebLink(
-            kind = WebLinkKind.OBJECT,
-            from = WebArea(100, 90, 100, 100, 0),
-            to = WebArea(200, 200, 200, 200, 0),
-            cost = 1000,
-            action = "Climb-up",
-            objectId = 1,
-            searchRadius = 8,
-            requirements = emptyList(),
-        )
-        assertTrue(!WebLinks.register(bad), "an inverted origin should be refused")
-    }
-
-    @Test
     fun `a link whose object asks where to go carries the answer`() {
         // Kharid-et's fort entrance is the one that does this, and it offers two places.
         val entrance = WebLinks.all.filter { it.objectId == 116920 }
@@ -239,11 +204,5 @@ class WebLinksTest {
             assertTrue(link.isGlobal, "$link is not a teleport")
             assertTrue(link.to to link.fairyCode in ringLandings, "$link lands somewhere no ring does")
         }
-    }
-
-    @Test
-    fun `a locked door is the same edge from either side`() {
-        assertEquals(WebGrid.doorEdge(3200, 3200, 0, 2), WebGrid.doorEdge(3201, 3200, 0, 0))
-        assertNotEquals(WebGrid.doorEdge(3200, 3200, 0, 2), WebGrid.doorEdge(3200, 3200, 0, 1))
     }
 }

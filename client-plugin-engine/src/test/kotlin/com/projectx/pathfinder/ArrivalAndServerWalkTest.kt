@@ -1,5 +1,7 @@
 package com.projectx.pathfinder
 
+import com.projectx.traversal.local.LocalNav
+import com.projectx.traversal.local.ServerWalk
 import com.projectx.pathfinder.GridWorld.Companion.tile
 import world.gregs.voidps.type.Tile
 import kotlin.test.Test
@@ -58,11 +60,11 @@ class ArrivalAndServerWalkTest {
 
     @Test
     fun `a jump beyond a run's reach is a teleport`() {
-        assertTrue(LiveWalkMap.isTeleport(tile(3200, 3200), tile(3213, 3200), 0))
-        assertFalse(LiveWalkMap.isTeleport(tile(3200, 3200), tile(3214, 3200), 600))
-        assertTrue(LiveWalkMap.isTeleport(tile(3200, 3200), tile(3215, 3200), 600))
-        assertFalse(LiveWalkMap.isTeleport(tile(3200, 3200), Tile.of(3205, 3200, 1), 0))
-        assertTrue(LiveWalkMap.isTeleport(tile(3200, 3200), Tile.of(3213, 3200, 1), 600))
+        assertTrue(LocalNav.isTeleport(tile(3200, 3200), tile(3213, 3200), 0))
+        assertFalse(LocalNav.isTeleport(tile(3200, 3200), tile(3214, 3200), 600))
+        assertTrue(LocalNav.isTeleport(tile(3200, 3200), tile(3215, 3200), 600))
+        assertFalse(LocalNav.isTeleport(tile(3200, 3200), Tile.of(3205, 3200, 1), 0))
+        assertTrue(LocalNav.isTeleport(tile(3200, 3200), Tile.of(3213, 3200, 1), 600))
     }
 
     @Test
@@ -80,12 +82,11 @@ class ArrivalAndServerWalkTest {
     }
 
     @Test
-    fun `the walker's own next click keeps the walk it was on`() {
+    fun `a walk click is not another action, so the next click keeps the walk it was on`() {
         var fires = 0L
         val walk = ServerWalk(GridWorld().map(), { 0L }) { fires }
         fires++
         walk.clicked(tile(3200, 3200), tile(3210, 3200))
-        fires++
         walk.clicked(tile(3203, 3200), tile(3215, 3200))
         assertEquals(tile(3215, 3200), walk.click)
         assertNotNull(walk.fires(tile(3204, 3200), null).fires)

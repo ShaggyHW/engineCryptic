@@ -1,6 +1,8 @@
 package com.projectx.pathfinder
 
-import com.projectx.pathfinder.hops.Hops
+import com.projectx.traversal.hops.HopKnowledge
+import com.projectx.traversal.local.GridSearch
+import com.projectx.traversal.local.SearchWindow
 import world.gregs.voidps.type.Direction
 import world.gregs.voidps.type.Tile
 import kotlin.math.ceil
@@ -56,16 +58,16 @@ internal open class WalkMap(
 
     open fun trusted(tile: Tile): Boolean = trust(tile.x, tile.y, tile.plane)
 
-    fun rule(): StepRule = steps()
+    open fun rule(): StepRule = steps()
 
-    open fun hopRule(): StepRule = steps()
+    open fun hopRule(): StepRule = rule()
 
-    fun canStep(x: Int, y: Int, plane: Int, direction: Direction): Boolean = steps().canStep(x, y, plane, direction)
+    fun canStep(x: Int, y: Int, plane: Int, direction: Direction): Boolean = rule().canStep(x, y, plane, direction)
 
     /** Trusted, and some step leads off it. */
-    fun walkable(tile: Tile): Boolean {
+    open fun walkable(tile: Tile): Boolean {
         if (!trusted(tile)) return false
-        val rule = steps()
+        val rule = rule()
         return Steps.SERVER_ORDER.any { rule.canStep(tile.x, tile.y, tile.plane, it) }
     }
 
@@ -78,7 +80,7 @@ internal open class WalkMap(
     private var older: Cached? = null
 
     /** Distances from [from] out to [maxDepth] steps, or null when [from] is not trusted. */
-    fun field(from: Tile, maxDepth: Int = DEFAULT_MAX_DEPTH): WalkField? {
+    open fun field(from: Tile, maxDepth: Int = DEFAULT_MAX_DEPTH): WalkField? {
         if (!trusted(from)) return null
         val now = System.currentTimeMillis()
         val depth = maxDepth.coerceIn(1, WINDOW_RADIUS)
@@ -88,26 +90,26 @@ internal open class WalkMap(
             }
         }
         val window = SearchWindow.around(from.x, from.y, from.plane, depth)
-        val field = WalkField(window, from, depth, GridSearch.fill(steps(), window, from.x, from.y, depth))
+        val field = WalkField(window, from, depth, GridSearch.fill(rule(), window, from.x, from.y, depth))
         older = newest
         newest = Cached(field, now)
         return field
     }
 
     /** Steps from [from] to [to]; [UNREACHABLE] beyond [maxDepth], [UNKNOWN] when either is untrusted or they differ in plane. */
-    fun distance(from: Tile, to: Tile, maxDepth: Int): Int {
+    open fun distance(from: Tile, to: Tile, maxDepth: Int): Int {
         if (from.plane != to.plane || !trusted(from) || !trusted(to)) return UNKNOWN
         val radius = max(from.getLongestDelta(to), maxDepth.coerceAtMost(WINDOW_RADIUS)).coerceAtMost(WINDOW_RADIUS)
         val window = SearchWindow.around(from.x, from.y, from.plane, radius)
         if (!window.contains(to.x, to.y)) return UNKNOWN
-        val d = GridSearch.distance(steps(), window, from, to, maxDepth)
+        val d = GridSearch.distance(rule(), window, from, to, maxDepth)
         return if (d < 0) UNREACHABLE else d
     }
 
     /** The tiles the server walks for a walk click on [to] from [from], [from] first; null when unknown. */
-    fun serverPath(from: Tile, to: Tile): List<Tile>? {
+    open fun serverPath(from: Tile, to: Tile): List<Tile>? {
         if (from.plane != to.plane || !trusted(from) || !trusted(to)) return null
-        return GridSearch.serverPath(steps(), SearchWindow.around(from.x, from.y, from.plane, SERVER_PATH_RADIUS), from, to)
+        return GridSearch.serverPath(rule(), SearchWindow.around(from.x, from.y, from.plane, SERVER_PATH_RADIUS), from, to)
     }
 
     /** Whether a walk joins [a] and [b] in at most [maxSteps]: a door is open when its two sides do. Null when unknown. */
@@ -162,10 +164,11 @@ internal class ArrivalWatch(private val clock: () -> Long = System::currentTimeM
 }
 
 /**
- * The live map: [WorldCollision] with the scene's door changes applied. Untrusted inside an instance, on a tile
- * whose zone was never loaded, and while the map catches up after a teleport.
+ * [WorldCollision] with the scene's door changes applied, for a client whose offset table lacks what the live map
+ * reader needs. Untrusted inside an instance, on a tile whose zone was never loaded, and while the map catches up
+ * after a teleport.
  */
-internal object LiveWalkMap : WalkMap(Steps::live) {
+internal object CacheWalkMap : WalkMap(Steps::live) {
     private const val INSTANCE_MIN_X = 6400
 
     // A jump this far, plus a running tick's two tiles for every tick between observations, is a teleport: the
@@ -222,7 +225,7 @@ internal object LiveWalkMap : WalkMap(Steps::live) {
             WorldCollision.getFlags(player.x + dx, player.y + dy, player.plane) == -1
         }
 
-    override fun hopRule(): StepRule = Hops.knowledge.rule(rule(), ::trusted)
+    override fun hopRule(): StepRule = HopKnowledge.rule(rule(), ::trusted)
 
     override fun trusted(tile: Tile): Boolean =
         tile.x in 1 until INSTANCE_MIN_X && !WorldCollision.inDynamic && WorldCollision.getFlags(tile.x, tile.y, tile.plane) != -1 && !arriving()

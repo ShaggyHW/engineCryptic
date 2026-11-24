@@ -10,6 +10,9 @@ import com.projectx.game.items.Item
 import com.projectx.game.nxt.entity.location.SceneObject
 import com.projectx.script.api.*
 import com.projectx.script.event.Event
+import com.projectx.traversal.JavaTraversal
+import com.projectx.traversal.TraversalNodeList
+import com.projectx.traversal.TraversalOutcome
 import com.projectx.webwalker.WalkGoal
 import com.projectx.webwalker.WebWalkResult
 import com.projectx.webwalker.WebWalker
@@ -315,6 +318,29 @@ sealed class Wait {
         @JvmOverloads
         fun castTeleportSpell(spell: TeleportSpell, onResult: Consumer<Boolean>? = null): Wait =
             call(onResult) { this.castTeleportSpell(spell) }
+
+        // ---- Traversals ----
+
+        /**
+         * Drive [nodes] until [finishedCondition] holds, [interruptCondition] fires, the player stands still on one node
+         * for [noMovementTimeoutMillis] (0 for never), or the nodes run out; [onResult] gets how it ended. Build the
+         * nodes with `JavaTraversal.nodes`. Kotlin: `Traversal.run`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun traversal(
+            nodes: TraversalNodeList,
+            finishedCondition: BooleanSupplier,
+            interruptCondition: BooleanSupplier? = null,
+            noMovementTimeoutMillis: Long = 0,
+            onResult: Consumer<TraversalOutcome>? = null,
+        ): Wait = traversal(JavaTraversal<Nothing>(null, nodes, finishedCondition, interruptCondition, noMovementTimeoutMillis), onResult)
+
+        /** Drive [traversal] inline until it stops, ignoring its `next`; [onResult] gets how it ended. Kotlin: `Traversal.run`. */
+        @JvmStatic
+        @JvmOverloads
+        fun traversal(traversal: JavaTraversal<*>, onResult: Consumer<TraversalOutcome>? = null): Wait =
+            call(onResult) { traversal.runInline(this) }
 
         // ---- Input, items and prayers ----
 

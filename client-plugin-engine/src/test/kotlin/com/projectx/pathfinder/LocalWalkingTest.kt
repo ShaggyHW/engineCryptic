@@ -1,5 +1,6 @@
 package com.projectx.pathfinder
 
+import com.projectx.traversal.local.ServerWalk
 import com.projectx.pathfinder.GridWorld.Companion.tile
 import world.gregs.voidps.type.Direction
 import kotlin.test.Test

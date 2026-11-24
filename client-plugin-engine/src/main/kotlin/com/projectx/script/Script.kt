@@ -17,6 +17,7 @@ import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ThreadLocalRandom
+import com.projectx.script.api.ServerTick
 import com.projectx.script.api.awaitServerTick
 import java.util.function.Predicate
 import kotlin.math.roundToInt
@@ -51,15 +52,32 @@ abstract class Script {
 
     private val dispatcher = ClientPulseDispatcher()
 
+    private var lastServerTick = -1L
+
     fun tick() {
         if (stopped) return
 
         if (!started) {
             started = true
             startCoroutineLoop()
-        } else
+        } else {
+            dispatchServerTick()
             dispatcher.tick()
+        }
     }
+
+    private fun dispatchServerTick() {
+        val tick = ServerTick.count
+        if (tick == lastServerTick) return
+        lastServerTick = tick
+        runCatching { onTickLoop() }.onFailure { it.printStackTrace() }
+    }
+
+    /**
+     * Called once per server tick on the game thread, between passes or while the current pass waits. Keep it short
+     * and never wait in it: it is for observing, such as polling a traversal's conditions while a step blocks.
+     */
+    open fun onTickLoop() {}
 
     private fun startCoroutineLoop() {
         val suspendLambda: suspend () -> Unit = {

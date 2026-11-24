@@ -4,6 +4,7 @@ import com.projectx.game.bootstrap.Bootstrap
 import com.projectx.game.map.MapSquare
 import com.projectx.game.nxt.entity.location.SceneObject
 import com.projectx.script.api.inInstancedArea
+import com.projectx.traversal.local.LiveMapHooks
 import world.gregs.voidps.collision.ClipFlag
 import world.gregs.voidps.collision.CollisionMap
 import world.gregs.voidps.map.ObjectShape
@@ -23,7 +24,9 @@ object WorldCollision {
     @JvmStatic
     fun checkLoad() {
         try {
-            val tile = Bootstrap.client.loggedInPlayer.self.tile
+            val self = Bootstrap.client.loggedInPlayer.self
+            LiveMapHooks.feed(Bootstrap.client.ptr.address(), self.ptr.address())
+            val tile = self.tile
             val dynamicMapSquare = inInstancedArea
             if (dynamicMapSquare && !inDynamic) {
                 sceneBase = Tile(tile.mapSquareX shl 6, tile.mapSquareY shl 6, 0)
