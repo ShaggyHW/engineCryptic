@@ -295,7 +295,7 @@ fn backup_corrupt_file(path: &Path) {
 /// Atomically write `contents` to `path`: write to a temp file in the same
 /// directory (0600 on unix so tokens never land world-readable), fsync, then
 /// rename over the target. The parent dir is created and restricted to 0700.
-fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .context("Cannot determine parent directory for atomic write")?;

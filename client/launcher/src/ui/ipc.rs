@@ -383,6 +383,7 @@ const LAUNCHER_START_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// Common tail of a successful spawn: announce completion, optionally inject the
 /// Project X engine, optionally close the launcher.
 fn finish_launch(reporter: &LaunchReporter, pid: u32, auto_inject: bool, close_after: bool) {
+    crate::navpath::note_client_launch();
     reporter.complete();
     if auto_inject {
         crate::game::inject::maybe_inject_projectx(pid);
@@ -465,6 +466,27 @@ async fn ensure_engine_installed(reporter: &LaunchReporter, plugins_cfg: &Plugin
         Err(e) => {
             log::warn!("Engine provisioning failed: {}", e);
             reporter.status(format!("Continuing without the engine: {}", e));
+        }
+    }
+    if let Err(e) = ensure_route_planner(plugins_cfg, &progress).await {
+        reporter.status(format!("Continuing without the route planner, so walking will not work: {:#}", e));
+    }
+}
+
+/// The injected engine walks with the local route planner, so a client launched without one cannot walk.
+async fn ensure_route_planner(
+    plugins_cfg: &PluginsConfig,
+    progress: &(dyn Fn(String) + Sync),
+) -> Result<()> {
+    match crate::navpath::ensure(&crate::http_client(), plugins_cfg, progress).await {
+        Ok(Some(endpoint)) => {
+            log::info!("Route planner ready at {}", endpoint.url);
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(e) => {
+            log::error!("ROUTE PLANNER UNAVAILABLE, walking will fail: {:#}", e);
+            Err(e)
         }
     }
 }
@@ -648,7 +670,7 @@ async fn write_default_preferences(dir: &Path) {
     }
 }
 
-fn set_executable(path: &Path) {
+pub(crate) fn set_executable(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1033,6 +1055,7 @@ impl IpcState {
                         return;
                     }
                 }
+                let _ = ensure_route_planner(&plugins_cfg, &progress).await;
             }
 
             let result = tokio::task::spawn_blocking(move || match action {
@@ -1752,6 +1775,19 @@ impl IpcState {
         tokio::spawn(async move {
             state.run_startup_update_check().await;
             state.report_store_updates(&crate::http_client()).await;
+        });
+
+        let (auto_inject, plugins_cfg) = {
+            let config = self.config.lock().unwrap();
+            (config.auto_inject_projectx, config.plugins.clone())
+        };
+        tokio::spawn(async move {
+            if auto_inject {
+                let progress = |message: String| log::info!("{}", message);
+                let _ = ensure_route_planner(&plugins_cfg, &progress).await;
+            } else {
+                crate::navpath::adopt().await;
+            }
         });
     }
 

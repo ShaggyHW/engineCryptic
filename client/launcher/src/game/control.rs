@@ -543,6 +543,17 @@ fn live_client_pids() -> Vec<u32> {
     crate::game::inject::windows::rs2client_pids()
 }
 
+/// Whether any `rs2client` is still running, injected or not. Skips the per-client STATUS round trips.
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+pub fn any_client_running() -> bool {
+    !live_client_pids().is_empty()
+}
+
+#[cfg(not(any(all(unix, not(target_os = "macos")), windows)))]
+pub fn any_client_running() -> bool {
+    false
+}
+
 /// First-inject the engine into a specific pid (delegates to
 /// [`crate::game::inject::inject_into_pid`]). May block on a pkexec/sudo prompt
 /// on Linux, so callers must run this off the UI thread.

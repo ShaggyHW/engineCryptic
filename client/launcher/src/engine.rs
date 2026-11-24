@@ -456,7 +456,7 @@ async fn ensure_engine_jar(
         return Ok(());
     }
 
-    download_engine_jar(client, artifact, home, progress).await?;
+    download_to(client, artifact, home, "engine", progress).await?;
 
     // One engine jar, always: the supervisor picks whichever it likes best out of
     // whatever is in the home, so a leftover would decide the engine version.
@@ -472,24 +472,26 @@ async fn ensure_engine_jar(
     Ok(())
 }
 
-/// Stream the jar to a temp file beside its target: it is large enough that
-/// holding it in memory is wasteful, and large enough that a partial download
-/// left under the real name would be injected and fail confusingly.
-async fn download_engine_jar(
+/// Stream a release artifact to a temp file beside its target, verifying it on the way: the large ones are
+/// wasteful to hold in memory, and a partial download left under the real name would be used and fail
+/// confusingly.
+pub(crate) async fn download_to(
     client: &reqwest::Client,
     artifact: &ReleaseArtifact,
-    home: &Path,
+    dir: &Path,
+    label: &str,
     progress: &(dyn Fn(String) + Sync),
-) -> Result<()> {
+) -> Result<PathBuf> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
 
-    let target = home.join(&artifact.file);
-    let temp = home.join(format!(".{}.part", artifact.file));
+    let target = dir.join(&artifact.file);
+    let temp = dir.join(format!(".{}.part", artifact.file));
 
     log::info!(
-        "Installing engine {} ({})",
-        if artifact.version.is_empty() { "jar" } else { artifact.version.as_str() },
+        "Installing {} {} ({})",
+        label,
+        if artifact.version.is_empty() { "build" } else { artifact.version.as_str() },
         artifact.file
     );
 
@@ -511,16 +513,19 @@ async fn download_engine_jar(
     let mut written: u64 = 0;
     let mut last_reported = 0u64;
 
-    while let Some(chunk) = response.chunk().await.context("Engine download interrupted")? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .with_context(|| format!("Download of {} interrupted", artifact.file))?
+    {
         hasher.update(&chunk);
-        file.write_all(&chunk).await.context("Failed to write the engine jar")?;
+        file.write_all(&chunk)
+            .await
+            .with_context(|| format!("Failed to write {}", temp.display()))?;
         written += chunk.len() as u64;
         if written - last_reported >= PROGRESS_STEP_BYTES {
             last_reported = written;
-            progress(format!(
-                "Downloading engine... {}",
-                progress_text(written, total)
-            ));
+            progress(format!("Downloading {}... {}", label, progress_text(written, total)));
         }
     }
     file.flush().await.ok();
@@ -543,8 +548,8 @@ async fn download_engine_jar(
         let _ = std::fs::remove_file(&temp);
         anyhow!("Failed to install {}: {}", target.display(), e)
     })?;
-    log::info!("Installed engine jar {}", target.display());
-    Ok(())
+    log::info!("Installed {} {}", label, target.display());
+    Ok(target)
 }
 
 const PROGRESS_STEP_BYTES: u64 = 8 * 1024 * 1024;

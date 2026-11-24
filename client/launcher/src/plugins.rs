@@ -71,6 +71,10 @@ struct ReleaseManifest {
     supervisor: Option<ReleaseArtifact>,
     #[serde(default)]
     bootstrap: Vec<ReleaseArtifact>,
+    #[serde(default)]
+    navpath: Vec<ReleaseArtifact>,
+    #[serde(default, rename = "navpathMap")]
+    navpath_map: Option<ReleaseArtifact>,
 }
 
 pub fn platform_tag() -> Option<&'static str> {
@@ -113,12 +117,18 @@ pub struct Catalog {
     pub engine: Option<ReleaseArtifact>,
     pub supervisor: Option<ReleaseArtifact>,
     pub bootstrap: Vec<ReleaseArtifact>,
+    pub navpath: Vec<ReleaseArtifact>,
+    pub navpath_map: Option<ReleaseArtifact>,
     pub fetched_at: SystemTime,
 }
 
 impl Catalog {
     pub fn bootstrap_for(&self, platform: &str) -> Option<&ReleaseArtifact> {
         self.bootstrap.iter().find(|a| a.platform == platform)
+    }
+
+    pub fn navpath_for(&self, platform: &str) -> Option<&ReleaseArtifact> {
+        self.navpath.iter().find(|a| a.platform == platform)
     }
 
     pub fn is_stale(&self) -> bool {
@@ -232,12 +242,14 @@ async fn fetch_catalog_web(client: &reqwest::Client, cfg: &PluginsConfig, web: &
 
 fn catalog_from_manifest(release_tag: String, mut manifest: ReleaseManifest) -> Catalog {
     log::info!(
-        "Release {} lists {} launcher build(s), {} engine, {} supervisor and {} bootstrap(s)",
+        "Release {} lists {} launcher build(s), {} engine, {} supervisor, {} bootstrap(s), {} route planner build(s) and {} map",
         release_tag,
         manifest.launcher.len(),
         if manifest.engine.is_some() { "an" } else { "no" },
         if manifest.supervisor.is_some() { "a" } else { "no" },
-        manifest.bootstrap.len()
+        manifest.bootstrap.len(),
+        manifest.navpath.len(),
+        if manifest.navpath_map.is_some() { "a" } else { "no" }
     );
     for download in &mut manifest.launcher {
         download.label = platform_label(&download.platform);
@@ -248,6 +260,8 @@ fn catalog_from_manifest(release_tag: String, mut manifest: ReleaseManifest) -> 
         engine: manifest.engine,
         supervisor: manifest.supervisor,
         bootstrap: manifest.bootstrap,
+        navpath: manifest.navpath,
+        navpath_map: manifest.navpath_map,
         fetched_at: SystemTime::now(),
     }
 }
@@ -746,5 +760,30 @@ pub(crate) mod tests {
                 .expect("manifest");
         assert!(manifest.supervisor.is_none());
         assert!(manifest.bootstrap.is_empty());
+        assert!(manifest.navpath.is_empty());
+        assert!(manifest.navpath_map.is_none());
+    }
+
+    #[test]
+    fn a_manifest_names_the_route_planner_per_platform_and_one_map() {
+        let manifest: ReleaseManifest = serde_json::from_str(
+            r#"{"version":"3.3.0",
+                "navpath":[
+                  {"platform":"linux-x86_64","file":"navpath-2.0.0-linux-x86_64.tar.gz",
+                   "version":"2.0.0","url":"https://example/nl","sha256":"ee","size":5},
+                  {"platform":"windows-x86_64","file":"navpath-2.0.0-windows-x86_64.zip",
+                   "version":"2.0.0","url":"https://example/nw","sha256":"ff","size":6}],
+                "navpathMap":{"platform":"any","file":"navpath-map-2.0.0.db","version":"2.0.0",
+                              "url":"https://example/m","sha256":"0a","size":7}}"#,
+        )
+        .expect("manifest");
+
+        let catalog = catalog_from_manifest("v3.3.0".into(), manifest);
+
+        assert_eq!(catalog.navpath_for("linux-x86_64").expect("linux").file, "navpath-2.0.0-linux-x86_64.tar.gz");
+        assert_eq!(catalog.navpath_for("windows-x86_64").expect("windows").sha256, "ff");
+        assert!(catalog.navpath_for("macos-universal").is_none());
+        let map = catalog.navpath_map.expect("map");
+        assert_eq!((map.file.as_str(), map.platform.as_str()), ("navpath-map-2.0.0.db", "any"));
     }
 }

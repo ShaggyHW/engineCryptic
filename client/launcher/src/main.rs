@@ -9,6 +9,7 @@ mod game;
 #[cfg(windows)]
 mod helpers;
 mod java;
+mod navpath;
 mod plugins;
 mod store;
 mod ui;
@@ -333,6 +334,8 @@ fn main() -> Result<()> {
                 }
             },
 
+            Event::LoopDestroyed => navpath::on_launcher_exit(),
+
             _ => {}
         }
     });
@@ -369,6 +372,7 @@ fn run_headless(
             }
         }
     });
+    navpath::on_launcher_exit();
     Ok(())
 }
 

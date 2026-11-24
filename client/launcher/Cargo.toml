@@ -17,6 +17,8 @@ bytes = "1"
 ar = "0.9"
 tar = "0.4"
 xz2 = "0.1"
+flate2 = "1"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 # Crypto
 sha2 = "0.10"
@@ -62,6 +64,9 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # Compiles assets/projectx.rc so the crest ships as icon resource 1: Explorer, shortcuts
 # and pinned taskbar entries read it straight off the executable.
