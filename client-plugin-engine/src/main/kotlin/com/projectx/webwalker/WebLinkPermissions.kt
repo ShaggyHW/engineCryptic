@@ -230,8 +230,32 @@ class WebLinkPermissions private constructor(
             "hasGTAGTaiBwoWannaiCharges" to Charged("trail17_teleport_charge_tai_bwo_wannai", "trail17_gloves_tier3"),
         )
 
+        private val WICKED_HOOD_ALTARS = listOf(
+            "Air", "Mind", "Water", "Earth", "Fire", "Body", "Cosmic", "Chaos", "Astral", "Nature", "Law", "Death", "Blood",
+        )
+        private val ELEMENTAL_ALTARS = setOf("Air", "Water", "Earth", "Fire")
+
+        private fun carriesWickedHood(backpack: List<Item>, worn: List<Item>) =
+            carriesNamed(backpack, "hooks3_hood") || carriesNamed(worn, "hooks3_hood")
+
+        // The hood keeps no charges per altar, whatever upstream's labels say: it holds one teleport a day
+        // (hooks3_used_teleport counts them) plus bought bonus ones. Only an unused day is counted, the safe side.
+        private fun wickedHoodTeleportLeft() =
+            varbitNamed("hooks3_bonus_teleports") > 0 || varbitNamed("hooks3_used_teleport") == 0
+
+        private fun wickedHoodReaches(altar: String) =
+            varbitNamed("hooks3_consumed_${altar.lowercase()}") > 0 || varbitNamed("hooks3_consumed_omni") > 0 ||
+                altar in ELEMENTAL_ALTARS && varbitNamed("hooks3_consumed_elemental") > 0
+
+        private val WICKED_HOOD_TELEPORTS: Map<String, (List<Item>, List<Item>) -> Boolean> =
+            WICKED_HOOD_ALTARS.associate { altar ->
+                "hasWickedHood${altar}Charges" to { backpack: List<Item>, worn: List<Item> ->
+                    carriesWickedHood(backpack, worn) && wickedHoodReaches(altar) && wickedHoodTeleportLeft()
+                }
+            } + mapOf("hasWickedHoodCharges" to { backpack, worn -> carriesWickedHood(backpack, worn) && wickedHoodTeleportLeft() })
+
         // Keys upstream computes from more than one thing carried and a var or two.
-        private val COMPUTED: Map<String, (List<Item>, List<Item>) -> Boolean> = mapOf(
+        private val COMPUTED: Map<String, (List<Item>, List<Item>) -> Boolean> = WICKED_HOOD_TELEPORTS + mapOf(
             "hasLegatusPendant" to { _, _ -> varbitNamed("toolbelt_legatus_pendant") > 0 },
             // Upstream's precedence, kept: the backpack copy alone counts.
             "daveSpellbookWatchTower" to { backpack, worn ->
@@ -299,6 +323,7 @@ class WebLinkPermissions private constructor(
             "StolenHeartsQuestCompleted" to { idNamed(QUEST, "ozan1")?.let(CacheQuests::completed) == true },
             // The row is labelled completed and asks for at least 1; read as the quest being done, the safe side.
             "questDODCoinRealm" to { CacheQuests.completed("Dimension of Disaster: Coin of the Realm") },
+            "questHeraldsOfCrimson" to { idNamed(QUEST, "quest_wendle_heralds")?.let(CacheQuests::completed) == true },
         )
 
         // Quests the planner's rows gate on by how far along they are, as the raw value of the quest's progress var.

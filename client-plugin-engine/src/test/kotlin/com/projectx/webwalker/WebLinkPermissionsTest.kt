@@ -14,6 +14,7 @@ class WebLinkPermissionsTest {
             "hasDA4Equiped", "hasJujuTeleportSpiritbag", "hasBigBookOPiracy", "hasNaturesSentinelTeleport",
             "hasRimmingtonTablet", "hasAnachroniaTablet", "hasTaverleyTabletModify", "hasMenaphosTabletModify",
             "hasDramenStaff", "hasMasterFarmerHabitat", "hasScepterOfTheGods", "hasPontifexRing",
+            "hasWickedHoodCharges", "hasWickedHoodAirCharges", "hasWickedHoodAstralCharges", "hasWickedHoodBloodCharges",
         )) {
             assertTrue(key in keys, key)
         }
@@ -32,7 +33,9 @@ class WebLinkPermissionsTest {
 
     @Test
     fun `quest progress keys are quest flags`() {
-        for (key in listOf("questUndergroundPass", "TreeGnomeVillageProgress", "MonksFriendQuestProgress", "questDODCoinRealm")) {
+        for (key in listOf(
+            "questUndergroundPass", "TreeGnomeVillageProgress", "MonksFriendQuestProgress", "questDODCoinRealm", "questHeraldsOfCrimson",
+        )) {
             assertTrue(key in WebLinkPermissions.questFlags, key)
         }
     }
