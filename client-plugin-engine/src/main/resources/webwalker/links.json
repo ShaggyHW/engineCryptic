@@ -3693,6 +3693,12 @@
    "key": "varbit_10987",
    "value": "4",
    "comparison": ">="
+  },
+  "615": {
+   "about": "Kharazi Jungle fairy ring unlocked",
+   "key": "varbit_36856",
+   "value": "1",
+   "comparison": ">="
   }
  },
  "links": [
@@ -64724,7 +64730,8 @@
    "costTiles": 12,
    "requirements": [
     74,
-    115
+    115,
+    615
    ]
   },
   {
@@ -65280,7 +65287,8 @@
    "costTiles": 12,
    "requirements": [
     115,
-    380
+    380,
+    615
    ]
   },
   {

@@ -26,6 +26,7 @@ import org.projectx.core.game.combat.Ability
 import com.projectx.util.random
 import world.gregs.voidps.type.Tile
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
@@ -58,6 +59,15 @@ object WebWalker {
     private const val MAX_DOOR_ATTEMPTS = 3
     private const val MAX_LINK_ATTEMPTS = 3
     private const val MAX_SET_ASIDE = 6
+    private const val MISROUTE_MEMORY_MS = 30 * 60_000L
+    private const val LANDING_SLACK = 10
+    private val misrouted = ConcurrentHashMap<WebLink, Long>()
+
+    private fun landedNear(area: WebArea): Boolean {
+        val me = localPlayer.tile
+        return me.plane == area.plane && me.x in area.minX - LANDING_SLACK..area.maxX + LANDING_SLACK &&
+            me.y in area.minY - LANDING_SLACK..area.maxY + LANDING_SLACK
+    }
 
     // A staircase or shortcut runs an animation and may load a new area, so it is given longer than a door; a
     // teleport longer still, and a voyage the longest, since some sail through a cutscene.
@@ -199,7 +209,10 @@ object WebWalker {
         }
         val goals = request?.let { goal.goalSet(from) }
         val future = CompletableFuture.supplyAsync(
-            { hosted(request, goals, teleports) ?: planLocally(from, goal, permissions, teleports, excluded, lockedDoors) },
+            {
+                hosted(request, goals, teleports)?.takeIf { it.path?.let { path -> ringsAllowed(path, permissions) } != false }
+                    ?: planLocally(from, goal, permissions, teleports, excluded, lockedDoors)
+            },
             planner,
         )
         script.delayUntil(SEARCH_TIMEOUT_MS, SEARCH_POLL_MS) { future.isDone || script.stopped }
@@ -228,6 +241,9 @@ object WebWalker {
         val setAside = HashSet<WebLink>()
         if (!useItemTeleports) setAside += WebLinks.globals.filter { it.kind == WebLinkKind.ITEM || it.kind == WebLinkKind.POA || it.portable }
         val keptBack = setAside.size
+        val started = System.currentTimeMillis()
+        misrouted.values.removeIf { started - it > MISROUTE_MEMORY_MS }
+        setAside += misrouted.keys
         val lockedDoors = HashSet<Long>()
         val walker = LiveRouteWalker("WebWalk").apply {
             surgeEnabled = useMovementAbilities
@@ -313,6 +329,13 @@ object WebWalker {
                 walker.forgetWalk()
                 linkStartedAt = System.currentTimeMillis()
                 if (passLink(script, route, link, stop)) {
+                    if (step != null && step.kind == WebLinkKind.FAIRY_RING && !landedNear(step.to)) {
+                        // A ring the account hasn't unlocked sends you to Zanaris instead; dialling it again only loops.
+                        println("[WebWalk] $step left us at ${localPlayer.tile}, not its destination; leaving it out for now")
+                        misrouted[step] = System.currentTimeMillis()
+                        setAside += step
+                        path = null
+                    }
                     linkAttempts = 0
                     linkStartedAt = Long.MAX_VALUE
                     if (step?.kind == WebLinkKind.LODESTONE) lodestone = step.lodestone
@@ -485,6 +508,13 @@ object WebWalker {
     }
 
     /** The hosted planner's route, on `/route_area` when there are [goals], or null when the local planner should plan instead. */
+    // The hosted planner's rings carry no requirements, so one this account can't use is checked against our own data.
+    private fun ringsAllowed(path: WebPath, permissions: WebLinkPermissions): Boolean = (0 until path.size).all { index ->
+        val code = path.linkAt(index)?.takeIf { it.kind == WebLinkKind.FAIRY_RING }?.fairyCode ?: return@all true
+        val ours = WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING && it.fairyCode == code }
+        ours.isEmpty() || ours.any(permissions::allows)
+    }
+
     private fun hosted(request: NavRequest?, goals: NavGoalSet?, teleports: Boolean): WebWalkResult? {
         request ?: return null
         return when (val outcome = runCatching { Navpath.planner.plan(request, goals, teleports) }.getOrNull()) {
