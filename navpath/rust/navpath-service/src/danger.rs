@@ -14,7 +14,7 @@
 //! is logged and skipped (a typo must not take the router down).
 //!
 //! Location: `NAVPATH_DANGER_AREAS` (path), default `dangerAreas.txt` next to the
-//! snapshot. A missing file means no danger areas. The file is read at startup and on
+//! snapshot. A missing file falls back to the built-in areas. The file is read at startup and on
 //! every `POST /admin/reload`.
 //!
 //! Penalty: every danger tile a route ENTERS costs `NAVPATH_DANGER_PENALTY_MS` extra
@@ -114,7 +114,7 @@ impl DangerAreas {
     }
 
     /// Read the configured file (see the module docs) and resolve it against `snap`.
-    /// A missing file yields an empty set.
+    /// A missing file falls back to the built-in areas, so a copy run without one still avoids them.
     pub fn load(snap: &Snapshot, snapshot_path: &Path) -> DangerAreas {
         let path = danger_areas_path(snapshot_path);
         let penalty_ms = danger_penalty_ms();
@@ -127,8 +127,8 @@ impl DangerAreas {
                 areas
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                info!(path = ?path, "no danger-areas file; danger avoidance inactive");
-                Vec::new()
+                info!(path = ?path, "no danger-areas file; using the built-in danger areas");
+                parse_danger_areas(BUILT_IN_DANGER_AREAS).0
             }
             Err(e) => {
                 warn!(path = ?path, error = %e, "could not read danger-areas file; danger avoidance inactive");
@@ -165,6 +165,9 @@ impl DangerAreas {
         path.iter().skip(skip).any(|&v| self.contains(v))
     }
 }
+
+// The launcher runs navpath with no file beside its graph; these are upstream's areas, vendored with the source.
+const BUILT_IN_DANGER_AREAS: &str = include_str!("../../../dangerAreas.txt");
 
 pub fn danger_areas_path(snapshot_path: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("NAVPATH_DANGER_AREAS") {
