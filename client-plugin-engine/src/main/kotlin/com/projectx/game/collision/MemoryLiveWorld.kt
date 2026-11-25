@@ -207,9 +207,9 @@ internal class MemoryLiveWorld(private val clientAddress: Long, private val loca
                 if (container == 0L || walk.budget < 0) continue
                 if (--walk.budget < 0) break
                 if (vector(container + OLocationContainer.SPAWNED_LOCATIONS_BEGIN)) locations(walk, vectorBegin, vectorEnd, spawned = true)
-                for (offset in STATIC_VECTORS) {
+                for (offset in staticVectors) {
                     if (walk.budget < 0) break
-                    if (vector(container + offset())) locations(walk, vectorBegin, vectorEnd, spawned = false)
+                    if (vector(container + offset)) locations(walk, vectorBegin, vectorEnd, spawned = false)
                 }
                 if (walk.budget >= 0) {
                     val node = pointer(container + OEntity.GRAPH_NODE)
@@ -400,11 +400,15 @@ internal class MemoryLiveWorld(private val clientAddress: Long, private val loca
         private val locationFrom by lazy { locationFields.min() }
         private val locationLength by lazy { (locationFields.max() + 8 - locationFrom).toInt() }
 
-        private val STATIC_VECTORS = listOf(
-            { OLocationContainer.PRIMARY_LOCATIONS_BEGIN },
-            { OLocationContainer.SPAN_LOCATIONS_BEGIN },
-            { OLocationContainer.TERTIARY_LOCATIONS_BEGIN },
-        )
+        // The span vector is only in the tables that located it; the Windows container has none at that place.
+        private val staticVectors: LongArray by lazy {
+            val span = try {
+                OLocationContainer.SPAN_LOCATIONS_BEGIN
+            } catch (_: OffsetUnavailableException) {
+                null
+            }
+            listOfNotNull(OLocationContainer.PRIMARY_LOCATIONS_BEGIN, span, OLocationContainer.TERTIARY_LOCATIONS_BEGIN).toLongArray()
+        }
 
         /** Whether this client's offset table carries everything the reader needs. */
         val supported: Boolean by lazy {
@@ -413,8 +417,7 @@ internal class MemoryLiveWorld(private val clientAddress: Long, private val loca
                     OMapSquare.PLACEMENTS, OMapSquare.PLACEMENT_ENTRY_STRIDE, OMapSquare.PLACEMENT_ENTRY_PTR_OFFSET,
                     OPlacement.TYPE_ID, OPlacement.PLANE, OPlacement.LOCAL_X, OPlacement.LOCAL_Y, OPlacement.SHAPE,
                     OPlacement.ROTATION, OPlacement.LOCATION_TYPE, OLocationType.CLIP_TYPE, OLocationType.BLOCKS_PROJECTILE,
-                    OLocation.OWN_TYPE, OLocationContainer.SPAWNED_LOCATIONS_BEGIN, OLocationContainer.SPAN_LOCATIONS_BEGIN,
-                    ORegionHeightContainer.SETTINGS_LEVELS,
+                    OLocation.OWN_TYPE, OLocationContainer.SPAWNED_LOCATIONS_BEGIN, ORegionHeightContainer.SETTINGS_LEVELS,
                 )
                 true
             } catch (_: OffsetUnavailableException) {

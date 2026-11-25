@@ -258,22 +258,22 @@ object OInterfaceManager : OffsetObject {
     val INTERFACE_LIST by offset()
     val KEY_EVENT_BEGIN by offset()
     val KEY_EVENT_END by offset()
-    val EVENTMASK_BUCKETS by portPending(LINUX)
-    val EVENTMASK_COUNT by portPending(LINUX)
+    val EVENTMASK_BUCKETS by offset()
+    val EVENTMASK_COUNT by offset()
 }
 
 /** One component's entry in the interface manager's if_setevents override map; its slots hang off [SLOT_BUCKETS]. */
 object OEventMaskNode : OffsetObject {
-    val KEY by portPending(LINUX)
-    val SLOT_BUCKETS by portPending(LINUX)
-    val SLOT_COUNT by portPending(LINUX)
-    val NEXT by portPending(LINUX)
+    val KEY by offset()
+    val SLOT_BUCKETS by offset()
+    val SLOT_COUNT by offset()
+    val NEXT by offset()
 }
 
 object OEventMaskSlot : OffsetObject {
-    val KEY by portPending(LINUX)
-    val VALUE by portPending(LINUX)
-    val NEXT by portPending(LINUX)
+    val KEY by offset()
+    val VALUE by offset()
+    val NEXT by offset()
 }
 
 object OInterfaceList : OffsetObject {
@@ -423,7 +423,7 @@ object ORegionHeightContainer : OffsetObject {
     val LINK_PLANE_STRIDE by offset()
     val LINK_COL_STRIDE by offset()
     val LINK_ROW_STRIDE by offset()
-    val SETTINGS_LEVELS by portPending(LINUX)
+    val SETTINGS_LEVELS by offset()
 }
 
 object OMapSquare : OffsetObject {
@@ -434,19 +434,19 @@ object OMapSquare : OffsetObject {
     val LOCATION_CONTAINERS by offset()
     val LOCATION_CONTAINER_ENTRY_STRIDE by offset()
     val LOCATION_CONTAINER_ENTRY_PTR_OFFSET by offset()
-    val PLACEMENTS by portPending(LINUX)
-    val PLACEMENT_ENTRY_STRIDE by portPending(LINUX)
-    val PLACEMENT_ENTRY_PTR_OFFSET by portPending(LINUX)
+    val PLACEMENTS by offset()
+    val PLACEMENT_ENTRY_STRIDE by offset()
+    val PLACEMENT_ENTRY_PTR_OFFSET by offset()
 }
 
 object OPlacement : OffsetObject {
-    val TYPE_ID by portPending(LINUX)
-    val PLANE by portPending(LINUX)
-    val LOCAL_X by portPending(LINUX)
-    val LOCAL_Y by portPending(LINUX)
-    val SHAPE by portPending(LINUX)
-    val ROTATION by portPending(LINUX)
-    val LOCATION_TYPE by portPending(LINUX)
+    val TYPE_ID by offset()
+    val PLANE by offset()
+    val LOCAL_X by offset()
+    val LOCAL_Y by offset()
+    val SHAPE by offset()
+    val ROTATION by offset()
+    val LOCATION_TYPE by offset()
 }
 
 object OLocationContainer : OffsetObject {
@@ -458,8 +458,8 @@ object OLocationContainer : OffsetObject {
     val MULTI_LOCATIONS_END by offset()
     val TERTIARY_LOCATIONS_BEGIN by offset()
     val TERTIARY_LOCATIONS_END by offset()
-    val SPAWNED_LOCATIONS_BEGIN by portPending(LINUX)
-    val SPAWNED_LOCATIONS_END by portPending(LINUX)
+    val SPAWNED_LOCATIONS_BEGIN by offset()
+    val SPAWNED_LOCATIONS_END by offset()
     val SPAN_LOCATIONS_BEGIN by portPending(LINUX)
     val SPAN_LOCATIONS_END by portPending(LINUX)
     val DISPATCH_SLOT_TABLE_START by offset()
@@ -482,7 +482,7 @@ object OLocation : OffsetObject {
     val HIGHLIGHT_INTENSITY by offset()
     val HIGHLIGHT_CATEGORY by offset()
     val SHOW_AS_IMPORTANT by offset()
-    val OWN_TYPE by portPending(LINUX)
+    val OWN_TYPE by offset()
 }
 
 object OCombinedLocation : OffsetObject {
@@ -504,8 +504,8 @@ object OLocationType : OffsetObject {
     val ID by offset()
     val SIZE_X by offset()
     val SIZE_Y by offset()
-    val CLIP_TYPE by portPending(LINUX)
-    val BLOCKS_PROJECTILE by portPending(LINUX)
+    val CLIP_TYPE by offset()
+    val BLOCKS_PROJECTILE by offset()
 }
 
 object OSpotAnimManager : OffsetObject {

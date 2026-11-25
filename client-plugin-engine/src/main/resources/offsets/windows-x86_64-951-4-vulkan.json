@@ -2408,6 +2408,12 @@
         "confidence": "HIGH",
         "note": "Unchanged from 949-4: stable across paired functions (0x4:4172).",
         "verified_build": "951-1-vulkan"
+      },
+      "SETTINGS_LEVELS": {
+        "value": "0x200",
+        "confidence": "HIGH",
+        "note": "Per-level vector of 66x66 u8 tile-settings grids (64 tiles and a one-tile border), entries laid out as PLANE_STRIDE / PLANE_ELEM. Read live on the 951-4 Vulkan client: four levels of exactly 66 rows of 66 bytes, the roof bit covering Draynor bank's footprint.",
+        "verified_build": "951-4-vulkan"
       }
     },
     "OHeightMap": {
@@ -2492,6 +2498,18 @@
         "confidence": "MEDIUM",
         "note": "Unchanged from 950-1: majority across paired functions (0x78:1257 0x80:2).",
         "verified_build": "951-1-vulkan"
+      },
+      "EVENTMASK_BUCKETS": {
+        "value": "0x150",
+        "confidence": "HIGH",
+        "note": "Bucket array of the if_setevents table; an end sentinel follows the last bucket. Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      },
+      "EVENTMASK_COUNT": {
+        "value": "0x158",
+        "confidence": "HIGH",
+        "note": "u32 bucket count. Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
       }
     },
     "OMiniMenu": {
@@ -2610,6 +2628,18 @@
         "confidence": "HIGH",
         "note": "Unchanged from 949-4: stable across paired functions (0x5:211).",
         "verified_build": "951-1-vulkan"
+      },
+      "SPAWNED_LOCATIONS_BEGIN": {
+        "value": "0xc0",
+        "confidence": "HIGH",
+        "note": "The LOC_ADD spawn vector, the same slot MULTI_LOCATIONS_BEGIN names. Read live on the 951-4 Vulkan client: its locs carry no ORIGINAL_TYPE and their own type's id matches TYPE_ID.",
+        "verified_build": "951-4-vulkan"
+      },
+      "SPAWNED_LOCATIONS_END": {
+        "value": "0xc8",
+        "confidence": "HIGH",
+        "note": "End of the spawn vector; see SPAWNED_LOCATIONS_BEGIN.",
+        "verified_build": "951-4-vulkan"
       }
     },
     "OLocation": {
@@ -2696,6 +2726,12 @@
         "confidence": "HIGH",
         "note": "Moved from 0x18f in 949-4: stable across paired functions (0x197:15).",
         "verified_build": "951-1-vulkan"
+      },
+      "OWN_TYPE": {
+        "value": "0xc0",
+        "confidence": "HIGH",
+        "note": "The loc's own LocType*: equals ORIGINAL_TYPE on varbit-transformed locs (the base type, while TYPE_ID is the current form), and set alone on spawned and plain locs, where its id matched TYPE_ID 257 of 257 times live on the 951-4 Vulkan client.",
+        "verified_build": "951-4-vulkan"
       }
     },
     "OCombinedLocation": {
@@ -2780,6 +2816,18 @@
         "confidence": "MEDIUM",
         "note": "Unchanged from 949-4: majority across paired functions (0x380:90 0x3b8:2 0x370:1).",
         "verified_build": "951-1-vulkan"
+      },
+      "CLIP_TYPE": {
+        "value": "0x384",
+        "confidence": "HIGH",
+        "note": "i32 walk blocking: 0 none, 1 wall-like, 2 solid (the default). Read live on the 951-4 Vulkan client: only 0..2 across 2915 placements; nettles and boulders 0, doors and gates 1, inviswall 2.",
+        "verified_build": "951-4-vulkan"
+      },
+      "BLOCKS_PROJECTILE": {
+        "value": "0x388",
+        "confidence": "HIGH",
+        "note": "u8. Read live on the 951-4 Vulkan client: blankwall_no_blockrange reads 0 beside a clip type of 2, inviswall reads 1.",
+        "verified_build": "951-4-vulkan"
       }
     },
     "ORenderModel": {
@@ -3140,6 +3188,24 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: stable across paired functions (0x8:22164).",
         "verified_build": "951-1-vulkan"
+      },
+      "PLACEMENTS": {
+        "value": "0xeb70",
+        "confidence": "HIGH",
+        "note": "Vector of {ctrl, Placement*} pairs, every loc the client placed in the square; LOCATION_CONTAINERS follows it. Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "PLACEMENT_ENTRY_PTR_OFFSET": {
+        "value": "0x8",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "PLACEMENT_ENTRY_STRIDE": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
       }
     },
     "OSpotAnimManager": {
@@ -4060,6 +4126,96 @@
         "confidence": "MEDIUM",
         "note": "Mirrored from the Linux 951-4 table (GS_ROUTEWAYPOINT_FINE_Y): the struct's surrounding fields share one layout on both platforms (OPathingEntity.WAYPOINT_COUNT agrees and the waypoint queue is an eastl::vector).",
         "verified_build": "951-4"
+      }
+    },
+    "OEventMaskNode": {
+      "KEY": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "u32 (interface << 16) | component; the hash is key mod the bucket count. Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      },
+      "SLOT_BUCKETS": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      },
+      "SLOT_COUNT": {
+        "value": "0x18",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      },
+      "NEXT": {
+        "value": "0x38",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      }
+    },
+    "OEventMaskSlot": {
+      "KEY": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "u32 slot id, 0xFFFFFFFF for the whole component. Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      },
+      "VALUE": {
+        "value": "0x4",
+        "confidence": "HIGH",
+        "note": "i32 op mask. Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      },
+      "NEXT": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: every node of the 823-bucket table hashed to its own bucket and keyed a real (interface << 16 | component), and the backpack's per-slot masks sat on slot keys 0..27.",
+        "verified_build": "951-4-vulkan"
+      }
+    },
+    "OPlacement": {
+      "TYPE_ID": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "i32 base loc id. Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "PLANE": {
+        "value": "0x4",
+        "confidence": "HIGH",
+        "note": "u8 bridge-shifted plane, 0xFF under a bridge. Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "LOCAL_X": {
+        "value": "0x5",
+        "confidence": "HIGH",
+        "note": "u8 tile within the square. Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "LOCAL_Y": {
+        "value": "0x6",
+        "confidence": "HIGH",
+        "note": "u8 tile within the square. Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "SHAPE": {
+        "value": "0x8",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "ROTATION": {
+        "value": "0x9",
+        "confidence": "HIGH",
+        "note": "Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
+      },
+      "LOCATION_TYPE": {
+        "value": "0x50",
+        "confidence": "HIGH",
+        "note": "The base LocType*. Read live on the 951-4 Vulkan client: all 2915 placements of a square resolved their LocType to the same id, and 83 of 83 live locs found a placement with the same id, tile, plane, shape and rotation.",
+        "verified_build": "951-4-vulkan"
       }
     }
   },
