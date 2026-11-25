@@ -2,65 +2,52 @@ package com.projectx.quest.runtime
 
 import com.projectx.game.bootstrap.Bootstrap
 import com.projectx.game.nxt.MainState
+import com.projectx.quest.data.Quest
+import com.projectx.quest.data.QuestCondition
 import com.projectx.quest.solver.QuestSolverRegistry
 import com.projectx.script.api.varps
 
+/** Moves the guide on by itself once a step's checkable conditions hold; at most one step per call. */
 object StepAdvancer {
-    private const val TICK_MS = 250L
+    private const val INTERVAL_MS = 250L
 
-    @Volatile private var lastTickMs = 0L
+    private var lastRunMs = 0L
 
     fun maybeTick(autoAdvanceEnabled: Boolean) {
-        val now = System.currentTimeMillis()
-        if (now - lastTickMs < TICK_MS) return
-        lastTickMs = now
+        val startedAt = System.currentTimeMillis()
+        if (startedAt - lastRunMs < INTERVAL_MS) return
+        lastRunMs = startedAt
+        val quest = ActiveQuestState.selectedQuest?.takeIf { inGame() } ?: return
+        if (quest.stageVarbit >= 0) recordStage(quest.stageVarbit)
+        if (autoAdvanceEnabled) advance(quest, startedAt)
+    }
 
-        if (!loggedIn()) return
-        val q = ActiveQuestState.selectedQuest ?: return
-
-        // Track varbit value for the UI panel, but DO NOT auto-jump the step pointer when it
-        // changes mid-quest. Intermediate values don't map 1:1 to lua step indices; jumping
-        // is more annoying than helpful. The endpoints (start=0, >= complete=done) are still
-        // honoured on quest-select via [ActiveQuestState.seekToVarbitStage].
-        val vb = q.stageVarbit
-        if (vb >= 0) {
-            val current = runCatching { varps.getVarBit(vb) }.getOrElse { ActiveQuestState.lastVarbitValue }
-            if (current != ActiveQuestState.lastVarbitValue) {
-                ActiveQuestState.updateLastVarbit(current)
-            }
-        }
-
-        if (!autoAdvanceEnabled) return
-
-        val idx = ActiveQuestState.currentStepIndex
-        val step = q.steps.getOrNull(idx) ?: return
-
-        // Jump conditions: non-linear branching used by quests that need to loop
-        // back when a model goes missing / dialog state regresses. All
-        // jumpconditions must be met before we jump.
-        if (step.jumpconditions.isNotEmpty() && step.jumpOffset != 0) {
-            val implementable = step.jumpconditions.filter { ConditionEvaluator.implementable(it) }
-            if (implementable.isNotEmpty() && implementable.all { ConditionEvaluator.isMet(it) }) {
-                ActiveQuestState.jumpBy(step.jumpOffset)
-                return
-            }
-        }
-
-        val solverSolved = step.solverId?.let {
-            QuestSolverRegistry.evaluateOrCached(q, step, idx, lastTickMs).solved
-        } ?: false
-
-        val implementable = step.postconditions.filter { ConditionEvaluator.implementable(it) }
-        val conditionsMet = implementable.isNotEmpty() && implementable.all { ConditionEvaluator.isMet(it) }
-
-        if (solverSolved || conditionsMet) {
-            ActiveQuestState.next()
+    private fun advance(quest: Quest, stamp: Long) {
+        val index = ActiveQuestState.currentStepIndex
+        val step = quest.steps.getOrNull(index) ?: return
+        val jump = step.jumpOffset
+        if (jump != 0 && allHold(step.jumpconditions)) {
+            ActiveQuestState.jumpBy(jump)
+        } else {
+            val solved = step.solverId != null && QuestSolverRegistry.evaluateOrCached(quest, step, index, stamp).solved
+            if (solved || allHold(step.postconditions)) ActiveQuestState.next()
         }
     }
 
-    private fun loggedIn(): Boolean = try {
-        Bootstrap.client.mainState == MainState.LOGGED_IN
-    } catch (_: Throwable) {
-        false
+    private fun inGame(): Boolean = runCatching { Bootstrap.client.mainState }.getOrNull() == MainState.LOGGED_IN
+
+    private fun recordStage(varbit: Int) {
+        val stage = try {
+            varps.getVarBit(varbit)
+        } catch (_: Throwable) {
+            return
+        }
+        if (stage != ActiveQuestState.lastVarbitValue) ActiveQuestState.updateLastVarbit(stage)
+    }
+
+    /** Conditions the helper cannot check are left out; an empty remainder never holds. */
+    private fun allHold(conditions: List<QuestCondition>): Boolean {
+        val checkable = conditions.filter(ConditionEvaluator::implementable)
+        return checkable.isNotEmpty() && checkable.all(ConditionEvaluator::isMet)
     }
 }

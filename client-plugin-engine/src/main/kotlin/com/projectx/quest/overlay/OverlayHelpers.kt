@@ -2,81 +2,96 @@ package com.projectx.quest.overlay
 
 import com.projectx.game.math.Vector2f
 import com.projectx.ui.backend.dsl.scopes.BackgroundDrawListScope
+import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
-import kotlin.math.sqrt
 
-fun pulseAlpha(baseColor: Int, periodMs: Long = 900L, minAlpha: Int = 96, maxAlpha: Int = 255): Int {
-    val t = (System.currentTimeMillis() % periodMs).toDouble() / periodMs.toDouble()
-    val phase = sin(t * Math.PI * 2.0) * 0.5 + 0.5
-    val a = (minAlpha + (maxAlpha - minAlpha) * phase).toInt().coerceIn(0, 255)
-    return (baseColor and 0x00FFFFFF) or (a shl 24)
+private const val RGB_BITS = 0x00FFFFFF
+private const val SHAFT_SHARE_OF_HEAD = 0.6f
+private const val NEGLIGIBLE = 0.001f
+private const val EDGE_ARROW_THICKNESS = 4f
+private const val EDGE_ARROW_HEAD = 18f
+
+/** [baseColor] with its alpha swapped for one that breathes between [minAlpha] and [maxAlpha] every [periodMs]. */
+fun pulseAlpha(
+    baseColor: Int,
+    periodMs: Long = 900L, minAlpha: Int = 96, maxAlpha: Int = 255,
+): Int {
+    val cycle = (System.currentTimeMillis() % periodMs).toDouble() / periodMs
+    val swing = 0.5 + 0.5 * sin(cycle * 2.0 * PI)
+    val alpha = (minAlpha + (maxAlpha - minAlpha) * swing).toInt().coerceIn(0, 255)
+    return (baseColor and RGB_BITS) or (alpha shl 24)
 }
 
-fun BackgroundDrawListScope.arrow(
-    from: Vector2f,
-    to: Vector2f,
-    color: Int,
-    thickness: Float = 3f,
-    headSize: Float = 16f,
-) {
-    val dx = to.x - from.x
-    val dy = to.y - from.y
-    val len = sqrt(dx * dx + dy * dy)
-    if (len < 1e-3f) return
-    val nx = dx / len
-    val ny = dy / len
-    val shaftEnd = Vector2f(to.x - nx * headSize * 0.6f, to.y - ny * headSize * 0.6f)
-    line(from, shaftEnd, color, thickness)
-    val px = -ny
-    val py = nx
-    val baseX = to.x - nx * headSize
-    val baseY = to.y - ny * headSize
-    val left = Vector2f(baseX + px * headSize * 0.5f, baseY + py * headSize * 0.5f)
-    val right = Vector2f(baseX - px * headSize * 0.5f, baseY - py * headSize * 0.5f)
-    convexPolyFilled(floatArrayOf(to.x, to.y, left.x, left.y, right.x, right.y), color)
+/** A shaft ending just inside a filled head whose tip sits exactly on [to]. */
+fun BackgroundDrawListScope.arrow(from: Vector2f, to: Vector2f, color: Int, thickness: Float = 3f, headSize: Float = 16f) {
+    val run = to.x - from.x
+    val rise = to.y - from.y
+    val length = hypot(run, rise)
+    if (length < NEGLIGIBLE) return
+    val ux = run / length
+    val uy = rise / length
+    val inset = headSize * SHAFT_SHARE_OF_HEAD
+    line(from, Vector2f(to.x - ux * inset, to.y - uy * inset), color, thickness)
+    val backX = to.x - ux * headSize
+    val backY = to.y - uy * headSize
+    val wing = headSize / 2f
+    val head = floatArrayOf(
+        to.x, to.y,
+        backX - uy * wing, backY + ux * wing,
+        backX + uy * wing, backY - ux * wing,
+    )
+    convexPolyFilled(head, color)
 }
 
-fun BackgroundDrawListScope.offscreenBearingArrow(
-    center: Vector2f,
-    screenW: Float,
-    screenH: Float,
-    bearingRad: Float,
-    color: Int,
-    margin: Float = 60f,
-    arrowLen: Float = 32f,
-) {
-    // Screen Y grows downward, so flip the Y component of the world bearing.
-    val sx = cos(bearingRad)
-    val sy = -sin(bearingRad)
-    val minX = margin
-    val maxX = screenW - margin
-    val minY = margin
-    val maxY = screenH - margin
-    val ts = mutableListOf<Float>()
-    if (sx > 1e-3f) ts += (maxX - center.x) / sx
-    if (sx < -1e-3f) ts += (minX - center.x) / sx
-    if (sy > 1e-3f) ts += (maxY - center.y) / sy
-    if (sy < -1e-3f) ts += (minY - center.y) / sy
-    val t = ts.filter { it > 0f }.minOrNull() ?: return
-    val edgeX = (center.x + sx * t).coerceIn(minX, maxX)
-    val edgeY = (center.y + sy * t).coerceIn(minY, maxY)
-    val tip = Vector2f(edgeX, edgeY)
-    val tailX = edgeX - sx * arrowLen
-    val tailY = edgeY - sy * arrowLen
-    arrow(Vector2f(tailX, tailY), tip, color, thickness = 4f, headSize = 18f)
+/** Points from the edge of the inset screen box toward a world bearing whose target is off screen. */
+fun BackgroundDrawListScope.offscreenBearingArrow(center: Vector2f, screenW: Float, screenH: Float, bearingRad: Float,
+                                                   color: Int, margin: Float = 60f, arrowLen: Float = 32f) {
+    val dirX = cos(bearingRad)
+    val dirY = -sin(bearingRad)
+    val left = margin
+    val right = screenW - margin
+    val top = margin
+    val bottom = screenH - margin
+    val travel = buildList {
+        if (abs(dirX) > NEGLIGIBLE) {
+            add((left - center.x) / dirX)
+            add((right - center.x) / dirX)
+        }
+        if (abs(dirY) > NEGLIGIBLE) {
+            add((top - center.y) / dirY)
+            add((bottom - center.y) / dirY)
+        }
+    }.filter { it > 0f }.minOrNull() ?: return
+    val tip = Vector2f(
+        (center.x + dirX * travel).coerceIn(left, right),
+        (center.y + dirY * travel).coerceIn(top, bottom),
+    )
+    val tail = Vector2f(tip.x - dirX * arrowLen, tip.y - dirY * arrowLen)
+    arrow(tail, tip, color, EDGE_ARROW_THICKNESS, EDGE_ARROW_HEAD)
 }
 
-fun bearingRad(fromX: Int, fromY: Int, toX: Int, toY: Int): Float =
-    atan2((toY - fromY).toDouble(), (toX - fromX).toDouble()).toFloat()
+/** World angle from one tile to another, counter-clockwise from east, in radians. */
+fun bearingRad(fromX: Int, fromY: Int, toX: Int, toY: Int): Float {
+    val north = (toY - fromY).toDouble()
+    val east = (toX - fromX).toDouble()
+    return atan2(north, east).toFloat()
+}
 
-fun stripHtml(s: String): String =
-    s.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("</li>", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("<li>", RegexOption.IGNORE_CASE), "- ")
-        .replace(Regex("<[^>]+>"), "")
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
+private val lineBreakTag = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+private val listItemEnd = Regex("</li>", RegexOption.IGNORE_CASE)
+private val listItemStart = Regex("<li>", RegexOption.IGNORE_CASE)
+private val anyTag = Regex("<[^>]*>")
+private val entities = listOf("&nbsp;" to " ", "&amp;" to "&", "&lt;" to "<", "&gt;" to ">")
+
+/** Guide HTML as panel text: breaks and list items become lines, other markup goes, four entities decode. */
+fun stripHtml(s: String): String {
+    val plain = s.replace(lineBreakTag, "\n")
+        .replace(listItemEnd, "\n")
+        .replace(listItemStart, "- ")
+        .replace(anyTag, "")
+    return entities.fold(plain) { text, (entity, glyph) -> text.replace(entity, glyph) }
+}

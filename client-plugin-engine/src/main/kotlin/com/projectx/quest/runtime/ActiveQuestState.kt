@@ -5,66 +5,67 @@ import com.projectx.game.nxt.MainState
 import com.projectx.quest.data.Quest
 import com.projectx.script.api.varps
 
+/** The quest being guided and the step the player is on; an index equal to the step count means finished. */
 object ActiveQuestState {
-    @Volatile var selectedQuest: Quest? = null
-        private set
+    /** Swapped whole, so the game and UI threads always see a quest with an index that belongs to it. */
+    private data class Position(val quest: Quest? = null, val step: Int = 0, val stage: Int = -1)
 
-    @Volatile var currentStepIndex: Int = 0
-        private set
+    @Volatile private var position = Position()
 
-    @Volatile var lastVarbitValue: Int = -1
-        private set
+    val selectedQuest: Quest? get() = position.quest
+
+    val currentStepIndex: Int get() = position.step
+
+    val lastVarbitValue: Int get() = position.stage
 
     fun select(quest: Quest?) {
-        selectedQuest = quest
-        currentStepIndex = 0
-        lastVarbitValue = -1
-        if (quest != null) seekToVarbitStage(quest)
+        position = Position(quest)
+        quest?.let(::seekToVarbitStage)
     }
 
-    fun next() {
-        val q = selectedQuest ?: return
-        if (currentStepIndex < q.steps.size) currentStepIndex++
-    }
+    fun next() = moveTo { it + 1 }
 
     fun previous() {
-        if (currentStepIndex > 0) currentStepIndex--
+        position = position.copy(step = (position.step - 1).coerceAtLeast(0))
     }
 
-    fun reset() { currentStepIndex = 0 }
-
-    fun setStep(index: Int) {
-        val q = selectedQuest ?: return
-        currentStepIndex = index.coerceIn(0, q.steps.size)
+    fun reset() {
+        position = position.copy(step = 0)
     }
 
-    fun jumpBy(offset: Int) {
-        val q = selectedQuest ?: return
-        currentStepIndex = (currentStepIndex + offset).coerceIn(0, q.steps.size)
+    fun setStep(index: Int) = moveTo { index }
+
+    fun jumpBy(offset: Int) = moveTo { it + offset }
+
+    fun updateLastVarbit(value: Int) {
+        position = position.copy(stage = value)
     }
 
     fun seekToVarbitStage() {
-        val quest = selectedQuest ?: return
-        seekToVarbitStage(quest)
+        position.quest?.let(::seekToVarbitStage)
     }
 
-    fun updateLastVarbit(value: Int) { lastVarbitValue = value }
-
-    // Varbit stage tracking — only the two endpoints are reliable. The varbit's intermediate
-    // values do NOT map cleanly to the Lua step list (each varbit value covers many lua
-    // steps), so interpolating jumps the user mid-quest. Use postconditions for step-by-step
-    // progression and only let the varbit force the helper to the start or the finish.
+    /** Only the two ends of a stage varbit map onto guide steps; values in between leave the step alone. */
     fun seekToVarbitStage(quest: Quest) {
-        if (Bootstrap.client.mainState != MainState.LOGGED_IN) return
-        val vb = quest.stageVarbit
-        val complete = quest.stageVarbitCompleteValue
-        if (vb < 0 || complete <= 0) return
-        val value = runCatching { varps.getVarBit(vb) }.getOrNull() ?: return
-        lastVarbitValue = value
-        when {
-            value <= 0 -> currentStepIndex = 0
-            value >= complete -> currentStepIndex = quest.steps.size
-            // Intermediate value — trust whatever step the user is on; do NOT jump.
+        if (quest.stageVarbit < 0 || quest.stageVarbitCompleteValue <= 0) return
+        val stage = readStage(quest.stageVarbit) ?: return
+        val step = when {
+            stage <= 0 -> 0
+            stage >= quest.stageVarbitCompleteValue -> quest.steps.size
+            else -> position.step
         }
+        position = position.copy(step = step, stage = stage)
+    }
+
+    private inline fun moveTo(target: (Int) -> Int) {
+        val now = position
+        val quest = now.quest ?: return
+        position = now.copy(step = target(now.step).coerceIn(0, quest.steps.size))
+    }
+
+    private fun readStage(varbit: Int): Int? = try {
+        if (Bootstrap.client.mainState == MainState.LOGGED_IN) varps.getVarBit(varbit) else null
+    } catch (_: Throwable) {
+        null
     }
 }

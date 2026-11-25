@@ -1,61 +1,35 @@
 package com.projectx.quest.runtime
 
+/** The newest chat lines with their arrival times, written by the chat hook and searched from anywhere. */
 object RecentChat {
-    private const val CAPACITY = 64
-    private const val DEFAULT_WINDOW_MS = 8_000L
+    private const val KEPT_LINES = 64
+    private const val RECENT_WINDOW_MS = 8_000L
 
-    private data class Entry(val at: Long, val text: String)
+    private class Line(val receivedAt: Long, val message: String)
 
-    private val buffer = ArrayDeque<Entry>(CAPACITY)
-    private val lock = Any()
+    private val lines = ArrayDeque<Line>(KEPT_LINES)
 
     fun record(message: String) {
-        if (message.isBlank()) return
-        val now = System.currentTimeMillis()
-        synchronized(lock) {
-            if (buffer.size >= CAPACITY) buffer.removeFirst()
-            buffer.addLast(Entry(now, message))
-        }
+        if (message.isNotBlank()) append(Line(System.currentTimeMillis(), message))
     }
 
-    /** Newest buffered message matching [regex], searched newest-first over the whole buffer. */
-    fun latestMatch(regex: Regex): MatchResult? {
-        synchronized(lock) {
-            for (i in buffer.indices.reversed()) {
-                regex.find(buffer[i].text)?.let { return it }
-            }
-        }
-        return null
+    fun latestMatch(regex: Regex): MatchResult? = newestFirst().firstNotNullOfOrNull { regex.find(it.message) }
+
+    fun containsSince(needle: String, sinceMillis: Long): Boolean =
+        needle.isNotBlank() && newestSince(needle, sinceMillis) != null
+
+    fun findSince(needle: String, sinceMillis: Long): String? = newestSince(needle, sinceMillis)
+
+    fun containsRecent(needle: String, windowMs: Long = RECENT_WINDOW_MS): Boolean =
+        containsSince(needle, System.currentTimeMillis() - windowMs)
+
+    private fun append(line: Line) = synchronized(lines) {
+        while (lines.size >= KEPT_LINES) lines.removeFirst()
+        lines.addLast(line)
     }
 
-    /** True when a message containing [needle], ignoring case, arrived at or after [sinceMillis]. */
-    fun containsSince(needle: String, sinceMillis: Long): Boolean {
-        if (needle.isBlank()) return false
-        synchronized(lock) {
-            return buffer.any { it.at >= sinceMillis && it.text.contains(needle, ignoreCase = true) }
-        }
-    }
+    private fun newestFirst(): List<Line> = synchronized(lines) { lines.reversed() }
 
-    /** The newest message containing [needle], ignoring case, that arrived at or after [sinceMillis]; null when none did. */
-    fun findSince(needle: String, sinceMillis: Long): String? {
-        synchronized(lock) {
-            for (i in buffer.indices.reversed()) {
-                val entry = buffer[i]
-                if (entry.at >= sinceMillis && entry.text.contains(needle, ignoreCase = true)) return entry.text
-            }
-        }
-        return null
-    }
-
-    fun containsRecent(needle: String, windowMs: Long = DEFAULT_WINDOW_MS): Boolean {
-        if (needle.isBlank()) return false
-        val n = needle.lowercase()
-        val cutoff = System.currentTimeMillis() - windowMs
-        synchronized(lock) {
-            for (e in buffer) {
-                if (e.at >= cutoff && e.text.lowercase().contains(n)) return true
-            }
-        }
-        return false
-    }
+    private fun newestSince(needle: String, sinceMillis: Long): String? =
+        newestFirst().firstOrNull { it.receivedAt >= sinceMillis && it.message.contains(needle, ignoreCase = true) }?.message
 }

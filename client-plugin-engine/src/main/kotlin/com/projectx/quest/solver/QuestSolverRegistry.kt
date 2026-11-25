@@ -5,68 +5,39 @@ import com.projectx.quest.data.QuestAction
 import com.projectx.quest.data.QuestStep
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Lookup table for [QuestStepSolver]s by id. Solvers register here at startup
- * (manual registration or classpath discovery via [@QuestSolver]). The quest
- * runtime queries this on each tick of a solver-bound step.
- *
- * Result snapshots are cached for one tick so the renderer and step advancer
- * see consistent state instead of evaluating the solver twice per frame.
- */
+/** Every known solver by id, and a one-entry memo so callers sharing a stamp share one evaluation. */
 object QuestSolverRegistry {
-    private val solvers = ConcurrentHashMap<String, QuestStepSolver>()
+    private val byId = ConcurrentHashMap<String, QuestStepSolver>()
 
-    @Volatile private var lastTickStamp = -1L
-    @Volatile private var lastResult: QuestStepSolver.Result = QuestStepSolver.Result()
-    @Volatile private var lastKey: String? = null
+    private class Memo(val stamp: Long, val slug: String, val stepIndex: Int, val solverId: String, val result: QuestStepSolver.Result)
 
-    fun register(solver: QuestStepSolver) {
-        solvers[solver.id] = solver
-    }
+    private val memoLock = Any()
+    private var memo: Memo? = null
 
-    fun unregister(id: String) {
-        solvers.remove(id)
-    }
+    fun register(solver: QuestStepSolver) = byId.set(solver.id, solver)
 
-    fun get(id: String): QuestStepSolver? = solvers[id]
+    fun unregister(id: String) = byId.remove(id).let { }
 
-    fun all(): List<QuestStepSolver> = solvers.values.toList()
+    fun get(id: String): QuestStepSolver? = byId[id]
 
-    fun ids(): List<String> = solvers.keys.sorted()
+    fun all(): List<QuestStepSolver> = byId.values.toList()
 
-    /**
-     * Returns the solver result for the active step, evaluated at most once per
-     * tick stamp [tickStamp]. Pass a monotonically-increasing stamp (e.g. the
-     * client tick counter or System.currentTimeMillis()/250) so the renderer
-     * and advancer share a single evaluation.
-     */
-    fun evaluateOrCached(
-        quest: Quest,
-        step: QuestStep,
-        stepIndex: Int,
-        tickStamp: Long,
-    ): QuestStepSolver.Result {
-        val solver = step.solverId?.let { solvers[it] } ?: return QuestStepSolver.Result()
-        val key = "${quest.slug}#$stepIndex#${solver.id}"
-        if (tickStamp == lastTickStamp && key == lastKey) return lastResult
-        val r = try {
-            solver.evaluate(quest, step, stepIndex)
-        } catch (t: Throwable) {
-            println("[QuestSolverRegistry] solver '${solver.id}' threw: ${t.message}")
-            t.printStackTrace()
-            QuestStepSolver.Result()
+    fun ids(): List<String> = byId.keys.sorted()
+
+    fun evaluateOrCached(quest: Quest, step: QuestStep, index: Int, stamp: Long): QuestStepSolver.Result {
+        val named = step.solverId ?: return NOTHING
+        val found = byId[named] ?: return NOTHING
+        synchronized(memoLock) {
+            memo?.takeIf { it.stamp == stamp && it.slug == quest.slug && it.stepIndex == index && it.solverId == named }?.let { return it.result }
+            val fresh = runCatching { found.evaluate(quest, step, index) }.getOrElse { failure ->
+                println("[QuestSolver] $named failed: $failure")
+                NOTHING
+            }
+            memo = Memo(stamp, quest.slug, index, named, fresh)
+            return fresh
         }
-        lastTickStamp = tickStamp
-        lastKey = key
-        lastResult = r
-        return r
     }
 
-    /** Convenience: only the overlay actions, no advance-side effects. */
-    fun overlayActionsFor(
-        quest: Quest,
-        step: QuestStep,
-        stepIndex: Int,
-        tickStamp: Long,
-    ): List<QuestAction> = evaluateOrCached(quest, step, stepIndex, tickStamp).overlayActions
+    fun overlayActionsFor(quest: Quest, step: QuestStep, index: Int, stamp: Long): List<QuestAction> =
+        evaluateOrCached(quest, step, index, stamp).overlayActions
 }

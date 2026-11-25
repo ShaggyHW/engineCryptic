@@ -14,7 +14,7 @@ internal object CacheQuests {
     /** By the name the quest journal shows, ignoring case, punctuation and a leading "The". */
     fun completed(name: String): Boolean = named(name)?.let(::completed) == true
 
-    fun sameName(a: String, b: String): Boolean = key(a) == key(b)
+    fun sameName(a: String, b: String): Boolean = nameKey(a) == nameKey(b)
 
     /**
      * The raw value of the quest's own progress var, as the route planner's rows compare it: started at its
@@ -28,6 +28,22 @@ internal object CacheQuests {
     /** [progress] of quest [id]: 0 when it has no progress var, -1 when there is no such quest. */
     fun progress(id: Int): Int = Cache.quest(id)?.let(::progress) ?: -1
 
+    /** Journal status of cache quest [id] from its progress vars; [QuestStatus.UNKNOWN] when it has none. */
+    internal fun status(id: Int): QuestStatus =
+        Cache.quest(id)?.let { status(it, varps::getVar, varps::getVarBit) } ?: QuestStatus.UNKNOWN
+
+    internal fun status(quest: QuestType, varp: (Int) -> Int, varbit: (Int) -> Int): QuestStatus {
+        val readings = quest.varpProgress.orEmpty().map { it to varp(it.varId) } +
+            quest.varbitProgress.orEmpty().map { it to varbit(it.varId) }
+        return when {
+            readings.isEmpty() -> QuestStatus.UNKNOWN
+            readings.all { (stage, value) -> value >= stage.completedValue } -> QuestStatus.COMPLETED
+            else -> if (readings.any { (stage, value) -> value > 0 && value >= stage.startedValue }) QuestStatus.IN_PROGRESS else QuestStatus.NOT_STARTED
+        }
+    }
+
+    internal fun nameKey(name: String): String = name.lowercase().removePrefix("the ").filter { it.isLetterOrDigit() }
+
     private fun progress(quest: QuestType): Int {
         quest.varpProgress?.firstOrNull()?.let { return varps.getVar(it.varId) }
         return quest.varbitProgress?.firstOrNull()?.let { varps.getVarBit(it.varId) } ?: 0
@@ -35,17 +51,11 @@ internal object CacheQuests {
 
     private fun hasProgress(quest: QuestType): Boolean = !quest.varpProgress.isNullOrEmpty() || !quest.varbitProgress.isNullOrEmpty()
 
-    private fun completed(quest: QuestType): Boolean {
-        val progress = quest.varpProgress.orEmpty().map { varps.getVar(it.varId) >= it.completedValue } +
-            quest.varbitProgress.orEmpty().map { varps.getVarBit(it.varId) >= it.completedValue }
-        return progress.isNotEmpty() && progress.all { it }
-    }
+    private fun completed(quest: QuestType): Boolean = status(quest, varps::getVar, varps::getVarBit) == QuestStatus.COMPLETED
 
     private fun named(name: String): QuestType? {
-        val all = byName ?: Cache.quests.mapNotNull { quest -> quest.name?.takeIf { it.isNotBlank() }?.let { key(it) to quest } }.toMap()
+        val all = byName ?: Cache.quests.mapNotNull { quest -> quest.name?.takeIf { it.isNotBlank() }?.let { nameKey(it) to quest } }.toMap()
             .also { if (it.isNotEmpty()) byName = it }
-        return all[key(name)]
+        return all[nameKey(name)]
     }
-
-    private fun key(name: String): String = name.lowercase().removePrefix("the ").filter { it.isLetterOrDigit() }
 }

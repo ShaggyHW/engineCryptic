@@ -3,85 +3,50 @@ package com.projectx.quest.solver
 import com.projectx.quest.data.Quest
 import com.projectx.quest.data.QuestAction
 import com.projectx.quest.data.QuestStep
-import com.projectx.script.api.interfaces
-import com.projectx.script.api.varcs
 
 /**
- * Solver for the junction-box pipe puzzle in *Elemental Workshop II* (step 25 —
- * "connect the pipes by clicking on a pair of pipe holes").
- *
- * Interface [JUNCTION_BOX] has six pipe holes; the solution is three fixed pairs,
- * each connected by clicking both holes:
- *   - top-left ([TL]=24)    + bottom-right ([BR]=23)
- *   - top-middle ([TM]=25)  + top-right ([TR]=20)
- *   - bottom-left ([BL]=21) + bottom-middle ([BM]=22)
- *
- * Per-hole selection state lives in client vars (CS2 scripts 1318/1319 toggle
- * `varclient_162..167`): 1 = that hole is currently selected/lit, 0 = not. A
- * connection is two clicks — select a hole, then click its partner.
- *
- * The solver highlights the next button to press and self-corrects: when a hole is
- * selected it points at that hole's fixed partner (so any mis-selection is recovered
- * by completing or re-clicking it); when nothing is selected it lights the first hole
- * of all three pairs so the player can start any of them.
- *
- * NOTE: the connection/progress varbits (player 13703/13704) proved unreliable on a
- * fresh puzzle (varp 2746 decodes 13704=3 with nothing connected), so this relies on
- * the client-var selection state plus the fixed solution rather than a progress count.
+ * Elemental Workshop II's pipe junction box: three fixed pairs of holes, each joined by clicking both ends.
+ * Never reports solved; the quest's own varbits for the box are unreliable, so the step's conditions decide.
  */
 object ElementalWorkshopIIJunctionBoxSolver : QuestStepSolver {
-    override val id: String = "elemental-workshop-ii.junction-box"
+    override val id get() = "elemental-workshop-ii.junction-box"
 
-    private const val JUNCTION_BOX = 262
+    private const val BOX = "elem_magicpress_pipes"
+    private const val PAIRS = "top-left + bottom-right, top-middle + top-right, bottom-left + bottom-middle"
 
-    private const val TL = 24
-    private const val TM = 25
-    private const val TR = 20
-    private const val BL = 21
-    private const val BM = 22
-    private const val BR = 23
-
-    /** Fixed solution: each hole's partner. */
-    private val PARTNER = mapOf(TL to BR, BR to TL, TM to TR, TR to TM, BL to BM, BM to BL)
-
-    /** First hole of each pair (the holes to offer when nothing is selected). */
-    private val PAIR_FIRSTS = listOf(TL, TM, BL)
-
-    /** Component id → its selection client var (1 = selected/lit). */
-    private val SELECT_VARC = mapOf(TL to 163, TM to 164, TR to 162, BL to 165, BM to 166, BR to 167)
-
-    private val NAME = mapOf(
-        TL to "top-left", TM to "top-middle", TR to "top-right",
-        BL to "bottom-left", BM to "bottom-middle", BR to "bottom-right",
-    )
-
-    override fun evaluate(quest: Quest, step: QuestStep, stepIndex: Int): QuestStepSolver.Result {
-        if (!isOpen()) {
-            return hint("Open the junction box, then connect the pipe pairs: top-left + bottom-right, top-middle + top-right, bottom-left + bottom-middle.")
-        }
-
-        val actions = mutableListOf<QuestAction>(
-            QuestAction.TextHint(
-                "Connect pipe pairs (click both holes): top-left + bottom-right, top-middle + top-right, bottom-left + bottom-middle."
-            )
-        )
-
-        val selected = SELECT_VARC.entries.firstOrNull { safeVarc(it.value) == 1 }?.key
-        if (selected != null) {
-            val partner = PARTNER.getValue(selected)
-            actions += highlight(partner, "Connect: ${NAME[partner]}")
-        } else {
-            for (first in PAIR_FIRSTS) actions += highlight(first, "Start: ${NAME[first]}")
-        }
-        return QuestStepSolver.Result(overlayActions = actions)
+    private class Hole(val label: String, inlet: String) {
+        val component by lazy { Names.component(BOX, inlet) }
+        val selectedVar by lazy { Names.varc(inlet) }
     }
 
-    private fun highlight(componentId: Int, label: String): QuestAction =
-        QuestAction.InterfaceComponentHighlight(JUNCTION_BOX, componentId, label = label)
+    private val topLeft = Hole("top-left", "inletam")
+    private val topMiddle = Hole("top-middle", "inletbm")
+    private val topRight = Hole("top-right", "inletcm")
+    private val bottomLeft = Hole("bottom-left", "inlet1m")
+    private val bottomMiddle = Hole("bottom-middle", "inlet2m")
+    private val bottomRight = Hole("bottom-right", "inlet3m")
 
-    private fun hint(text: String): QuestStepSolver.Result =
-        QuestStepSolver.Result(overlayActions = listOf(QuestAction.TextHint(text)))
+    private val scanOrder = listOf(topLeft, topMiddle, topRight, bottomLeft, bottomMiddle, bottomRight)
+    private val partnerOf = mapOf(
+        topLeft to bottomRight, bottomRight to topLeft,
+        topMiddle to topRight, topRight to topMiddle,
+        bottomLeft to bottomMiddle, bottomMiddle to bottomLeft,
+    )
+    private val pairStarts = listOf(topLeft, topMiddle, bottomLeft)
 
-    private fun isOpen(): Boolean = try { interfaces.isOpen(JUNCTION_BOX) } catch (_: Throwable) { false }
-    private fun safeVarc(id: Int): Int? = try { varcs.getVar(id) } catch (_: Throwable) { null }
+    private val boxInterface by lazy { Names.iface(BOX) }
+
+    override fun evaluate(quest: Quest, step: QuestStep, stepIndex: Int) = advise()
+
+    private fun advise(): QuestStepSolver.Result {
+        if (!SolverWorld.isOpen(boxInterface)) return adviceOnly("Open the junction box, then connect the pipe pairs: $PAIRS.")
+        val held = scanOrder.firstOrNull { SolverWorld.varc(it.selectedVar) == 1 }
+        val marks = if (held != null) {
+            val partner = partnerOf.getValue(held)
+            listOf(buttonMark(boxInterface, partner.component, "Connect: ${partner.label}"))
+        } else {
+            pairStarts.map { buttonMark(boxInterface, it.component, "Start: ${it.label}") }
+        }
+        return QuestStepSolver.Result(listOf<QuestAction>(advice("Connect pipe pairs (click both holes): $PAIRS.")) + marks)
+    }
 }

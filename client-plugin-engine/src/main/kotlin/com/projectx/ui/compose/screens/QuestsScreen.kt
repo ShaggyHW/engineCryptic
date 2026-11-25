@@ -276,7 +276,7 @@ private fun QuestPicker(s: QuestsSnapshot) {
                     key = { it.slug },
                 ) { pick ->
                     text(pick.name)
-                    text(pick.steps.toString())
+                    text(if (pick.steps == 0) "-" else pick.steps.toString())
                     cell { pick.status?.let { StatusPill(it) } }
                     cell { ActionButton("Start", { QuestsModel.select(pick.slug) }, tone = ButtonTone.Primary, height = 28.dp) }
                 }
@@ -296,16 +296,29 @@ private fun StatusPill(status: QuestStatus) = when (status) {
 @Composable
 private fun ActiveQuest(a: ActiveStep) {
     val type = LocalType.current
+    val guideless = a.stepCount == 0
     val done = a.stepIndex >= a.stepCount
     ScreenScroll {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ActionButton("All quests", { QuestsModel.select(null) }, icon = Glyph.ChevronLeft, height = 32.dp)
             Column(Modifier.weight(1f)) {
                 BasicText(a.name, style = type.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                BasicText(if (done) "Complete" else "Step ${a.stepIndex + 1} of ${a.stepCount}" + (a.stage?.let { "  ·  $it" } ?: ""), style = type.data)
+                val progress = when {
+                    guideless -> "No guide yet"
+                    done -> "Complete"
+                    else -> "Step ${a.stepIndex + 1} of ${a.stepCount}" + (a.stage?.let { "  ·  $it" } ?: "")
+                }
+                BasicText(progress, style = type.data)
             }
             ActionButton("Reload", { QuestsModel.reloadKeepingStep(a.slug) }, icon = Glyph.Refresh, height = 32.dp)
             ActionButton("Edit", { QuestsModel.edit(a.slug) }, height = 32.dp)
+        }
+        if (guideless) {
+            a.requirements.forEach { (title, lines) -> Section(title) { Checklist(lines) } }
+            EmptyState("No guide yet", "The game knows this quest, but nobody has written a guide for it. Write one with the quest editor and it replaces this entry.") {
+                ActionButton("Write a guide", { QuestsModel.edit(a.slug) }, tone = ButtonTone.Primary)
+            }
+            return@ScreenScroll
         }
         StepProgress(a.stepIndex, a.stepCount)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

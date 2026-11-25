@@ -1,6 +1,5 @@
 package com.projectx.quest.runtime
 
-import world.gregs.voidps.type.Tile
 import com.projectx.game.bootstrap.Bootstrap
 import com.projectx.game.nxt.entity.Entity
 import com.projectx.game.nxt.entity.location.SceneObject
@@ -11,231 +10,190 @@ import com.projectx.quest.data.WorldLocation
 import com.projectx.script.api.getAllObjectsWithinRange
 import com.projectx.script.api.groundItems
 import com.projectx.script.api.localPlayer
+import world.gregs.voidps.type.Tile
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
- * Resolution of a quest target to live in-world entities.
- *
- * The match is purely typeId equality against either [Spec.typeId] (the
- * primary id from `Models.npcs[...]`/`Models.objects[...]`) or any of
- * [Spec.candidateTypeIds] (offline-computed list of NPC/Object types whose
- * cache `modelIds` overlap a raw `Model.new(N)` referenced in the lua source).
- *
- * No runtime cache lookups — every per-tick call here is integer equality on
- * already-materialized entities. The previous design (calling `NPCType.get` /
- * `ObjectType.get` per scene entity to scan its `modelIds`) consistently
- * crashed entering instances: the SQLite-backed cache plus walking entities
- * mid-scene-mutation wrote to recycled memory and the game's
- * `jag::ref_counter_base::DecRef` blew up on the corrupted refcount.
- *
- * Additional fixed-cost filters:
- *   - [Spec.atLocation] — only entities whose tile matches (optionally
- *     translated by the captured instance origin when [Spec.instance]).
- *   - [Spec.animated] — only entities currently playing a non-idle animation.
+ * Resolves guide targets to live scene entities by type id alone. NPC and loc types are never looked up during a
+ * scan: resolving them while the scene is rebuilt on instance entry corrupted client memory.
  */
 object QuestTargetMatcher {
-    data class Spec(
-        val typeId: Int = -1,
-        val candidateNpcTypeIds: List<Int> = emptyList(),
-        val candidateObjectTypeIds: List<Int> = emptyList(),
-        val displayName: String = "",
-        val kind: String = "",
-        val atLocation: WorldLocation? = null,
-        val instance: Boolean = false,
-        val animated: Boolean = false,
+    private const val LOC_RADIUS = 60
+    private const val NO_ANIMATION = 0xFFFF
+
+    /** What to look for: the ids to match, which sort of entity, and optionally the exact tile. */
+    data class Spec(val typeId: Int = -1, val candidateNpcTypeIds: List<Int> = listOf(), val candidateObjectTypeIds: List<Int> = listOf(),
+                    val displayName: String = "", val kind: String = "", val atLocation: WorldLocation? = null,
+                    val instance: Boolean = false, val animated: Boolean = false)
+
+    /** [name] is filled only when the match was made by name. */
+    data class GroundItemMatch(
+        val id: Int,
+        val name: String,
+        val tile: Tile,
     )
 
-    fun specFor(a: QuestAction.ModelHighlight): Spec = Spec(
-        typeId = a.typeId,
-        candidateNpcTypeIds = a.candidateNpcTypeIds,
-        candidateObjectTypeIds = a.candidateObjectTypeIds,
-        displayName = a.displayName,
-        kind = a.kind,
-        atLocation = a.atLocation,
-        instance = a.instance,
+    fun specFor(action: QuestAction.ModelHighlight) = Spec(
+        action.typeId, action.candidateNpcTypeIds, action.candidateObjectTypeIds, action.displayName, action.kind,
+        action.atLocation, action.instance, animated = false,
     )
 
-    fun specFor(c: QuestCondition.ModelVisible): Spec = Spec(
-        typeId = c.typeId,
-        candidateNpcTypeIds = c.candidateNpcTypeIds,
-        candidateObjectTypeIds = c.candidateObjectTypeIds,
-        displayName = c.displayName,
-        kind = c.kind,
-        atLocation = c.atLocation,
-        instance = c.instance,
-        animated = c.animated,
+    fun specFor(condition: QuestCondition.ModelVisible) = Spec(
+        condition.typeId, condition.candidateNpcTypeIds, condition.candidateObjectTypeIds, condition.displayName, condition.kind,
+        condition.atLocation, condition.instance, condition.animated,
     )
 
-    fun specFor(c: QuestCondition.ModelNotVisible): Spec = Spec(
-        typeId = c.typeId,
-        candidateNpcTypeIds = c.candidateNpcTypeIds,
-        candidateObjectTypeIds = c.candidateObjectTypeIds,
-        displayName = c.displayName,
-        kind = c.kind,
-        atLocation = c.atLocation,
-        instance = c.instance,
+    fun specFor(condition: QuestCondition.ModelNotVisible) = Spec(
+        condition.typeId, condition.candidateNpcTypeIds, condition.candidateObjectTypeIds, condition.displayName, condition.kind,
+        condition.atLocation, condition.instance, animated = false,
     )
 
-    fun specFor(c: QuestCondition.NpcNearTile): Spec = Spec(
-        typeId = c.typeId,
-        candidateNpcTypeIds = c.candidateNpcTypeIds,
-        displayName = c.displayName,
+    fun specFor(condition: QuestCondition.NpcNearTile) = Spec(
+        typeId = condition.typeId,
+        candidateNpcTypeIds = condition.candidateNpcTypeIds,
+        displayName = condition.displayName,
         kind = "npc",
     )
 
-    /** True if any NPC matching [spec] is within [distance] tiles (Chebyshev) of the tile. */
-    fun anyNpcNearTile(spec: Spec, tileX: Int, tileY: Int, plane: Int, distance: Int): Boolean {
-        val wanted = wantedNpcTypeIds(spec)
-        if (wanted.isEmpty()) return false
-        val npcManager = Bootstrap.client.npcManager
-        for (hashCode in npcManager.indices) {
-            if (hashCode <= 0) continue
-            val ptr = npcManager[hashCode] ?: continue
-            if (ptr.address() == 0L) continue
-            val npc = NPC(ptr)
-            if (!npc.exists()) continue
-            val entityTypeId = runCatching { if (npc.typeId == -1) npc.id else npc.typeId }.getOrNull() ?: continue
-            if (entityTypeId !in wanted) continue
-            val t = runCatching { npc.tile }.getOrNull() ?: continue
-            if (t.plane != plane) continue
-            val dx = abs(t.x - tileX)
-            val dy = abs(t.y - tileY)
-            if (maxOf(dx, dy) <= distance) return true
-        }
-        return false
+    fun findFirst(action: QuestAction.ModelHighlight): Entity? = specFor(action).let(::findFirst)
+
+    fun findAll(action: QuestAction.ModelHighlight): List<Entity> = specFor(action).let(::findAll)
+
+    fun findGroundItems(action: QuestAction.ModelHighlight): List<GroundItemMatch> = specFor(action).let(::findGroundItems)
+
+    /** For kind `model` a matching NPC always wins over a loc. */
+    fun findFirst(spec: Spec): Entity? = findAll(spec).let { if (it.isEmpty()) null else it[0] }
+
+    fun findAll(spec: Spec): List<Entity> = when (spec.kind) {
+        "grounditem" -> listOf()
+        "object" -> locs(spec)
+        "npc" -> npcs(spec)
+        else -> npcs(spec) + locs(spec)
     }
 
-    fun findFirst(action: QuestAction.ModelHighlight): Entity? = findFirst(specFor(action))
-    fun findAll(action: QuestAction.ModelHighlight): List<Entity> = findAll(specFor(action))
+    fun isPresent(spec: Spec): Boolean = countAtLeast(spec, 1)
 
-    fun findFirst(spec: Spec): Entity? = findAll(spec).firstOrNull()
-
-    fun findAll(spec: Spec): List<Entity> {
-        if (spec.kind == "grounditem") return emptyList()
-        val npcs = if (spec.kind == "object") emptyList() else collectNpcs(spec)
-        val objs = if (spec.kind == "npc") emptyList() else collectObjects(spec)
-        return (npcs + objs.map { it as Entity })
+    fun countAtLeast(spec: Spec, n: Int): Boolean {
+        val found = if (spec.kind == "grounditem") findGroundItems(spec).size else findAll(spec).size
+        return found >= n
     }
 
-    data class GroundItemMatch(val id: Int, val name: String, val tile: Tile)
+    fun findGroundItems(spec: Spec): List<GroundItemMatch> = if (spec.kind == "grounditem") scanGroundItems(spec) else listOf()
 
-    fun findGroundItems(action: QuestAction.ModelHighlight): List<GroundItemMatch> = findGroundItems(specFor(action))
-
-    fun findGroundItems(spec: Spec): List<GroundItemMatch> {
-        if (spec.kind != "grounditem") return emptyList()
-        if (spec.typeId < 0 && spec.displayName.isBlank()) return emptyList()
-        val pTile = runCatching { localPlayer.tile }.getOrNull() ?: return emptyList()
-        val targetTile = absoluteTargetTile(spec)
-        val wantName = spec.displayName.trim()
-        val matches = mutableListOf<Pair<GroundItemMatch, Int>>()
-        for (gi in runCatching { groundItems }.getOrNull() ?: return emptyList()) {
-            val t = runCatching { gi.tile }.getOrNull() ?: continue
-            if (t.plane != pTile.plane) continue
-            // typeId match is a pure memory read (no cache); name match resolves the cache item
-            // type only when the spec has no id (the picker always captures an id).
-            val name: String
-            val matched: Boolean
-            if (spec.typeId >= 0) {
-                matched = gi.id == spec.typeId
-                name = ""
-            } else {
-                val n = runCatching { gi.name }.getOrNull() ?: continue
-                matched = n.contains(wantName, ignoreCase = true)
-                name = n
+    private fun scanGroundItems(spec: Spec): List<GroundItemMatch> {
+        val wanted = spec.displayName.trim()
+        if (spec.typeId < 0 && wanted.isEmpty()) return listOf()
+        val me = playerTile() ?: return listOf()
+        val spot = anchorTile(spec)
+        val matches = mutableListOf<GroundItemMatch>()
+        for (item in groundItems) {
+            try {
+                if (item.tile.level != me.level) continue
+                if (spot != null && (item.tile.x != spot.first || item.tile.y != spot.second)) continue
+                when {
+                    spec.typeId >= 0 -> if (item.id == spec.typeId) matches += GroundItemMatch(item.id, "", item.tile)
+                    else -> item.name.takeIf { it.contains(wanted, ignoreCase = true) }?.let { matches += GroundItemMatch(item.id, it, item.tile) }
+                }
+            } catch (_: Throwable) {
             }
-            if (!matched) continue
-            if (targetTile != null && (t.x != targetTile.first || t.y != targetTile.second)) continue
-            val dx = t.x - pTile.x
-            val dy = t.y - pTile.y
-            matches += GroundItemMatch(gi.id, name, t) to (dx * dx + dy * dy)
         }
-        return matches.sortedBy { it.second }.map { it.first }
+        return matches.sortedBy { squaredDistance(me, it.tile.x, it.tile.y) }
     }
 
-    fun countAtLeast(spec: Spec, minCount: Int): Boolean =
-        if (spec.kind == "grounditem") findGroundItems(spec).size >= minCount
-        else findAll(spec).size >= minCount
-
-    fun isPresent(spec: Spec): Boolean =
-        if (spec.kind == "grounditem") findGroundItems(spec).isNotEmpty()
-        else findAll(spec).isNotEmpty()
-
-    private fun collectNpcs(spec: Spec): List<NPC> {
-        val wanted = wantedNpcTypeIds(spec)
-        if (wanted.isEmpty()) return emptyList()
-        val pTile = runCatching { localPlayer.tile }.getOrNull() ?: return emptyList()
-        val targetTile = absoluteTargetTile(spec)
-        val matches = mutableListOf<Pair<NPC, Int>>()
-
-        val npcManager = Bootstrap.client.npcManager
-        for (hashCode in npcManager.indices) {
-            if (hashCode <= 0) continue
-            val ptr = npcManager[hashCode] ?: continue
-            if (ptr.address() == 0L) continue
-            val npc = NPC(ptr)
-            if (!npc.exists()) continue
-            val entityTypeId = runCatching { if (npc.typeId == -1) npc.id else npc.typeId }.getOrNull() ?: continue
-            if (entityTypeId !in wanted) continue
-            val t = runCatching { npc.tile }.getOrNull() ?: continue
-            if (t.plane != pTile.plane) continue
-            if (targetTile != null && (t.x != targetTile.first || t.y != targetTile.second)) continue
-            if (spec.animated && !isAnimated(npc)) continue
-            val dx = t.x - pTile.x
-            val dy = t.y - pTile.y
-            matches += npc to (dx * dx + dy * dy)
+    fun anyNpcNearTile(spec: Spec, x: Int, y: Int, plane: Int, distance: Int): Boolean {
+        val wanted = npcIds(spec).ifEmpty { return false }
+        return liveNpcs().any { npc ->
+            try {
+                val tile = npc.tile
+                tile.level == plane && npcType(npc) in wanted && max(abs(tile.x - x), abs(tile.y - y)) <= distance
+            } catch (_: Throwable) {
+                false
+            }
         }
-        return matches.sortedBy { it.second }.map { it.first }
     }
 
-    private fun collectObjects(spec: Spec): List<SceneObject> {
-        val wanted = wantedObjectTypeIds(spec)
-        if (wanted.isEmpty()) return emptyList()
-        val pTile = runCatching { localPlayer.tile }.getOrNull() ?: return emptyList()
-        val targetTile = absoluteTargetTile(spec)
-        val matches = mutableListOf<Pair<SceneObject, Int>>()
+    private fun npcIds(spec: Spec): Set<Int> = buildSet {
+        if (spec.typeId >= 0) add(spec.typeId)
+        addAll(spec.candidateNpcTypeIds)
+    }
 
-        for (obj in getAllObjectsWithinRange(60)) {
-            val entityTypeId = runCatching { obj.visibleTypeId }.getOrNull() ?: continue
-            if (entityTypeId !in wanted) continue
-            val t = runCatching { obj.tile }.getOrNull() ?: continue
-            if (t.plane != pTile.plane) continue
-            if (targetTile != null && (t.x != targetTile.first || t.y != targetTile.second)) continue
-            val dx = t.x - pTile.x
-            val dy = t.y - pTile.y
-            matches += obj to (dx * dx + dy * dy)
+    private fun locIds(spec: Spec): Set<Int> = buildSet {
+        if (spec.typeId >= 0) add(spec.typeId)
+        addAll(spec.candidateObjectTypeIds)
+    }
+
+    private fun npcs(spec: Spec): List<Entity> {
+        val wanted = npcIds(spec)
+        if (wanted.isEmpty()) return listOf()
+        val me = playerTile() ?: return listOf()
+        val spot = anchorTile(spec)
+        val hits = mutableListOf<Pair<NPC, Long>>()
+        for (npc in liveNpcs()) {
+            try {
+                if (npcType(npc) !in wanted) continue
+                val tile = npc.tile
+                if (tile.level != me.level) continue
+                if (spot != null && (tile.x != spot.first || tile.y != spot.second)) continue
+                if (spec.animated && !npc.isPlayingAnimation()) continue
+                hits += npc to squaredDistance(me, tile.x, tile.y)
+            } catch (_: Throwable) {
+            }
         }
-        return matches.sortedBy { it.second }.map { it.first }
+        return hits.sortedBy { it.second }.map { it.first }
     }
 
-    private fun wantedNpcTypeIds(spec: Spec): Set<Int> {
-        if (spec.typeId < 0 && spec.candidateNpcTypeIds.isEmpty()) return emptySet()
-        val out = HashSet<Int>(spec.candidateNpcTypeIds.size + 1)
-        if (spec.typeId >= 0) out += spec.typeId
-        out += spec.candidateNpcTypeIds
-        return out
-    }
-
-    private fun wantedObjectTypeIds(spec: Spec): Set<Int> {
-        if (spec.typeId < 0 && spec.candidateObjectTypeIds.isEmpty()) return emptySet()
-        val out = HashSet<Int>(spec.candidateObjectTypeIds.size + 1)
-        if (spec.typeId >= 0) out += spec.typeId
-        out += spec.candidateObjectTypeIds
-        return out
-    }
-
-    private fun absoluteTargetTile(spec: Spec): Pair<Int, Int>? {
-        val loc = spec.atLocation ?: return null
-        val originX: Int; val originY: Int
-        if (spec.instance) {
-            val o = QuestInstanceTracker.origin ?: return null
-            originX = o.x; originY = o.y
-        } else {
-            originX = 0; originY = 0
+    private fun locs(spec: Spec): List<Entity> {
+        val wanted = locIds(spec)
+        if (wanted.isEmpty()) return listOf()
+        val me = playerTile() ?: return listOf()
+        val spot = anchorTile(spec)
+        val hits = mutableListOf<Pair<Entity, Long>>()
+        for (loc: SceneObject in getAllObjectsWithinRange(LOC_RADIUS)) {
+            try {
+                val entity = loc as? Entity ?: continue
+                if (loc.visibleTypeId !in wanted) continue
+                val tile = loc.tile
+                if (tile.level != me.level) continue
+                if (spot != null && (tile.x != spot.first || tile.y != spot.second)) continue
+                hits += entity to squaredDistance(me, tile.x, tile.y)
+            } catch (_: Throwable) {
+            }
         }
-        return (loc.x.toInt() + originX) to (loc.y.toInt() + originY)
+        return hits.sortedBy { it.second }.map { it.first }
     }
 
-    private fun isAnimated(npc: NPC): Boolean = runCatching {
-        npc.animationId.let { it >= 0 && it != 0xFFFF }
-    }.getOrDefault(false)
+    private fun liveNpcs(): List<NPC> = with(Bootstrap.client.npcManager) {
+        indices.filter { it > 0 }.mapNotNull { key ->
+            try {
+                get(key)?.takeIf { it.address() != 0L }?.let(::NPC)?.takeIf { it.exists() }
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
+
+    private fun npcType(npc: NPC): Int = npc.typeId.let { if (it == -1) npc.id else it }
+
+    private fun NPC.isPlayingAnimation(): Boolean = animationId.let { it >= 0 && it != NO_ANIMATION }
+
+    /** The exact tile a located target must stand on; with no instance origin the location is ignored. */
+    private fun anchorTile(spec: Spec): Pair<Int, Int>? {
+        val at = spec.atLocation ?: return null
+        if (!spec.instance) return at.x.toInt() to at.y.toInt()
+        val base = QuestInstanceTracker.origin ?: return null
+        return base.x + at.x.toInt() to base.y + at.y.toInt()
+    }
+
+    private fun playerTile(): Tile? = try {
+        localPlayer.tile
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun squaredDistance(from: Tile, x: Int, y: Int): Long {
+        val east = (x - from.x).toLong()
+        val north = (y - from.y).toLong()
+        return east * east + north * north
+    }
 }

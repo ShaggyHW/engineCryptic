@@ -3,118 +3,88 @@ package com.projectx.quest.solver
 import com.projectx.quest.data.Quest
 import com.projectx.quest.data.QuestAction
 import com.projectx.quest.data.QuestStep
-import com.projectx.quest.data.WorldLocation
 import com.projectx.quest.runtime.QuestInstanceTracker
-import com.projectx.script.api.getAllObjectsWithinRange
-import com.projectx.script.api.localPlayer
 import world.gregs.voidps.type.Tile
-import kotlin.math.abs
-import kotlin.math.max
 
 /**
- * Lunar Diplomacy "Dream puff" chasm crossing (Ethereal Guide). The player jumps across a chasm on
- * `quest_lunar_dream_puff_platform_multi` puffs; the correct route is fixed but hidden (every puff
- * shares one loc id, so it can't be read from the cache), and a wrong jump drops the player back to
- * the start. It has to be learned by trial and remembered.
- *
- * The solver learns the route from the player's own movement and highlights it so a fall is only ever
- * paid for once. A puff is confirmed safe when the player advances off it toward the far side (it held
- * them) or settles on it; it is marked unsafe and un-highlighted if the player falls back to the start
- * from it. Progress is measured as distance from the captured start tile, so the logic is geometry-
- * agnostic. Highlight-only; advancement is left to the step's existing dialogue postcondition.
+ * Lunar Diplomacy's dream-puff chasm. Every puff is the same loc, so the safe route is learned from the player's
+ * own jumps: a puff that led further from the start is safe, one that dropped them back is not.
  */
 object LunarDiplomacyDreamPuffSolver : QuestStepSolver {
-    override val id: String = "lunar-diplomacy.dream-puff"
+    override val id get() = "lunar-diplomacy.dream-puff"
 
-    private const val PUFF_LOC = 16638
-    private const val SCAN_RANGE = 12
-    private const val STABLE_TICKS = 3
+    private const val PUFF_REACH = 12
+    private const val SETTLED_TICKS = 3
 
-    private val safe = LinkedHashSet<Tile>()
-    private val unsafe = HashSet<Tile>()
-    private var startTile: Tile? = null
-    private var curPuff: Tile? = null
-    private var curTicks = 0
-    private var lastOrigin: QuestInstanceTracker.Origin? = null
+    private val puffLoc by lazy { Names.loc("quest_lunar_dream_puff_platform_multi") }
 
-    override fun evaluate(quest: Quest, step: QuestStep, stepIndex: Int): QuestStepSolver.Result {
-        resetOnNewInstance()
+    private class Standing(val puff: Tile, val progress: Int, var ticks: Int = 1)
 
-        val player = runCatching { localPlayer.tile }.getOrNull()
-            ?: return hint("Move to the chasm to start tracking the dream-puff route.")
-        val standing = puffUnder(player)
+    private var watching = false
+    private var instanceSeen: QuestInstanceTracker.Origin? = null
+    private var start: Tile? = null
+    private var standing: Standing? = null
+    private val safe: MutableSet<Tile> = LinkedHashSet()
+    private val unsafe: MutableSet<Tile> = HashSet()
 
-        if (standing != null) onPuff(standing) else offPuffs(player)
+    override fun evaluate(quest: Quest, step: QuestStep, stepIndex: Int) = advise()
 
-        val highlights = safe.map(::highlight)
-        val note = when {
-            safe.isEmpty() -> "Jump the puffs to learn the safe route - it will highlight as you go."
-            else -> "Safe puffs learned: ${safe.size} (highlighted). Retrace them after a fall."
+    private fun advise(): QuestStepSolver.Result {
+        val instance = QuestInstanceTracker.origin
+        if (!watching || instance != instanceSeen) {
+            watching = true
+            instanceSeen = instance
+            start = null
+            standing = null
+            safe.clear()
+            unsafe.clear()
         }
-        return QuestStepSolver.Result(overlayActions = listOf(QuestAction.TextHint(note)) + highlights)
-    }
-
-    private fun onPuff(standing: Tile) {
-        if (standing == curPuff) {
-            curTicks++
+        val here = SolverWorld.playerTile() ?: return adviceOnly("Move to the chasm to start tracking the dream-puff route.")
+        val puff = puffUnder(here)
+        if (puff != null) stepOnto(puff, progressAt(here)) else stepOff(here)
+        val summary = if (safe.isEmpty()) {
+            "Jump the puffs to learn the safe route - it will highlight as you go."
         } else {
-            curPuff?.let { if (progress(standing) > progress(it)) confirmSafe(it) }
-            curPuff = standing
-            curTicks = 1
+            "Safe puffs learned: ${safe.size} (highlighted). Retrace them after a fall."
         }
-        if (curTicks >= STABLE_TICKS) confirmSafe(standing)
+        return QuestStepSolver.Result(listOf<QuestAction>(advice(summary)) + safe.map { locMark(puffLoc, "Safe puff", it) })
     }
 
-    private fun offPuffs(player: Tile) {
-        if (startTile == null) startTile = player
-        val left = curPuff
+    private fun puffUnder(here: Tile): Tile? = SolverWorld.locs(PUFF_REACH).firstOrNull { loc ->
+        (loc.type == puffLoc || loc.visible == puffLoc) && loc.tile.plane == here.plane && here in loc.footprint()
+    }?.tile
+
+    private fun progressAt(here: Tile): Int = start?.takeIf { it.plane == here.plane }?.let { chebyshev(it, here) } ?: 0
+
+    private fun stepOnto(puff: Tile, progress: Int) {
+        val previous = standing
+        if (previous != null && previous.puff == puff) {
+            previous.ticks++
+        } else {
+            if (previous != null && progress > previous.progress) confirm(previous.puff, safeToJump = true)
+            standing = Standing(puff, progress)
+        }
+        if ((standing?.ticks ?: 0) >= SETTLED_TICKS) confirm(puff, safeToJump = true)
+    }
+
+    private fun stepOff(here: Tile) {
+        if (start == null) start = here
+        val left = standing
         if (left != null) {
-            if (progress(player) > progress(left)) confirmSafe(left) else confirmUnsafe(left)
-            curPuff = null
-            curTicks = 0
-        } else if (progress(player) == 0) {
-            startTile = player
+            confirm(left.puff, safeToJump = progressAt(here) > left.progress)
+            standing = null
+        } else if (progressAt(here) == 0) {
+            start = here
         }
     }
 
-    private fun confirmSafe(tile: Tile) {
-        unsafe.remove(tile)
-        safe.add(tile)
-    }
-
-    private fun confirmUnsafe(tile: Tile) {
-        safe.remove(tile)
-        unsafe.add(tile)
-    }
-
-    /** Distance from the captured start tile; higher = further across the chasm. */
-    private fun progress(tile: Tile): Int {
-        val s = startTile ?: return 0
-        if (tile.plane != s.plane) return 0
-        return max(abs(tile.x - s.x), abs(tile.y - s.y))
-    }
-
-    private fun puffUnder(player: Tile): Tile? =
-        runCatching { getAllObjectsWithinRange(SCAN_RANGE) }.getOrNull().orEmpty()
-            .firstOrNull { it.id == PUFF_LOC && it.tile.plane == player.plane && player in it.occupiedTiles() }
-            ?.tile
-
-    private fun resetOnNewInstance() {
-        val origin = runCatching { QuestInstanceTracker.origin }.getOrNull()
-        if (origin != lastOrigin) {
-            safe.clear(); unsafe.clear()
-            startTile = null; curPuff = null; curTicks = 0
-            lastOrigin = origin
+    private fun confirm(puff: Tile, safeToJump: Boolean) {
+        if (safeToJump) {
+            unsafe.remove(puff)
+            safe.add(puff)
+        } else {
+            safe.remove(puff)
+            unsafe.add(puff)
         }
     }
-
-    private fun highlight(tile: Tile) = QuestAction.ModelHighlight(
-        kind = "object",
-        typeId = PUFF_LOC,
-        modelIds = emptyList(),
-        displayName = "Safe puff",
-        atLocation = WorldLocation(tile.x.toDouble(), 0.0, tile.y.toDouble()),
-    )
-
-    private fun hint(text: String) = QuestStepSolver.Result(overlayActions = listOf(QuestAction.TextHint(text)))
 }
