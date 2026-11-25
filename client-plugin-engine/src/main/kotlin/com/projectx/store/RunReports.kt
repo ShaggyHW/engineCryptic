@@ -107,6 +107,9 @@ internal object RunReports {
         worker.execute { runCatching { sender.report(body) } }
     }
 
+    /** The internal name of the store script that has run longest of those running now, or null. */
+    fun storeScript(): String? = runs.values.filter { it.store }.minByOrNull { it.startedAt }?.internalName
+
     fun markStop(scriptClass: Class<*>, end: RunEnd) {
         marks[scriptClass.name] = Mark(end, System.currentTimeMillis())
     }

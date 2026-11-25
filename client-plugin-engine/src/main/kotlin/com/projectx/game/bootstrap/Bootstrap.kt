@@ -19,6 +19,7 @@ import com.projectx.markers.TileMarkerStore
 import com.projectx.mcp.McpServer
 import com.projectx.store.Entitlements
 import com.projectx.store.Instances
+import com.projectx.store.RareDrops
 import com.projectx.store.RunReports
 import com.projectx.quest.data.QuestLibrary
 import com.projectx.quest.solver.registerExampleSolvers
@@ -73,6 +74,7 @@ object Bootstrap {
             Entitlements.start()
             Instances.start()
             RunReports.start()
+            RareDrops.start()
             ScriptExecutor.loadScripts()
             println("[ok] loadScripts() completed. Found: ${ScriptExecutor.scripts.size} scripts")
 
@@ -143,6 +145,7 @@ object Bootstrap {
         runCatching { CollisionMap.stop() }
         runCatching { OverlayHost.dispose() }
         runCatching { RunReports.close() }
+        runCatching { RareDrops.close() }
         runCatching { Entitlements.stop() }
         runCatching { ScriptExecutor.stopAll() }
         runCatching { ScriptExecutor.stopInternalTasks() }

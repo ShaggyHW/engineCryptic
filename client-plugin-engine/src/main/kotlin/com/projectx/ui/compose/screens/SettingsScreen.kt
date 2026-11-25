@@ -15,6 +15,7 @@ import com.projectx.game.net.packetlog.PacketUploadRunner
 import com.projectx.mcp.McpServer
 import com.projectx.profiling.JfrManager
 import com.projectx.ui.LiveDetailsPreference
+import com.projectx.ui.RareDropsPreference
 import com.projectx.ui.UIState
 import com.projectx.ui.compose.ComposeOverlay
 import com.projectx.ui.compose.Feed
@@ -194,6 +195,11 @@ fun SettingsScreen() {
                 LiveDetailsPreference.enabled,
                 "Logged in or not, total level, HP and prayer, and the scripts running with their experience. Never your in-game name or location.",
             ) { LiveDetailsPreference.save(it) }
+            ToggleRow(
+                "Share rare drops",
+                RareDropsPreference.enabled,
+                "Rare drops, pets and chest uniques from store scripts appear in the website's drop feed and its Discord, with nobody's name on them.",
+            ) { RareDropsPreference.save(it) }
         }
         Section("Discord notifications") {
             ToggleRow("Enabled", UIState.discordEnabled)
