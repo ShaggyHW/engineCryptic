@@ -30,7 +30,7 @@ class HitmarksAndHeadbars(raw: MemorySegment) {
                 .toList()
         }
     val hits
-        get() = ptr.getOrNull?.let { HitArray(it.deref(OHitmarksAndHeadbars.HIT_VECTOR, VECTOR_HEADER), 8).toList() }
+        get() = ptr.getOrNull?.let { HitArray(it.deref(OHitmarksAndHeadbars.HIT_VECTOR, HIT_SLOTS * OHit.STRIDE), HIT_SLOTS).toList() }
 }
 
 class HitArray(val ptr: MemorySegment, val size: Int) : Iterable<Hit> {
@@ -111,5 +111,5 @@ class Headbar(raw: MemorySegment) {
         get() = cyclesLeft * 20L
 }
 
-/** begin, end and capacity of an eastl vector. */
-private const val VECTOR_HEADER = 0x20L
+/** The hit pointer leads to a fixed run of this many inline hit slots, not to a vector header. */
+private const val HIT_SLOTS = 8
