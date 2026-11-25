@@ -99,12 +99,7 @@ INTERNAL_TYPES = {
 # Types that were Kotlin `internal` in the previous release and are public now. Their old members compiled to
 # public bytecode no script could reach, so they are compared as new rather than reported as removed. Clear
 # the set once the release that made them public has gone out.
-NEWLY_PUBLIC = {
-    "com.projectx.pathfinder.WalkField",
-    "com.projectx.pathfinder.WalkMap",
-    "com.projectx.traversal.MasterFarmerHat",
-    "com.projectx.traversal.local.LocalNav",
-}
+NEWLY_PUBLIC: set[str] = set()
 
 # Members that are an implementation detail of how Kotlin and the Compose compiler build a class, not
 # something anyone calls.
