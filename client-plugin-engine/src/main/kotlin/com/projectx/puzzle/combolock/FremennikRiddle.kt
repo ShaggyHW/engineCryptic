@@ -1,18 +1,10 @@
 package com.projectx.puzzle.combolock
 
-/**
- * Solves Peer the Seer's door riddle in The Fremennik Trials. The riddle is a six-line poem whose
- * first sentence — "My first is in <word>, but not in ..." — alone fixes the 4-letter answer word
- * entered on the [CombinationLockInterface]. Only the word right after "my first is in" matters; the
- * "but not in ..." clause is a decoy and is ignored.
- *
- * Pure and engine-independent so it can be unit-tested without the live cache.
- */
 object FremennikRiddle {
-
     const val MARKER = "my first is in"
 
-    private val ANSWER_BY_KEYWORD = linkedMapOf(
+    private const val ARTICLE = "the "
+    private val KEYWORD_ANSWERS = listOf(
         "mage" to "MIND",
         "tar" to "TREE",
         "well" to "LIFE",
@@ -21,24 +13,28 @@ object FremennikRiddle {
         "wizard" to "WIND",
     )
 
-    /** The answer word for the riddle contained in [text], or null if none of the six lines is present. */
     fun answerFrom(text: String): String? {
-        val lower = text.lowercase()
-        val at = lower.indexOf(MARKER)
-        if (at < 0) return null
-        var rest = lower.substring(at + MARKER.length).trimStart()
-        if (rest.startsWith("the ")) rest = rest.substring(4).trimStart()
-        val keyword = rest.takeWhile(Char::isLetter)
-        return ANSWER_BY_KEYWORD[keyword]
+        val spoken = text.lowercase()
+        val markerAt = spoken.indexOf(MARKER)
+        if (markerAt < 0) return null
+        var cursor = skipWhitespace(spoken, markerAt + MARKER.length)
+        if (spoken.startsWith(ARTICLE, cursor)) cursor = skipWhitespace(spoken, cursor + ARTICLE.length)
+        var end = cursor
+        while (end < spoken.length && spoken[end].isLetter()) end++
+        val keyword = spoken.substring(cursor, end)
+        return KEYWORD_ANSWERS.firstOrNull { it.first == keyword }?.second
     }
 
-    /**
-     * Answer for channels that only expose a substring test (e.g. the recent-chat ring buffer): tries
-     * each "my first is in <keyword>" prefix — safe because the decoy "but not in ..." clause never
-     * begins with the marker.
-     */
-    fun answerMatching(contains: (String) -> Boolean): String? =
-        ANSWER_BY_KEYWORD.entries.firstOrNull { (keyword, _) ->
-            contains("$MARKER $keyword") || contains("$MARKER the $keyword")
-        }?.value
+    fun answerMatching(contains: (String) -> Boolean): String? {
+        for ((keyword, answer) in KEYWORD_ANSWERS) {
+            if (contains("$MARKER $keyword") || contains("$MARKER $ARTICLE$keyword")) return answer
+        }
+        return null
+    }
+
+    private fun skipWhitespace(text: String, from: Int): Int {
+        var at = from
+        while (at < text.length && text[at].isWhitespace()) at++
+        return at
+    }
 }

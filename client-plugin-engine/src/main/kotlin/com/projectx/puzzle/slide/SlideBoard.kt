@@ -1,51 +1,51 @@
 package com.projectx.puzzle.slide
 
-/**
- * A sliding-tile puzzle position. [tiles] holds the piece id at each slot in row-major order
- * (`slot = row * cols + col`); [blankId] is the piece id that represents the hole.
- *
- * Engine-independent and immutable — every transformation returns a new board.
- */
-class SlideBoard(
-    val rows: Int,
-    val cols: Int,
-    val tiles: IntArray,
-    val blankId: Int,
-) {
+class SlideBoard(val rows: Int, val cols: Int, val tiles: IntArray, val blankId: Int) {
+
     init {
-        require(rows > 0 && cols > 0) { "rows/cols must be positive" }
-        require(tiles.size == rows * cols) { "tiles size ${tiles.size} != ${rows * cols}" }
+        require(rows > 0 && cols > 0) { "a slide board needs positive dimensions, got ${rows}x$cols" }
+        require(tiles.size == rows * cols) { "a ${rows}x$cols board holds ${rows * cols} pieces, got ${tiles.size}" }
     }
 
-    val size: Int get() = tiles.size
+    val size: Int get() = rows * cols
 
-    fun rowOf(slot: Int) = slot / cols
-    fun colOf(slot: Int) = slot % cols
-    fun slotOf(row: Int, col: Int) = row * cols + col
+    fun rowOf(slot: Int): Int = slot / cols
 
-    fun blankSlot(): Int = tiles.indexOf(blankId).also {
-        require(it >= 0) { "blank piece $blankId not present on board" }
+    fun colOf(slot: Int): Int = slot % cols
+
+    fun slotOf(row: Int, col: Int): Int = row * cols + col
+
+    fun blankSlot(): Int {
+        val slot = tiles.indexOf(blankId)
+        require(slot >= 0) { "piece $blankId is not on the board" }
+        return slot
     }
 
-    fun isSolved(goal: IntArray): Boolean = tiles.contentEquals(goal)
+    fun isSolved(goal: IntArray): Boolean = goal.contentEquals(tiles)
 
-    /** Apply a single move and return the resulting board without mutating this one. */
     fun applied(move: SlideMove): SlideBoard {
-        val next = tiles.copyOf()
-        next[move.blankSlot] = tiles[move.tileSlot]
-        next[move.tileSlot] = blankId
-        return SlideBoard(rows, cols, next, blankId)
+        val after = tiles.copyOf()
+        after[move.blankSlot] = after[move.tileSlot]
+        after[move.tileSlot] = blankId
+        return SlideBoard(rows, cols, after, blankId)
     }
 
-    /** Order-sensitive content key, cheap enough to recompute every tick for change detection. */
     fun signature(): Long {
-        var h = 1125899906842597L
-        for (t in tiles) h = h * 1099511628211L + t
-        return h
+        var hash = FNV_OFFSET
+        for (piece in tiles) {
+            var bits = piece
+            repeat(Int.SIZE_BYTES) {
+                hash = (hash xor (bits and 0xFF).toLong()) * FNV_PRIME
+                bits = bits ushr 8
+            }
+        }
+        return hash
     }
 
     companion object {
-        /** Goal where piece `i` belongs at slot `i` (the standard solved arrangement). */
-        fun identityGoal(size: Int): IntArray = IntArray(size) { it }
+        private const val FNV_OFFSET = -0x340d631b7bdddcdbL
+        private const val FNV_PRIME = 0x100000001b3L
+
+        fun identityGoal(size: Int): IntArray = IntArray(size) { slot -> slot }
     }
 }

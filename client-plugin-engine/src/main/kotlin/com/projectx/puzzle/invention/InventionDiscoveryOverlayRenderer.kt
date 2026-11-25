@@ -1,89 +1,72 @@
 package com.projectx.puzzle.invention
 
-import com.projectx.game.bootstrap.Bootstrap
 import com.projectx.game.hooks.Priority
 import com.projectx.game.math.Vector2f
-import com.projectx.game.nxt.MainState
-import com.projectx.puzzle.invention.InventionDiscoveryOverlayState.Companion.FIRST_ICON_COMPONENT
-import com.projectx.puzzle.invention.InventionDiscoveryOverlayState.Companion.INTERFACE_ID
+import com.projectx.game.nxt.interfaces.ScreenRect
+import com.projectx.puzzle.PuzzleClient
 import com.projectx.quest.overlay.pulseAlpha
 import com.projectx.ui.backend.dsl.ImGuiDsl.backgroundDrawList
 import com.projectx.ui.backend.dsl.scopes.BackgroundDrawListScope
 import com.projectx.ui.backend.dsl.utils.ImGuiColors
 import com.projectx.ui.backend.rendering.ImGUIRender
 
-/**
- * Draws the Invention discovery advisory: an outline on each track module (green = keep, yellow =
- * likely, cyan "1"/"2" = the next swap to make) plus a guidance panel. Advisory only — never clicks.
- *
- * Auto-discovered via [ImGUIRender]; reads only the snapshot published by [InventionDiscoveryFeature]
- * and gated interface rects (same SIGSEGV-safety as the slide-puzzle overlay).
- */
 object InventionDiscoveryOverlayRenderer {
+
+    private const val OUTSET = 2f
+    private const val ROUNDING = 4f
+    private const val LINE_HEIGHT = 16f
+    private const val INSET = 8f
+    private const val CHAR_WIDTH = 7f
+    private const val PANEL_GAP = 6f
 
     @JvmStatic
     @ImGUIRender(priority = Priority.LOW)
     fun render() {
-        val state = InventionDiscoveryFeature.overlay ?: return
-        try {
-            if (Bootstrap.client.mainState != MainState.LOGGED_IN) return
-        } catch (_: Throwable) {
-            return
+        val snapshot = InventionDiscoveryFeature.overlay ?: return
+        if (!PuzzleClient.loggedIn) return
+        val icons = List(TRACK_SLOTS) { slot ->
+            PuzzleClient.rect(InventionDiscoveryOverlayState.INTERFACE_ID, InventionDiscoveryOverlayState.FIRST_ICON_COMPONENT + slot)
         }
         backgroundDrawList {
-            var anchor: IntRect? = null
-            for (slot in state.slotHints.indices) {
-                val rect = iconRect(slot) ?: continue
-                if (anchor == null || rect.y < anchor!!.y) anchor = rect
-                try {
-                    drawSlot(rect, slot + 1, state.slotHints[slot])
-                } catch (_: Throwable) {
-                }
+            icons.forEachIndexed { slot, rect ->
+                if (rect != null) outlineSlot(rect, snapshot.slotHints.getOrElse(slot) { SlotHint.NEUTRAL })
             }
-            anchor?.let { drawPanel(it, state) }
+            val anchor = icons.filterNotNull().minByOrNull { it.y }
+            if (anchor != null && snapshot.lines.isNotEmpty()) panel(anchor, snapshot)
         }
     }
 
-    private fun BackgroundDrawListScope.drawSlot(rect: IntRect, ordinal: Int, hint: SlotHint) {
-        val tl = Vector2f(rect.x - 2f, rect.y - 2f)
-        val br = Vector2f(rect.x + rect.w + 2f, rect.y + rect.h + 2f)
-        when (hint) {
-            SlotHint.NEUTRAL -> {}
-            SlotHint.LIKELY -> rect(tl, br, (ImGuiColors.YELLOW and 0x00FFFFFF) or (140 shl 24), rounding = 4f, thickness = 2f)
-            SlotHint.LOCKED -> rect(tl, br, ImGuiColors.GREEN or (255 shl 24), rounding = 4f, thickness = 2.5f)
-            SlotHint.SWAP_FIRST, SlotHint.SWAP_SECOND -> {
-                val color = pulseAlpha(ImGuiColors.CYAN, minAlpha = 220, maxAlpha = 255)
-                rect(tl, br, color, rounding = 4f, thickness = 3.5f)
-                val badge = if (hint == SlotHint.SWAP_FIRST) "1" else "2"
-                text(Vector2f(rect.x + 3f, rect.y + 1f), color, badge)
+    private fun BackgroundDrawListScope.outlineSlot(bounds: ScreenRect, hint: SlotHint) {
+        val (color, thickness, badge) = when (hint) {
+            SlotHint.NEUTRAL -> return
+            SlotHint.LIKELY -> Triple(withAlpha(ImGuiColors.YELLOW, 140), 2f, null)
+            SlotHint.LOCKED -> Triple(withAlpha(ImGuiColors.GREEN, 255), 2.5f, null)
+            SlotHint.SWAP_FIRST -> Triple(pulseAlpha(ImGuiColors.CYAN, minAlpha = 220, maxAlpha = 255), 3.5f, "1")
+            SlotHint.SWAP_SECOND -> Triple(pulseAlpha(ImGuiColors.CYAN, minAlpha = 220, maxAlpha = 255), 3.5f, "2")
+        }
+        val topLeft = Vector2f(bounds.x - OUTSET, bounds.y - OUTSET)
+        val bottomRight = Vector2f(bounds.x + bounds.width + OUTSET, bounds.y + bounds.height + OUTSET)
+        rect(topLeft, bottomRight, color, rounding = ROUNDING, thickness = thickness)
+        if (badge != null) text(Vector2f(bounds.x + 3f, bounds.y + 1f), color, badge)
+    }
+
+    private fun BackgroundDrawListScope.panel(anchor: ScreenRect, state: InventionDiscoveryOverlayState) {
+        val lines = state.lines
+        val height = lines.size * LINE_HEIGHT + INSET
+        val width = lines.maxOf { it.length } * CHAR_WIDTH + 2 * INSET
+        val origin = Vector2f(anchor.x.toFloat(), anchor.y - height - PANEL_GAP)
+        val corner = Vector2f(origin.x + width, origin.y + height)
+        rectFilled(origin, corner, withAlpha(ImGuiColors.BLACK, 190))
+        rect(origin, corner, if (state.solved) ImGuiColors.GREEN else ImGuiColors.CYAN, thickness = 1.5f)
+        for ((row, words) in lines.withIndex()) {
+            val color = when {
+                row == 0 -> ImGuiColors.WHITE
+                state.solved && row == lines.lastIndex -> ImGuiColors.GREEN
+                else -> ImGuiColors.TEXT_PRIMARY
             }
+            text(Vector2f(origin.x + INSET, origin.y + INSET / 2 + row * LINE_HEIGHT), color, words)
         }
     }
 
-    private fun BackgroundDrawListScope.drawPanel(anchor: IntRect, state: InventionDiscoveryOverlayState) {
-        if (state.lines.isEmpty()) return
-        val lineHeight = 16f
-        val width = (state.lines.maxOf { it.length } * 7 + 16).toFloat()
-        val height = state.lines.size * lineHeight + 8f
-        val x = anchor.x.toFloat()
-        val y = anchor.y - height - 6f
-        rectFilled(Vector2f(x, y), Vector2f(x + width, y + height), (ImGuiColors.BLACK and 0x00FFFFFF) or (190 shl 24), rounding = 4f)
-        val accent = if (state.solved) ImGuiColors.GREEN else ImGuiColors.CYAN
-        rect(Vector2f(x, y), Vector2f(x + width, y + height), accent or (255 shl 24), rounding = 4f, thickness = 1.5f)
-        for ((i, line) in state.lines.withIndex()) {
-            val color = if (i == 0) ImGuiColors.WHITE else if (state.solved && i == state.lines.lastIndex) ImGuiColors.GREEN else ImGuiColors.TEXT_PRIMARY
-            text(Vector2f(x + 8f, y + 4f + i * lineHeight), color or (255 shl 24), line)
-        }
-    }
-
-    private fun iconRect(slot: Int): IntRect? {
-        val list = try { Bootstrap.client.interfaceList } catch (_: Throwable) { return null }
-        if (!(try { list.isOpen(INTERFACE_ID) } catch (_: Throwable) { false })) return null
-        val comp = try { list.getComponent(INTERFACE_ID, FIRST_ICON_COMPONENT + slot) } catch (_: Throwable) { return null } ?: return null
-        val r = try { comp.screenRect } catch (_: Throwable) { return null } ?: return null
-        if (r.width <= 0 || r.height <= 0) return null
-        return IntRect(r.x, r.y, r.width, r.height)
-    }
-
-    private data class IntRect(val x: Int, val y: Int, val w: Int, val h: Int)
+    private fun withAlpha(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
 }

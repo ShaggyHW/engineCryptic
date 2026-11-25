@@ -1,26 +1,42 @@
 package com.projectx.puzzle.invention
 
-/** Parsed contents of the discovery [track_score_text][1708:4] the server fills in per arrangement. */
 class Optimisation(val level: String, val baseXp: Int, val bonusXp: Int) {
-    val perfect: Boolean get() = level.equals("Perfect", ignoreCase = true)
+    val perfect: Boolean
+        get() = PERFECT_LEVEL.equals(level, ignoreCase = true)
 }
+
+private const val PERFECT_LEVEL = "Perfect"
 
 object OptimisationText {
 
-    private val LEVEL = Regex("""Optimisation:\s*([^<\r\n]+?)\s*(?:<br>|$)""", RegexOption.IGNORE_CASE)
-    private val TAG = Regex("""<[^>]*>""")
-    private val NUMBER = Regex("""\d+""")
+    private const val LABEL = "Optimisation:"
+    private const val LINE_BREAK = "<br>"
+    private val TAG_MARKUP = Regex("<[^>]*>")
+    private val DIGITS = Regex("""\d+""")
 
-    /** True while the server hasn't scored the current arrangement yet (client shows "Analysing..."). */
-    fun isPending(text: String): Boolean = text.contains("Analys", ignoreCase = true)
+    fun isPending(text: String): Boolean = text.contains("analys", ignoreCase = true)
 
-    /** Null when the text isn't a scored result (empty, pending, or unparseable). */
     fun parse(text: String): Optimisation? {
-        if (text.isBlank() || isPending(text)) return null
-        val level = LEVEL.find(text)?.groupValues?.get(1)?.trim() ?: return null
-        val numbers = NUMBER.findAll(TAG.replace(text, " ")).map { it.value.toInt() }.toList()
-        val base = numbers.getOrElse(0) { 0 }
-        val bonus = numbers.getOrElse(1) { base }
-        return Optimisation(level, base, bonus)
+        val level = when {
+            text.isBlank() || isPending(text) -> return null
+            else -> levelIn(text) ?: return null
+        }
+        val xp = DIGITS.findAll(TAG_MARKUP.replace(text, " ")).mapNotNull { it.value.toIntOrNull() }.take(2).toList()
+        val first = xp.firstOrNull() ?: 0
+        return Optimisation(level, first, xp.getOrElse(1) { first })
+    }
+
+    private fun levelIn(text: String): String? {
+        var searchFrom = 0
+        while (true) {
+            val labelAt = text.indexOf(LABEL, searchFrom, ignoreCase = true)
+            if (labelAt < 0) return null
+            searchFrom = labelAt + LABEL.length
+            var start = searchFrom
+            while (start < text.length && text[start].isWhitespace()) start++
+            val end = text.indexOf(LINE_BREAK, start, ignoreCase = true).takeIf { it >= 0 } ?: text.length
+            val level = text.substring(start, end).trim()
+            if (level.isNotEmpty() && level.none { it == '<' || it == '\n' || it == '\r' }) return level
+        }
     }
 }

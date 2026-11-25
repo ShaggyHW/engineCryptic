@@ -2,11 +2,9 @@ package com.projectx.puzzle.knot
 
 import com.projectx.game.nxt.interfaces.ScreenRect
 import world.gregs.voidps.gameval.Gameval
+import java.util.concurrent.ConcurrentHashMap
 
 const val EMPTY_RUNE = 0
-
-private const val KNOT_PREFIX = "trail_knot"
-private const val MAX_TRACKS = 8
 
 class KnotTrack(
     val index: Int,
@@ -14,10 +12,9 @@ class KnotTrack(
     val runeComponents: IntArray,
     val clockwiseButton: Int,
     val counterClockwiseButton: Int,
-    /** True when slot 0 -> 1 -> 2 ... walks the ring clockwise on screen. */
     val forwardIsClockwise: Boolean,
 ) {
-    val size get() = slotComponents.size
+    val size: Int get() = slotComponents.size
 }
 
 class KnotSlotRef(val track: Int, val slot: Int)
@@ -32,153 +29,149 @@ class KnotLayout(
 )
 
 class KnotRotation(val track: KnotTrack, val steps: Int, val clockwise: Boolean) {
-    val buttonComponent get() = if (clockwise) track.clockwiseButton else track.counterClockwiseButton
+    val buttonComponent: Int get() = if (clockwise) track.clockwiseButton else track.counterClockwiseButton
 }
 
 object CelticKnotLayouts {
 
-    private val cache = HashMap<Int, KnotLayout>()
+    private const val NAME_PREFIX = "trail_knot"
+    private const val TRACK_LIMIT = 8
+    private const val SHORTEST_RING = 3
+
+    private val laidOut = ConcurrentHashMap<Int, KnotLayout>()
 
     val interfaceIds: IntArray by lazy {
-        Gameval.entries(Gameval.INTERFACE)
-            .filterValues { it.startsWith(KNOT_PREFIX) }
-            .keys.sorted().toIntArray()
+        Gameval.entries(Gameval.INTERFACE).filterValues { it.startsWith(NAME_PREFIX) }.keys.sorted().toIntArray()
     }
 
-    /**
-     * Layouts are only cached once every tile has a screen rect: the crossings and each ring's winding
-     * are read off the live geometry, and an interface that has not been laid out yet would otherwise
-     * bake a crossing-less layout in for the rest of the session.
-     */
-    fun forInterface(interfaceId: Int, rectOf: (Int) -> ScreenRect?): KnotLayout? =
-        cache[interfaceId] ?: build(interfaceId, rectOf)?.also { cache[interfaceId] = it }
+    /** Built from component names plus live tile rects; only complete layouts are kept, so an unready knot is retried. */
+    fun forInterface(interfaceId: Int, rectOf: (Int) -> ScreenRect?): KnotLayout? {
+        laidOut[interfaceId]?.let { return it }
+        val name = Gameval.interfaceName(interfaceId)?.takeIf { it.startsWith(NAME_PREFIX) } ?: return null
+        val rings = ringsNamed(name)
+        if (rings.size < 2) return null
+        val tileRects = rings.map { ring ->
+            ring.tiles.map { tile -> rectOf(tile)?.takeIf { it.width > 0 && it.height > 0 } ?: return null }
+        }
+        val tracks = rings.mapIndexed { index, ring ->
+            KnotTrack(index, ring.tiles, ring.runes, ring.clockwise, ring.counterClockwise, windsClockwise(tileRects[index]))
+        }
+        val shared = sharedTiles(tracks, tileRects).ifEmpty { return null }
+        val window = Gameval.componentId("$name:mainmodal_window") ?: 0
+        val layout = KnotLayout(interfaceId, window, tracks, shared)
+        return laidOut.putIfAbsent(interfaceId, layout) ?: layout
+    }
 
-    fun readRunes(layout: KnotLayout, graphicOf: (Int) -> Int): List<IntArray> =
-        layout.tracks.map { track -> IntArray(track.size) { graphicOf(track.runeComponents[it]) } }
+    fun readRunes(layout: KnotLayout, graphicOf: (Int) -> Int): List<IntArray> = layout.tracks.map { ring ->
+        ring.runeComponents.map(graphicOf).toIntArray()
+    }
 
-    private fun build(interfaceId: Int, rectOf: (Int) -> ScreenRect?): KnotLayout? {
-        val prefix = Gameval.interfaceName(interfaceId)?.takeIf { it.startsWith(KNOT_PREFIX) } ?: return null
-        val tracks = ArrayList<KnotTrack>()
-        val tiles = HashMap<ScreenRect, MutableList<KnotSlotRef>>()
+    private class RingNames(val tiles: IntArray, val runes: IntArray, val clockwise: Int, val counterClockwise: Int)
 
-        for (index in 0 until MAX_TRACKS) {
-            val clockwise = Gameval.componentId("$prefix:track_${index}_cw") ?: break
-            val counterClockwise = Gameval.componentId("$prefix:track_${index}_ccw") ?: break
-            val slots = ArrayList<Int>()
-            val runes = ArrayList<Int>()
-            val rects = ArrayList<ScreenRect>()
+    private fun ringsNamed(name: String): List<RingNames> {
+        val rings = ArrayList<RingNames>()
+        for (ring in 0 until TRACK_LIMIT) {
+            val clockwise = Gameval.componentId("$name:track_${ring}_cw") ?: break
+            val counterClockwise = Gameval.componentId("$name:track_${ring}_ccw") ?: break
+            val tileIds = ArrayList<Int>()
+            val runeIds = ArrayList<Int>()
             while (true) {
-                val slot = Gameval.componentId(slotName(prefix, "track", index, slots.size)) ?: break
-                val rune = Gameval.componentId(slotName(prefix, "rune", index, slots.size)) ?: break
-                val rect = rectOf(slot)?.takeIf { it.width > 0 && it.height > 0 } ?: return null
-                slots.add(slot)
-                runes.add(rune)
-                rects.add(rect)
+                val number = tileIds.size.toString().padStart(2, '0')
+                val tileId = Gameval.componentId("$name:track_${ring}_$number") ?: break
+                val runeId = Gameval.componentId("$name:rune_${ring}_$number") ?: break
+                tileIds += tileId
+                runeIds += runeId
             }
-            if (slots.size < 3) break
-            tracks.add(
-                KnotTrack(index, slots.toIntArray(), runes.toIntArray(), clockwise, counterClockwise, isClockwise(rects))
-            )
-            rects.forEachIndexed { slot, rect -> tiles.getOrPut(rect) { mutableListOf() }.add(KnotSlotRef(index, slot)) }
+            if (tileIds.size < SHORTEST_RING) break
+            rings += RingNames(tileIds.toIntArray(), runeIds.toIntArray(), clockwise, counterClockwise)
         }
-
-        if (tracks.size < 2) return null
-        val crossings = crossingsOf(tracks, tiles)
-        if (crossings.isEmpty()) return null
-        return KnotLayout(interfaceId, windowComponent(prefix), tracks, crossings)
+        return rings
     }
 
-    private fun crossingsOf(
-        tracks: List<KnotTrack>,
-        tiles: Map<ScreenRect, List<KnotSlotRef>>,
-    ): List<KnotCrossing> = buildList {
-        tiles.values.forEach { refs ->
-            val distinct = refs.distinctBy { it.track }
-            for (i in distinct.indices) for (j in i + 1 until distinct.size) {
-                val a = distinct[i]
-                add(KnotCrossing(a, distinct[j], tracks[a.track].slotComponents[a.slot]))
-            }
+    /** Shoelace sum over the tiles' top-left corners; with screen y growing downwards, positive reads as clockwise. */
+    private fun windsClockwise(rects: List<ScreenRect>): Boolean {
+        var twiceArea = 0L
+        for (i in rects.indices) {
+            val here = rects[i]
+            val after = rects[(i + 1) % rects.size]
+            twiceArea += here.x.toLong() * after.y - after.x.toLong() * here.y
         }
+        return twiceArea > 0
     }
 
-    private fun slotName(prefix: String, kind: String, track: Int, slot: Int) =
-        "%s:%s_%d_%02d".format(prefix, kind, track, slot)
-
-    private fun windowComponent(prefix: String) =
-        Gameval.componentId("$prefix:mainmodal_window") ?: 0
-
-    /**
-     * Screen space has Y growing downwards, so the shoelace sum of a ring walked in increasing slot
-     * order is positive exactly when that walk appears clockwise to the player — which is what decides
-     * whether the `cw` or the `ccw` button advances a slot index.
-     */
-    private fun isClockwise(tiles: List<ScreenRect>): Boolean {
-        var sum = 0L
-        for (i in tiles.indices) {
-            val a = tiles[i]
-            val b = tiles[(i + 1) % tiles.size]
-            sum += a.x.toLong() * b.y - b.x.toLong() * a.y
+    private fun sharedTiles(tracks: List<KnotTrack>, tileRects: List<List<ScreenRect>>): List<KnotCrossing> {
+        val occupants = LinkedHashMap<ScreenRect, MutableList<KnotSlotRef>>()
+        tileRects.forEachIndexed { track, rects ->
+            rects.forEachIndexed { slot, rect -> occupants.getOrPut(rect) { ArrayList() } += KnotSlotRef(track, slot) }
         }
-        return sum > 0
+        val crossings = ArrayList<KnotCrossing>()
+        for (refs in occupants.values) {
+            for (i in refs.indices) for (j in i + 1 until refs.size) {
+                val lower = refs[i]
+                val upper = refs[j]
+                if (lower.track == upper.track) continue
+                crossings += KnotCrossing(lower, upper, tracks[lower.track].slotComponents[lower.slot])
+            }
+        }
+        return crossings
     }
 }
 
 object CelticKnotSolver {
 
-    /**
-     * Rotating a track shifts every rune along it, so a solution is one offset per track. The spaces are
-     * small enough to settle exactly by enumeration; crossings are checked as soon as both their tracks
-     * are bound, and the cheapest total click count wins rather than the first hit.
-     */
-    fun solve(layout: KnotLayout, runes: List<IntArray>): List<KnotRotation>? {
-        val tracks = layout.tracks
-        if (runes.size != tracks.size) return null
-        if (tracks.indices.any { runes[it].size != tracks[it].size }) return null
-
-        val gatedBy = Array(tracks.size) { track -> layout.crossings.filter { maxOf(it.a.track, it.b.track) == track } }
-        val offsets = IntArray(tracks.size)
-        val best = IntArray(tracks.size)
-        var bestClicks = Int.MAX_VALUE
-
-        fun search(track: Int, clicks: Int) {
-            if (track == tracks.size) {
-                bestClicks = clicks
-                offsets.copyInto(best)
-                return
-            }
-            val size = runes[track].size
-            for (offset in 0 until size) {
-                val cost = clicks + minOf(offset, size - offset)
-                if (cost >= bestClicks) continue
-                offsets[track] = offset
-                if (gatedBy[track].all { aligned(runes, it, offsets) }) search(track + 1, cost)
-            }
-            offsets[track] = 0
-        }
-
-        search(0, 0)
-        if (bestClicks == Int.MAX_VALUE) return null
-        return tracks.mapIndexedNotNull { index, track -> rotationOf(track, best[index]) }
-    }
+    fun runeAt(runes: List<IntArray>, ref: KnotSlotRef, offset: Int): Int =
+        runes[ref.track].let { shown -> shown[Math.floorMod(ref.slot - offset, shown.size)] }
 
     fun aligned(runes: List<IntArray>, crossing: KnotCrossing, offsets: IntArray): Boolean {
-        val a = runeAt(runes, crossing.a, offsets[crossing.a.track])
-        val b = runeAt(runes, crossing.b, offsets[crossing.b.track])
-        return a == EMPTY_RUNE || b == EMPTY_RUNE || a == b
+        val first = runeAt(runes, crossing.a, offsets[crossing.a.track])
+        val second = runeAt(runes, crossing.b, offsets[crossing.b.track])
+        return first == EMPTY_RUNE || second == EMPTY_RUNE || first == second
     }
 
-    fun runeAt(runes: List<IntArray>, ref: KnotSlotRef, offset: Int): Int {
-        val ring = runes[ref.track]
-        return ring[((ref.slot - offset) % ring.size + ring.size) % ring.size]
+    fun solve(layout: KnotLayout, runes: List<IntArray>): List<KnotRotation>? {
+        val rings = layout.tracks
+        val fits = runes.size == rings.size && rings.zip(runes).all { (ring, shown) -> ring.size == shown.size }
+        if (!fits) return null
+        val offsets = OffsetSearch(rings, layout.crossings, runes).cheapest() ?: return null
+        return rings.filter { offsets[it.index] != 0 }.map { rotationFor(it, offsets[it.index]) }
     }
 
-    private fun rotationOf(track: KnotTrack, offset: Int): KnotRotation? {
-        if (offset == 0) return null
-        val backwards = track.size - offset
-        return if (offset <= backwards) {
-            KnotRotation(track, offset, track.forwardIsClockwise)
-        } else {
-            KnotRotation(track, backwards, !track.forwardIsClockwise)
+    private fun rotationFor(track: KnotTrack, offset: Int): KnotRotation {
+        val back = track.size - offset
+        return if (offset <= back) KnotRotation(track, offset, track.forwardIsClockwise)
+        else KnotRotation(track, back, !track.forwardIsClockwise)
+    }
+
+    /** Exhaustive depth-first search over per-track offsets, checking each crossing once both of its tracks are set. */
+    private class OffsetSearch(
+        private val tracks: List<KnotTrack>,
+        crossings: List<KnotCrossing>,
+        private val runes: List<IntArray>,
+    ) {
+        private val settledBy: List<List<KnotCrossing>> =
+            tracks.indices.map { t -> crossings.filter { maxOf(it.a.track, it.b.track) == t } }
+        private val chosen = IntArray(tracks.size)
+        private var best: IntArray? = null
+        private var bestPresses = Int.MAX_VALUE
+
+        fun cheapest(): IntArray? {
+            visit(0, 0)
+            return best
+        }
+
+        private fun visit(depth: Int, presses: Int) {
+            if (presses >= bestPresses) return
+            if (depth == tracks.size) {
+                bestPresses = presses
+                best = chosen.copyOf()
+                return
+            }
+            val slots = tracks[depth].size
+            for (turn in 0 until slots) {
+                chosen[depth] = turn
+                if (settledBy[depth].all { aligned(runes, it, chosen) }) visit(depth + 1, presses + minOf(turn, slots - turn))
+            }
+            chosen[depth] = 0
         }
     }
 }

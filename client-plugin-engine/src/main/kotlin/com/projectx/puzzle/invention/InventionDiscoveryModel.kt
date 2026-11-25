@@ -1,12 +1,12 @@
 package com.projectx.puzzle.invention
 
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 const val TRACK_SLOTS = 5
 
 enum class SlotHint { NEUTRAL, LIKELY, LOCKED, SWAP_FIRST, SWAP_SECOND }
 
-/** What to do next with the current arrangement. */
 class Advice(
     val solved: Boolean,
     val swapFirst: Int,
@@ -16,200 +16,175 @@ class Advice(
 )
 
 /**
- * Solver for the Invention discovery track.
- *
- * The server scores an arrangement with one number — `invent_discovery_score`, 0 for "Perfect" rising
- * in twos to 12 — and that score is *exactly additive* over the twenty-five (slot, module) pairs: every
- * arrangement tried is one linear equation in twenty-five unknown affinities, verified against captured
- * sessions to machine precision. So the affinities are fitted rather than guessed at, and the lowest
- * scoring arrangement the fit has yet to see becomes the next probe. Ridge regularisation stands in for
- * the equations still missing while the fit is under-determined.
- *
- * Modules are ids 1..5; an arrangement is a permutation indexed by track slot 0..4.
+ * Learns a discovery blueprint from scored arrangements. The penalty is the sum of a hidden cost per (slot, module)
+ * pair, so every score is one linear equation; a ridge-regularised least-squares fit of the 25 costs predicts every
+ * arrangement and picks the next one worth scoring.
  */
 class InventionDiscoveryModel {
 
-    private val penalties = LinkedHashMap<Long, Int>()
-    private val arrangements = LinkedHashMap<Long, IntArray>()
+    private val scores = LinkedHashMap<Int, Scored>()
+    private var best: IntArray? = null
 
-    val observationCount get() = penalties.size
+    val observationCount: Int get() = scores.size
 
-    var bestPenalty = Int.MAX_VALUE
+    var bestPenalty: Int = UNSCORED
         private set
 
-    var bestArrangement: IntArray? = null
-        private set
+    val bestArrangement: IntArray? get() = best?.copyOf()
 
-    val solved get() = bestPenalty == 0
+    val solved: Boolean get() = bestPenalty == 0
 
     fun reset() {
-        penalties.clear()
-        arrangements.clear()
-        bestPenalty = Int.MAX_VALUE
-        bestArrangement = null
+        scores.clear()
+        best = null
+        bestPenalty = UNSCORED
     }
 
-    fun record(perm: IntArray, penalty: Int) {
-        if (!isArrangement(perm) || penalty < 0) return
-        val key = keyOf(perm)
-        penalties[key] = penalty
-        arrangements[key] = perm.copyOf()
-        if (penalty < bestPenalty) {
-            bestPenalty = penalty
-            bestArrangement = perm.copyOf()
-        }
+    fun record(arrangement: IntArray, penalty: Int) {
+        if (!isArrangement(arrangement) || penalty < 0) return
+        val kept = arrangement.copyOf()
+        scores[codeOf(kept)] = Scored(kept, penalty)
+        if (penalty < bestPenalty) best = kept
+        bestPenalty = minOf(bestPenalty, penalty)
     }
 
-    fun penaltyOf(perm: IntArray): Int? = penalties[keyOf(perm)]
+    fun penaltyOf(arrangement: IntArray): Int? =
+        if (isArrangement(arrangement)) scores[codeOf(arrangement)]?.penalty else null
+
+    fun swapToward(current: IntArray, target: IntArray): Pair<Int, Int> {
+        if (!isArrangement(current) || !isArrangement(target)) return NO_SWAP
+        val first = (0 until TRACK_SLOTS).firstOrNull { current[it] != target[it] } ?: return NO_SWAP
+        return first to current.indexOf(target[first])
+    }
 
     fun advise(current: IntArray): Advice {
-        val hints = Array(TRACK_SLOTS) { SlotHint.NEUTRAL }
-        if (!isArrangement(current)) return Advice(false, -1, -1, hints, current.copyOf())
-        if (penaltyOf(current) == 0) return Advice(true, -1, -1, hints, current.copyOf())
+        if (!isArrangement(current)) return restingAdvice(current, solved = false)
+        if (penaltyOf(current) == 0) return restingAdvice(current, solved = true)
 
-        val affinity = fit()
-        val believedBest = pickBest(ALL_ARRANGEMENTS, current, affinity)
-        val target = if (!penalties.containsKey(keyOf(believedBest))) believedBest else {
-            val untried = ALL_ARRANGEMENTS.filter { !penalties.containsKey(keyOf(it)) }
-            if (untried.isEmpty()) believedBest else pickBest(untried, current, affinity)
-        }
+        val costs = fitCosts()
+        val predictions = DoubleArray(ALL.size) { predicted(costs, ALL[it]) }
+        val believed = cheapestPrediction(current, predictions) { true }
+            ?: error("an arrangement always exists")
+        val target = if (penaltyOf(ALL[believed]) == null) believed
+        else cheapestPrediction(current, predictions) { penaltyOf(ALL[it]) == null } ?: believed
+        val believedBest = ALL[believed].copyOf()
 
-        for (slot in 0 until TRACK_SLOTS) {
-            if (current[slot] != believedBest[slot]) continue
-            hints[slot] = if (confident(slot, current[slot], affinity)) SlotHint.LOCKED else SlotHint.LIKELY
-        }
-
-        val (first, second) = swapToward(current, target)
-        if (first >= 0) {
-            hints[first] = SlotHint.SWAP_FIRST
-            if (second >= 0) hints[second] = SlotHint.SWAP_SECOND
-        }
-        return Advice(false, first, second, hints, believedBest)
-    }
-
-    /** The one transposition that moves [current] a step closer to [target]. */
-    fun swapToward(current: IntArray, target: IntArray): Pair<Int, Int> {
-        if (!isArrangement(current) || !isArrangement(target)) return -1 to -1
-        val first = (0 until TRACK_SLOTS).firstOrNull { current[it] != target[it] } ?: return -1 to -1
-        val second = (0 until TRACK_SLOTS).firstOrNull { current[it] == target[first] } ?: return -1 to -1
-        return first to second
-    }
-
-    /** Least-squares affinity per (slot, module), ridged so an under-determined fit still resolves. */
-    private fun fit(): DoubleArray {
-        val size = TRACK_SLOTS * TRACK_SLOTS
-        val normal = Array(size) { DoubleArray(size) }
-        val rhs = DoubleArray(size)
-        for ((key, penalty) in penalties) {
-            val perm = arrangements.getValue(key)
-            val cells = IntArray(TRACK_SLOTS) { it * TRACK_SLOTS + perm[it] - 1 }
-            for (cell in cells) {
-                rhs[cell] += penalty.toDouble()
-                for (other in cells) normal[cell][other] += 1.0
+        val marks = Array(TRACK_SLOTS) { slot ->
+            when {
+                current[slot] != believedBest[slot] -> SlotHint.NEUTRAL
+                confident(costs, slot, current[slot]) -> SlotHint.LOCKED
+                else -> SlotHint.LIKELY
             }
         }
-        for (i in 0 until size) normal[i][i] += RIDGE
-        return solve(normal, rhs)
+        val (first, second) = swapToward(current, ALL[target])
+        if (first >= 0) {
+            marks[first] = SlotHint.SWAP_FIRST
+            marks[second] = SlotHint.SWAP_SECOND
+        }
+        return Advice(solved = false, swapFirst = first, swapSecond = second, slotHints = marks, believedBest = believedBest)
     }
 
-    private fun predicted(perm: IntArray, affinity: DoubleArray): Double {
+    private fun restingAdvice(current: IntArray, solved: Boolean) =
+        Advice(solved, -1, -1, Array(TRACK_SLOTS) { SlotHint.NEUTRAL }, current.copyOf())
+
+    private fun cheapestPrediction(current: IntArray, predictions: DoubleArray, eligible: (Int) -> Boolean): Int? {
+        var chosen = -1
+        for (candidate in ALL.indices) {
+            if (!eligible(candidate)) continue
+            if (chosen < 0) {
+                chosen = candidate
+                continue
+            }
+            val gap = predictions[candidate] - predictions[chosen]
+            val closer = differingSlots(ALL[candidate], current) < differingSlots(ALL[chosen], current)
+            if (gap < -TIE || (abs(gap) <= TIE && closer)) chosen = candidate
+        }
+        return chosen.takeIf { it >= 0 }
+    }
+
+    private fun confident(costs: DoubleArray, slot: Int, module: Int): Boolean {
+        if (observationCount < CONFIDENT_AFTER) return false
+        val own = costs[pair(slot, module)]
+        val rival = (1..TRACK_SLOTS).filter { it != module }.minOf { costs[pair(slot, it)] }
+        val spread = maxOf(costs.max() - costs.min(), 1e-9)
+        return (rival - own) / spread > CONFIDENT_MARGIN
+    }
+
+    /** Least squares on the normal equations by Cholesky; the ridge keeps them positive definite while scores are few. */
+    private fun fitCosts(): DoubleArray {
+        val normal = Array(PAIRS) { DoubleArray(PAIRS) }
+        val rhs = DoubleArray(PAIRS)
+        for (scored in scores.values) {
+            val used = IntArray(TRACK_SLOTS) { pair(it, scored.arrangement[it]) }
+            for (row in used) {
+                rhs[row] += scored.penalty.toDouble()
+                for (column in used) normal[row][column] += 1.0
+            }
+        }
+        for (i in 0 until PAIRS) normal[i][i] += RIDGE_WEIGHT
+        val lower = Array(PAIRS) { DoubleArray(PAIRS) }
+        for (i in 0 until PAIRS) {
+            for (j in 0..i) {
+                var sum = normal[i][j]
+                for (k in 0 until j) sum -= lower[i][k] * lower[j][k]
+                lower[i][j] = if (i == j) sqrt(sum) else sum / lower[j][j]
+            }
+        }
+        val forward = DoubleArray(PAIRS)
+        for (i in 0 until PAIRS) {
+            var sum = rhs[i]
+            for (k in 0 until i) sum -= lower[i][k] * forward[k]
+            forward[i] = sum / lower[i][i]
+        }
+        val costs = DoubleArray(PAIRS)
+        for (i in PAIRS - 1 downTo 0) {
+            var sum = forward[i]
+            for (k in i + 1 until PAIRS) sum -= lower[k][i] * costs[k]
+            costs[i] = sum / lower[i][i]
+        }
+        return costs
+    }
+
+    private fun predicted(costs: DoubleArray, arrangement: IntArray): Double {
         var total = 0.0
-        for (slot in 0 until TRACK_SLOTS) total += affinity[slot * TRACK_SLOTS + perm[slot] - 1]
+        for (slot in 0 until TRACK_SLOTS) total += costs[pair(slot, arrangement[slot])]
         return total
     }
 
-    /** Lowest predicted penalty; ties go to whichever needs the fewest swaps from [reference]. */
-    private fun pickBest(candidates: List<IntArray>, reference: IntArray, affinity: DoubleArray): IntArray {
-        var best = candidates.first()
-        var bestScore = predicted(best, affinity)
-        var bestMismatch = mismatch(best, reference)
-        for (perm in candidates) {
-            val score = predicted(perm, affinity)
-            val miss = mismatch(perm, reference)
-            if (score < bestScore - EPSILON || (score < bestScore + EPSILON && miss < bestMismatch)) {
-                best = perm
-                bestScore = score
-                bestMismatch = miss
-            }
-        }
-        return best
-    }
-
-    private fun confident(slot: Int, module: Int, affinity: DoubleArray): Boolean {
-        if (penalties.size < TRACK_SLOTS) return false
-        var low = Double.MAX_VALUE
-        var high = -Double.MAX_VALUE
-        for (cell in affinity) {
-            low = minOf(low, cell)
-            high = maxOf(high, cell)
-        }
-        val range = (high - low).coerceAtLeast(EPSILON)
-        val rival = (1..TRACK_SLOTS).filter { it != module }.minOf { affinity[slot * TRACK_SLOTS + it - 1] }
-        return (rival - affinity[slot * TRACK_SLOTS + module - 1]) / range > CONFIDENCE_MARGIN
-    }
+    private class Scored(val arrangement: IntArray, val penalty: Int)
 
     companion object {
-        private const val RIDGE = 1e-3
-        private const val EPSILON = 1e-9
-        private const val CONFIDENCE_MARGIN = 0.12
+        private const val PAIRS = TRACK_SLOTS * TRACK_SLOTS
+        private const val RIDGE_WEIGHT = 1e-3
+        private const val UNSCORED = Int.MAX_VALUE
+        private const val TIE = 1e-9
+        private const val CONFIDENT_AFTER = 5
+        private const val CONFIDENT_MARGIN = 0.12
+        private val NO_SWAP = -1 to -1
 
-        val ALL_ARRANGEMENTS: List<IntArray> = permutations(intArrayOf(1, 2, 3, 4, 5))
+        val ALL_ARRANGEMENTS: List<IntArray> = orderings((1..TRACK_SLOTS).toList())
 
-        fun isArrangement(perm: IntArray): Boolean {
-            if (perm.size != TRACK_SLOTS) return false
-            val seen = BooleanArray(TRACK_SLOTS + 1)
-            for (module in perm) {
-                if (module !in 1..TRACK_SLOTS || seen[module]) return false
-                seen[module] = true
+        private val ALL: List<IntArray> get() = ALL_ARRANGEMENTS
+
+        fun isArrangement(a: IntArray): Boolean {
+            if (a.size != TRACK_SLOTS) return false
+            val present = BooleanArray(TRACK_SLOTS + 1)
+            for (module in a) {
+                if (module !in 1..TRACK_SLOTS || present[module]) return false
+                present[module] = true
             }
             return true
         }
 
-        private fun keyOf(perm: IntArray): Long = perm.fold(0L) { acc, module -> acc * 6 + module }
+        private fun pair(slot: Int, module: Int): Int = slot * TRACK_SLOTS + module - 1
 
-        private fun mismatch(a: IntArray, b: IntArray): Int {
-            var diff = 0
-            for (i in a.indices) if (a[i] != b[i]) diff++
-            return diff
-        }
+        private fun codeOf(arrangement: IntArray): Int = arrangement.fold(0) { code, module -> code * 8 + module }
 
-        /** Gauss-Jordan with partial pivoting; the ridge on the diagonal keeps it non-singular. */
-        private fun solve(matrix: Array<DoubleArray>, rhs: DoubleArray): DoubleArray {
-            val n = rhs.size
-            for (col in 0 until n) {
-                var pivot = col
-                for (row in col + 1 until n) if (abs(matrix[row][col]) > abs(matrix[pivot][col])) pivot = row
-                matrix[col] = matrix[pivot].also { matrix[pivot] = matrix[col] }
-                rhs[col] = rhs[pivot].also { rhs[pivot] = rhs[col] }
-                val diagonal = matrix[col][col]
-                if (abs(diagonal) < EPSILON) continue
-                for (row in 0 until n) {
-                    if (row == col) continue
-                    val factor = matrix[row][col] / diagonal
-                    if (factor == 0.0) continue
-                    for (k in col until n) matrix[row][k] -= factor * matrix[col][k]
-                    rhs[row] -= factor * rhs[col]
-                }
-            }
-            return DoubleArray(n) { if (abs(matrix[it][it]) < EPSILON) 0.0 else rhs[it] / matrix[it][it] }
-        }
+        private fun differingSlots(a: IntArray, b: IntArray): Int = (0 until TRACK_SLOTS).count { a[it] != b[it] }
 
-        private fun permutations(values: IntArray): List<IntArray> {
-            val out = ArrayList<IntArray>()
-            val used = BooleanArray(values.size)
-            val current = IntArray(values.size)
-            fun recurse(depth: Int) {
-                if (depth == values.size) { out.add(current.copyOf()); return }
-                for (i in values.indices) {
-                    if (used[i]) continue
-                    used[i] = true
-                    current[depth] = values[i]
-                    recurse(depth + 1)
-                    used[i] = false
-                }
-            }
-            recurse(0)
-            return out
+        private fun orderings(remaining: List<Int>): List<IntArray> {
+            if (remaining.isEmpty()) return listOf(IntArray(0))
+            return remaining.flatMap { head -> orderings(remaining - head).map { tail -> intArrayOf(head, *tail) } }
         }
     }
 }

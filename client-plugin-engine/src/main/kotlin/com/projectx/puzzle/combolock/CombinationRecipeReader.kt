@@ -1,23 +1,22 @@
 package com.projectx.puzzle.combolock
 
-import com.projectx.script.api.interfaces
+import com.projectx.puzzle.PuzzleClient
+import world.gregs.voidps.gameval.Gameval
 
-/**
- * Reads the "Old recipe" interface (220) — opened by clicking the "Old recipe" NPC — and returns the
- * combination it encodes, or null when it isn't open / can't be parsed. The recipe text lines live in
- * components 0..[MAX_TEXT_COMPONENT]; parsing is delegated to [CombinationRecipeParser].
- */
 object CombinationRecipeReader {
     const val INTERFACE_ID = 220
-    private const val MAX_TEXT_COMPONENT = 14
 
-    fun isOpen(): Boolean = runCatching { interfaces.isOpen(INTERFACE_ID) }.getOrDefault(false)
+    private const val SCROLL_LINES = 15
+
+    private val lineComponents: List<Int> by lazy {
+        (1..SCROLL_LINES).map { Gameval.requireComponentId("messagescroll:messcroll$it") }
+    }
+
+    fun isOpen(): Boolean = PuzzleClient.isOpen(INTERFACE_ID)
 
     fun read(): String? {
-        if (!isOpen()) return null
-        val lines = (0..MAX_TEXT_COMPONENT).mapNotNull { c ->
-            runCatching { interfaces.getComponent(INTERFACE_ID, c)?.text }.getOrNull()?.takeIf { it.isNotBlank() }
-        }
-        return CombinationRecipeParser.parse(lines)
+        if (!PuzzleClient.isOpen(INTERFACE_ID)) return null
+        val text = lineComponents.mapNotNull { component -> PuzzleClient.text(INTERFACE_ID, component)?.takeIf { it.isNotBlank() } }
+        return CombinationRecipeParser.parse(text)
     }
 }
