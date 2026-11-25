@@ -59,16 +59,20 @@ import com.projectx.ui.compose.theme.Palette
 import com.projectx.ui.compose.theme.tint
 
 @Composable
-fun LibraryScreen() {
-    val entries = LibraryModel.entries
-    val visible = LibraryModel.visible(entries, LibraryModel.search.text, LibraryModel.filter)
-    val selected = entries.firstOrNull { it.id == LibraryModel.selectedId } ?: visible.firstOrNull()
+fun LibraryScreen(shelf: ScriptShelf = LibraryModel) {
+    val entries = shelf.entries
+    val visible = LibraryModel.visible(entries, shelf.search.text, shelf.filter)
+    val selected = entries.firstOrNull { it.id == shelf.selectedId } ?: visible.firstOrNull()
 
     Column(Modifier.fillMaxSize()) {
-        Toolbar()
+        Toolbar(shelf)
         Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Box(Modifier.width(380.dp).fillMaxHeight()) {
-                if (entries.isEmpty()) EmptyLibrary() else ScriptList(visible, selected?.id)
+                when {
+                    entries.isNotEmpty() -> ScriptList(shelf, visible, selected?.id)
+                    shelf.local -> EmptyLocal()
+                    else -> EmptyLibrary()
+                }
             }
             Box(
                 Modifier
@@ -85,29 +89,29 @@ fun LibraryScreen() {
 }
 
 @Composable
-private fun Toolbar() {
+private fun Toolbar(shelf: ScriptShelf) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SearchField(LibraryModel.search, "Search your library", width = 260.dp)
-        Segmented(LibraryFilter.entries, LibraryModel.filter, { LibraryModel.filter = it }) { it.label }
+        SearchField(shelf.search, if (shelf.local) "Search your local scripts" else "Search your library", width = 260.dp)
+        Segmented(LibraryFilter.entries, shelf.filter, { shelf.filter = it }) { it.label }
         Spacer(Modifier.weight(1f))
         IconButton(Glyph.Refresh, { ScriptActions.reload() }, size = 34.dp)
-        if (LibraryModel.runningCount > 0) {
+        if (shelf.runningCount > 0) {
             ActionButton("Stop all", { ScriptActions.stopAll() }, tone = ButtonTone.Danger, icon = Glyph.Stop, height = 34.dp)
         }
     }
 }
 
 @Composable
-private fun ScriptList(visible: List<LibraryEntry>, selectedId: String?) {
+private fun ScriptList(shelf: ScriptShelf, visible: List<LibraryEntry>, selectedId: String?) {
     val listState = rememberLazyListState()
     Box(Modifier.fillMaxSize()) {
         if (visible.isEmpty()) {
             BasicText(
-                "Nothing in your library matches.",
+                if (shelf.local) "None of your local scripts match." else "Nothing in your library matches.",
                 style = LocalType.current.body,
                 modifier = Modifier.padding(top = 18.dp, start = 4.dp),
             )
@@ -117,7 +121,7 @@ private fun ScriptList(visible: List<LibraryEntry>, selectedId: String?) {
             modifier = Modifier.fillMaxSize().padding(end = 10.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            items(visible, key = { it.id }) { entry -> ScriptRow(entry, entry.id == selectedId) }
+            items(visible, key = { it.id }) { entry -> ScriptRow(shelf, entry, entry.id == selectedId) }
         }
         CompositionLocalProvider(LocalScrollbarStyle provides overlayScrollbarStyle()) {
             VerticalScrollbar(
@@ -129,7 +133,7 @@ private fun ScriptList(visible: List<LibraryEntry>, selectedId: String?) {
 }
 
 @Composable
-private fun ScriptRow(entry: LibraryEntry, selected: Boolean) {
+private fun ScriptRow(shelf: ScriptShelf, entry: LibraryEntry, selected: Boolean) {
     val hover = rememberHover()
     val type = LocalType.current
     val background = when {
@@ -144,7 +148,7 @@ private fun ScriptRow(entry: LibraryEntry, selected: Boolean) {
             .clip(RoundedCornerShape(10.dp))
             .background(animatedColor(background))
             .border(1.dp, if (selected) Palette.lineStrong else Color.Transparent, RoundedCornerShape(10.dp))
-            .press(hover) { LibraryModel.selectedId = entry.id }
+            .press(hover) { shelf.selectedId = entry.id }
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -244,7 +248,7 @@ private fun DetailActions(entry: LibraryEntry) {
         }
         Spacer(Modifier.weight(1f))
         TextLink("Send logs") { LibraryModel.sendingLogsFor = entry.id }
-        if (!entry.running) {
+        if (!entry.running && !entry.local) {
             TextLink("Remove from library") {
                 ScriptActions.removeFromLibrary(meta)
                 LibraryModel.selectedId = null
@@ -297,6 +301,20 @@ private fun EmptyLibrary() {
         BasicText("Your library is empty", style = type.heading)
         BasicText("Add the scripts you want from the Store and they will be listed here.", style = type.body)
         ActionButton("Open the Store", { OverlayNavigation.open(Page.Store) }, height = 34.dp)
+    }
+}
+
+@Composable
+private fun EmptyLocal() {
+    val type = LocalType.current
+    Column(Modifier.padding(top = 24.dp, start = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        BasicText("No local scripts", style = type.heading)
+        BasicText(
+            "Scripts you build yourself go in ~/.projectx/scripts/dev. Put a jar there and press refresh; it shows here, " +
+                "apart from everything the store installs.",
+            style = type.body,
+        )
+        ActionButton("Refresh", { ScriptActions.reload() }, height = 34.dp)
     }
 }
 

@@ -57,6 +57,8 @@ INTERNAL_TYPES = {
     "com.projectx.script.InMemoryJar",
     "com.projectx.script.InMemoryJarClassLoader",
     "com.projectx.script.LiveValues",
+    "com.projectx.script.LocalScriptsScanner",
+    "com.projectx.script.ScriptLoaderKt",
     "com.projectx.script.api.AttackLedger",
     "com.projectx.script.api.BankQuantity",
     "com.projectx.script.api.Deaths$Fired",

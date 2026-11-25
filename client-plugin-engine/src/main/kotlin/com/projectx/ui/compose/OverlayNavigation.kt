@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 enum class Page(val label: String) {
     Library("Library"),
     Store("Store"),
+    Local("Local"),
     Quests("Quest helper"),
     Xp("XP"),
     Inventory("Inventory"),
@@ -27,7 +28,7 @@ enum class Page(val label: String) {
 }
 
 enum class Section(val label: String, val pages: List<Page>) {
-    Scripts("Scripts", listOf(Page.Library, Page.Store)),
+    Scripts("Scripts", listOf(Page.Library, Page.Store, Page.Local)),
     Quests("Quests", listOf(Page.Quests)),
     Character("Character", listOf(Page.Xp, Page.Inventory, Page.Effects, Page.Invention, Page.Farming)),
     World("World", listOf(Page.Entities, Page.Collision, Page.TileMarkers)),

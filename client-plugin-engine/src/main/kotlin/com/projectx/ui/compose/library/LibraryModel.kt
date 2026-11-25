@@ -21,8 +21,21 @@ data class LibraryEntry(
     val running: Boolean,
     val favorite: Boolean,
     val startedAt: Long?,
+    val local: Boolean = false,
 ) {
-    val id: String get() = meta.scriptClass.name
+    // A developer's own copy can share a store script's class name, so it is told apart here.
+    val id: String get() = if (local) "local:${meta.scriptClass.name}" else meta.scriptClass.name
+}
+
+/** One list of scripts in the panel, with its own selection, filter and search: the Library, or the Local scripts. */
+interface ScriptShelf {
+    val entries: List<LibraryEntry>
+    var selectedId: String?
+    var filter: LibraryFilter
+    val search: OverlayText
+    val local: Boolean
+
+    val runningCount: Int get() = entries.count { it.running }
 }
 
 enum class LibraryFilter(val label: String) { All("All"), Running("Running"), Favorites("Starred") }
@@ -35,41 +48,46 @@ enum class DetailTab(val label: String) { Overview("Overview"), Settings("Settin
  * Rebuilt on the main-logic thread, where script state changes, and published as Compose state so the render
  * thread only ever reads a finished list. Publishing only on change keeps an idle panel from recomposing.
  */
-object LibraryModel {
-    var entries by mutableStateOf(emptyList<LibraryEntry>())
+object LibraryModel : ScriptShelf {
+    override var entries by mutableStateOf(emptyList<LibraryEntry>())
         internal set
 
     /** What the store says about each listed script in the library, keyed like [LibraryEntry.id]. */
     var access by mutableStateOf(emptyMap<String, StoreAccess>())
         internal set
 
-    var selectedId by mutableStateOf<String?>(null)
-    var filter by mutableStateOf(LibraryFilter.All)
+    override var selectedId by mutableStateOf<String?>(null)
+    override var filter by mutableStateOf(LibraryFilter.All)
     var detailTab by mutableStateOf(DetailTab.Overview)
     var sendingLogsFor by mutableStateOf<String?>(null)
-    val search = OverlayText(maxLength = 40)
+    override val search = OverlayText(maxLength = 40)
+    override val local = false
 
     private val categories = mutableMapOf<String, ScriptCategory>()
 
-    val runningCount: Int get() = entries.count { it.running }
-
     fun refresh() {
         val favorites = UIState.favoriteScripts
-        val next = ScriptExecutor.scripts.values
-            .filter { ScriptLibrary.contains(it) || ScriptExecutor.isScriptRunning(it.scriptClass) }
-            .map { meta ->
-                LibraryEntry(
-                    meta = meta,
-                    category = categoryOf(meta),
-                    source = ScriptLibrary.sourceOf(meta),
-                    running = ScriptExecutor.isScriptRunning(meta.scriptClass),
-                    favorite = meta.scriptClass in favorites,
-                    startedAt = ScriptExecutor.startedAt(meta.scriptClass),
-                )
-            }
-            .sortedWith(compareByDescending<LibraryEntry> { it.running }.thenByDescending { it.favorite }.thenBy { it.meta.name.lowercase() })
+        val running = ScriptExecutor.activeScripts.mapTo(HashSet()) { it.javaClass }
+        fun entry(meta: ScriptMetadata, local: Boolean) = LibraryEntry(
+            meta = meta,
+            category = categoryOf(meta),
+            source = ScriptLibrary.sourceOf(meta),
+            running = meta.scriptClass in running,
+            favorite = meta.scriptClass in favorites,
+            startedAt = ScriptExecutor.startedAt(meta.scriptClass),
+            local = local,
+        )
+        val order = compareByDescending<LibraryEntry> { it.running }.thenByDescending { it.favorite }.thenBy { it.meta.name.lowercase() }
+        val (local, store) = ScriptExecutor.scripts.values.partition { ScriptExecutor.isLocal(it.scriptClass) }
+        val next = store
+            .filter { ScriptLibrary.contains(it) || it.scriptClass in running }
+            .map { entry(it, local = false) }
+            .sortedWith(order)
         if (next != entries) entries = next
-        val nextAccess = next.mapNotNull { entry -> Entitlements.accessOf(entry.meta.scriptClass.simpleName)?.let { entry.id to it } }.toMap()
+        val nextLocal = local.map { entry(it, local = true) }.sortedWith(order)
+        if (nextLocal != LocalScripts.entries) LocalScripts.entries = nextLocal
+        val nextAccess = (next + nextLocal)
+            .mapNotNull { entry -> Entitlements.accessOf(entry.meta.scriptClass.simpleName)?.let { entry.id to it } }.toMap()
         if (nextAccess != access) access = nextAccess
     }
 
@@ -88,4 +106,14 @@ object LibraryModel {
     private fun categoryOf(meta: ScriptMetadata): ScriptCategory = categories.getOrPut(meta.scriptClass.name) {
         meta.scriptClass.getAnnotation(ScriptDescription::class.java)?.category ?: ScriptCategory.OTHER
     }
+}
+
+/** The developer's own scripts, from `~/.projectx/scripts/dev`, kept apart from everything the store installs. */
+object LocalScripts : ScriptShelf {
+    override var entries by mutableStateOf(emptyList<LibraryEntry>())
+        internal set
+    override var selectedId by mutableStateOf<String?>(null)
+    override var filter by mutableStateOf(LibraryFilter.All)
+    override val search = OverlayText(maxLength = 40)
+    override val local = true
 }

@@ -44,6 +44,7 @@ import com.projectx.ui.compose.components.press
 import com.projectx.ui.compose.components.rememberHover
 import com.projectx.ui.compose.library.LibraryModel
 import com.projectx.ui.compose.library.LibraryScreen
+import com.projectx.ui.compose.library.LocalScripts
 import com.projectx.ui.compose.screens.CollisionScreen
 import com.projectx.ui.compose.screens.Cs2TraceScreen
 import com.projectx.ui.compose.screens.EffectsScreen
@@ -92,7 +93,7 @@ fun OverlayApp() {
                 val section = OverlayNavigation.section
                 if (section.pages.size > 1) {
                     Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp)) {
-                        PillTabs(section.pages, OverlayNavigation.page, { OverlayNavigation.open(it) }, { it.label }, { if (it == Page.Library) LibraryModel.entries.size else null })
+                        PillTabs(section.pages, OverlayNavigation.page, { OverlayNavigation.open(it) }, { it.label }, { countOn(it) })
                     }
                 } else {
                     Spacer(Modifier.height(10.dp))
@@ -108,6 +109,7 @@ fun OverlayApp() {
 private fun PageContent(page: Page) = when (page) {
     Page.Library -> LibraryScreen()
     Page.Store -> StoreScreen()
+    Page.Local -> LibraryScreen(LocalScripts)
     Page.Quests -> QuestsScreen()
     Page.Xp -> XpScreen()
     Page.Inventory -> InventoryScreen()
@@ -219,4 +221,10 @@ private object Logo {
             SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
         }.getOrNull()
     }
+}
+
+private fun countOn(page: Page): Int? = when (page) {
+    Page.Library -> LibraryModel.entries.size
+    Page.Local -> LocalScripts.entries.size.takeIf { it > 0 }
+    else -> null
 }

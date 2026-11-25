@@ -32,13 +32,25 @@ object ScriptTools {
         return 5
     }
 
+    /** "Name (local)" or "Name (store)" picks that copy; a bare name prefers the developer's own local build. */
     fun findMeta(query: String): ScriptMetadata? {
-        val q = query.trim()
+        val raw = query.trim()
+        val wantLocal = when {
+            raw.endsWith(LOCAL_SUFFIX, ignoreCase = true) -> true
+            raw.endsWith(STORE_SUFFIX, ignoreCase = true) -> false
+            else -> null
+        }
+        val q = if (wantLocal == null) raw else raw.substringBeforeLast('(').trim()
         val all = ScriptExecutor.scripts.values
+            .filter { wantLocal == null || ScriptExecutor.isLocal(it.scriptClass) == wantLocal }
+            .sortedByDescending { ScriptExecutor.isLocal(it.scriptClass) }
         return all.firstOrNull { it.name.equals(q, ignoreCase = true) }
             ?: all.firstOrNull { it.scriptClass.simpleName.equals(q, ignoreCase = true) }
             ?: all.firstOrNull { it.name.contains(q, ignoreCase = true) }
     }
+
+    private const val LOCAL_SUFFIX = "(local)"
+    private const val STORE_SUFFIX = "(store)"
 
     private fun start(meta: ScriptMetadata): String {
         if (ScriptExecutor.isScriptRunning(meta.scriptClass)) return "already_running"
@@ -77,6 +89,7 @@ object ScriptTools {
                         addJsonObject {
                             put("name", meta.name)
                             put("class", meta.scriptClass.name)
+                            put("local", ScriptExecutor.isLocal(meta.scriptClass))
                             put("version", meta.version)
                             put("author", meta.author)
                             put("running", running)
@@ -91,7 +104,7 @@ object ScriptTools {
     private fun registerReloadScripts(server: Server) {
         server.addTool(
             name = "reload_scripts",
-            description = "Purpose: Re-scan ~/.projectx/scripts/*.jar (+ the project classpath) for @ScriptDescription scripts, picking up a freshly-built script jar WITHOUT reinjecting the engine - the MCP equivalent of the ScriptsTab 'Reload scripts' button. A running script keeps its OLD code until restarted, so the hot-reload cycle is stop_script -> reload_scripts -> start_script. || Returns: envelope + {count, items[] {name, running}}. || Inputs: none. || Related: stop_script, start_script, restart_script, list_scripts.",
+            description = "Purpose: Re-scan ~/.projectx/scripts/*.jar (store installs), ~/.projectx/scripts/dev (the developer's own local builds) and the project classpath for @ScriptDescription scripts, picking up a freshly-built script jar WITHOUT reinjecting the engine - the MCP equivalent of the ScriptsTab 'Reload scripts' button. A running script keeps its OLD code until restarted, so the hot-reload cycle is stop_script -> reload_scripts -> start_script. || Returns: envelope + {count, items[] {name, running}}. || Inputs: none. || Related: stop_script, start_script, restart_script, list_scripts.",
             inputSchema = ToolSchema(properties = buildJsonObject { }, required = emptyList()),
         ) {
             safeJsonCall("reload_scripts") { _ ->
@@ -101,6 +114,7 @@ object ScriptTools {
                     for (meta in ScriptExecutor.scripts.values.sortedBy { it.name }) {
                         addJsonObject {
                             put("name", meta.name)
+                            put("local", ScriptExecutor.isLocal(meta.scriptClass))
                             put("running", ScriptExecutor.isScriptRunning(meta.scriptClass))
                         }
                     }

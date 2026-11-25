@@ -11,6 +11,7 @@ enum class ScriptSource(val label: String) {
     OFFICIAL("Official"),
     COMMUNITY("Community"),
     LOCAL("Your scripts"),
+    DEVELOPMENT("Local"),
 }
 
 /**
@@ -37,6 +38,7 @@ object ScriptLibrary {
         private set
 
     fun contains(meta: ScriptMetadata): Boolean {
+        if (ScriptExecutor.isLocal(meta.scriptClass)) return false
         seedIfNeeded()
         return meta.scriptClass.name in added || isStoreScript(meta) && added.any { simpleName(it) == meta.scriptClass.simpleName }
     }
@@ -64,7 +66,9 @@ object ScriptLibrary {
      */
     internal fun addOwned(owned: Set<String>) {
         seedIfNeeded()
-        val fresh = ScriptExecutor.scripts.values.filter { it.scriptClass.simpleName in owned && it.scriptClass.simpleName !in offered }
+        val fresh = ScriptExecutor.scripts.values.filter {
+            !ScriptExecutor.isLocal(it.scriptClass) && it.scriptClass.simpleName in owned && it.scriptClass.simpleName !in offered
+        }
         if (fresh.isEmpty()) return
         fresh.forEach {
             offered += it.scriptClass.simpleName
@@ -80,9 +84,15 @@ object ScriptLibrary {
     private fun simpleName(className: String) = className.substringAfterLast('.')
 
     /** A script from the player's own folder that the store does not list: code only they have. */
-    fun isOwnScript(meta: ScriptMetadata): Boolean = sourceOf(meta) == ScriptSource.LOCAL && !isStoreScript(meta)
+    fun isOwnScript(meta: ScriptMetadata): Boolean =
+        sourceOf(meta).let { it == ScriptSource.LOCAL || it == ScriptSource.DEVELOPMENT } && !isStoreScript(meta)
 
-    fun sourceOf(meta: ScriptMetadata): ScriptSource = sources.getOrPut(meta.scriptClass.name) {
+    fun sourceOf(meta: ScriptMetadata): ScriptSource {
+        if (ScriptExecutor.isLocal(meta.scriptClass)) return ScriptSource.DEVELOPMENT
+        return storeSourceOf(meta)
+    }
+
+    private fun storeSourceOf(meta: ScriptMetadata): ScriptSource = sources.getOrPut(meta.scriptClass.name) {
         val jar = runCatching { File(meta.scriptClass.protectionDomain.codeSource.location.toURI()).name }.getOrDefault("")
         when {
             jar.startsWith(COMMUNITY_JAR_PREFIX) -> ScriptSource.COMMUNITY
@@ -97,6 +107,7 @@ object ScriptLibrary {
         if (seeded || ScriptExecutor.scripts.isEmpty()) return
         seeded = true
         ScriptExecutor.scripts.values
+            .filter { !ScriptExecutor.isLocal(it.scriptClass) }
             .filter { sourceOf(it) != ScriptSource.COMMUNITY || it.scriptClass in UIState.favoriteScripts }
             .mapTo(added) { it.scriptClass.name }
         save()

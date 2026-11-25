@@ -11,6 +11,7 @@ import com.projectx.ui.compose.OverlayNavigation
 import com.projectx.ui.compose.Page
 import com.projectx.ui.compose.library.DetailTab
 import com.projectx.ui.compose.library.LibraryModel
+import com.projectx.ui.compose.library.LocalScripts
 import java.lang.reflect.InvocationTargetException
 
 /**
@@ -48,9 +49,13 @@ object ScriptActions {
         ConfigurableScript::class.java.isAssignableFrom(meta.scriptClass)
 
     fun openSettings(meta: ScriptMetadata) {
-        LibraryModel.selectedId = meta.scriptClass.name
+        if (ScriptExecutor.isLocal(meta.scriptClass)) {
+            LocalScripts.selectedId = "local:${meta.scriptClass.name}"
+        } else {
+            LibraryModel.selectedId = meta.scriptClass.name
+        }
         LibraryModel.detailTab = DetailTab.Settings
-        OverlayNavigation.open(Page.Library)
+        OverlayNavigation.open(if (ScriptExecutor.isLocal(meta.scriptClass)) Page.Local else Page.Library)
         UIState.showMainWindow.value = true
     }
 
