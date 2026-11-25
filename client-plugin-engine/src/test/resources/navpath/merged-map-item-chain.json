@@ -46,13 +46,13 @@
      "name": null,
      "next_node_id": 186,
      "next_node_type": "ifslot",
-     "requirements": "60;390;391"
+     "requirements": "60;391;624"
     },
     "dst": 658059,
     "requirements": [
      60,
-     390,
-     391
+     391,
+     624
     ],
     "steps": [
      {
@@ -70,7 +70,7 @@
        "name": null,
        "next_db_row": {
         "click_id": 3,
-        "component_id": 24,
+        "component_id": 23,
         "cost": 0.0,
         "dest_max_x": null,
         "dest_max_y": null,
@@ -85,7 +85,7 @@
        },
        "next_node_id": 186,
        "next_node_type": "ifslot",
-       "requirements": "60;390;391"
+       "requirements": "60;391;624"
       },
       "id": 410,
       "kind": "item"
@@ -94,7 +94,7 @@
       "cost_ms": 0.0,
       "db_row": {
        "click_id": 3,
-       "component_id": 24,
+       "component_id": 23,
        "cost": 0.0,
        "dest_max_x": null,
        "dest_max_y": null,

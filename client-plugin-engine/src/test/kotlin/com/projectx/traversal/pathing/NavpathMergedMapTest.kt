@@ -65,7 +65,7 @@ class NavpathMergedMapTest {
         assertEquals(WebLinkKind.ITEM, link.kind)
         assertEquals(22332, link.target?.id)
         assertEquals("Activate", link.action)
-        assertEquals(listOf(WebInterfaceStep(1153, 24, -1, 3)), link.chain)
+        assertEquals(listOf(WebInterfaceStep(1153, 23, -1, 3)), link.chain)
         ours(link, Tile.of(3128, 3407, 0))
     }
 
