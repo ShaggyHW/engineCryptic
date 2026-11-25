@@ -29,8 +29,12 @@ class HitmarksAndHeadbars(raw: MemorySegment) {
                 .flatMap { it.map { node -> Headbar(node.value(OHeadbar.extent)) } }
                 .toList()
         }
+    // The slot count is per entity, not fixed: AddHitmark walks as many slots as the header holds.
     val hits
-        get() = ptr.getOrNull?.let { HitArray(it.deref(OHitmarksAndHeadbars.HIT_VECTOR, HIT_SLOTS * OHit.STRIDE), HIT_SLOTS).toList() }
+        get() = ptr.getOrNull?.let {
+            val slots = it.readInt(OHitmarksAndHeadbars.HIT_CAPACITY)
+            HitArray(it.deref(OHitmarksAndHeadbars.HIT_VECTOR, slots * OHit.STRIDE), slots).toList()
+        }
 }
 
 class HitArray(val ptr: MemorySegment, val size: Int) : Iterable<Hit> {
@@ -110,6 +114,3 @@ class Headbar(raw: MemorySegment) {
     val timeLeftMillis
         get() = cyclesLeft * 20L
 }
-
-/** The hit pointer leads to a fixed run of this many inline hit slots, not to a vector header. */
-private const val HIT_SLOTS = 8

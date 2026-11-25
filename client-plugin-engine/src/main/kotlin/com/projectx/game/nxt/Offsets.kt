@@ -754,6 +754,7 @@ object OPathingEntity : OffsetObject {
 }
 
 object OHitmarksAndHeadbars : OffsetObject {
+    val HIT_CAPACITY by offset()
     val HIT_VECTOR by offset()
     val HEADBAR_LINKEDLIST_VECTOR_START by offset()
     val HEADBAR_VECTOR_END by offset()
