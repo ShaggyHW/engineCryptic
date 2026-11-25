@@ -12,6 +12,8 @@
 //! obtain privileges logs a warning and returns — it never blocks or kills the
 //! client launch.
 
+use crate::scheduler::ScriptPlan;
+
 #[cfg(all(unix, not(target_os = "macos")))]
 use linux as platform;
 #[cfg(windows)]
@@ -222,12 +224,13 @@ pub(crate) mod revision {
 ///
 /// The wait + inject runs on a detached background thread so the launcher UI is
 /// never blocked for the init delay.
-pub fn maybe_inject_projectx(launcher_pid: u32) {
+/// A `plan` is handed to the engine once it is in, so the client starts its scripts unattended.
+pub fn maybe_inject_projectx(launcher_pid: u32, plan: Option<ScriptPlan>) {
     #[cfg(any(all(unix, not(target_os = "macos")), windows))]
     {
         std::thread::Builder::new()
             .name("projectx-inject".to_string())
-            .spawn(move || platform::inject(launcher_pid))
+            .spawn(move || platform::inject(launcher_pid, plan))
             .map(|_| ())
             .unwrap_or_else(|e| {
                 log::warn!("Failed to spawn Project X injection thread: {}", e);
@@ -236,7 +239,7 @@ pub fn maybe_inject_projectx(launcher_pid: u32) {
 
     #[cfg(not(any(all(unix, not(target_os = "macos")), windows)))]
     {
-        let _ = launcher_pid;
+        let _ = (launcher_pid, plan);
         log::warn!(
             "Auto-inject Project X is enabled but not supported on this platform; skipping injection."
         );
@@ -261,6 +264,7 @@ pub fn inject_into_pid(pid: u32) -> anyhow::Result<()> {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) mod linux {
+    use crate::scheduler::{deliver_in_background, ScriptPlan};
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
     use std::time::Duration;
@@ -321,7 +325,7 @@ pub(crate) mod linux {
         })
     }
 
-    pub fn inject(launcher_pid: u32) {
+    pub fn inject(launcher_pid: u32, plan: Option<ScriptPlan>) {
         let env = match resolve_inject_env() {
             Ok(e) => e,
             Err(e) => {
@@ -358,6 +362,9 @@ pub(crate) mod linux {
                 "Auto-inject: {} already mapped in pid {}; skipping.",
                 ENGINE_SO_NAME, target_pid
             );
+            if let Some(plan) = plan {
+                deliver_in_background(target_pid, plan);
+            }
             return;
         }
 
@@ -379,6 +386,9 @@ pub(crate) mod linux {
             Ok(()) => {
                 log::info!("Auto-inject: bootstrap loaded into pid {}", target_pid);
                 crate::game::control::report_engine_start(target_pid);
+                if let Some(plan) = plan {
+                    deliver_in_background(target_pid, plan);
+                }
             }
             Err(e) => log::warn!("Auto-inject: injection failed (continuing): {}", e),
         }
@@ -824,6 +834,7 @@ pub(crate) mod linux {
 
 #[cfg(windows)]
 pub(crate) mod windows {
+    use crate::scheduler::{deliver_in_background, ScriptPlan};
     use std::ffi::OsString;
     use std::mem::size_of;
     use std::os::windows::ffi::OsStringExt;
@@ -926,7 +937,7 @@ pub(crate) mod windows {
         }
     }
 
-    pub fn inject(launcher_pid: u32) {
+    pub fn inject(launcher_pid: u32, plan: Option<ScriptPlan>) {
         let env = match resolve_inject_env() {
             Ok(e) => e,
             Err(e) => {
@@ -963,6 +974,9 @@ pub(crate) mod windows {
                 "Auto-inject: {} already mapped in pid {}; skipping.",
                 ENGINE_DLL_NAME, target_pid
             );
+            if let Some(plan) = plan {
+                deliver_in_background(target_pid, plan);
+            }
             return;
         }
 
@@ -983,6 +997,9 @@ pub(crate) mod windows {
             Ok(()) => {
                 log::info!("Auto-inject: bootstrap loaded into pid {}", target_pid);
                 crate::game::control::report_engine_start(target_pid);
+                if let Some(plan) = plan {
+                    deliver_in_background(target_pid, plan);
+                }
             }
             Err(e) => log::warn!("Auto-inject: injection failed (continuing): {}", e),
         }

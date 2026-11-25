@@ -222,6 +222,7 @@
       case "store_scripts":
         state.storeScripts = event.scripts || [];
         state.storeError = event.error || null;
+        if (state.view === "scheduler") fillScriptNames();
         renderStore();
         break;
 
@@ -372,10 +373,13 @@
     characters.forEach((character) => {
       const row = el("label", "toggle-row");
       const text = el("span", "toggle-text");
+      const own = characterPlans()[character.account_id];
       text.append(
         el("span", "toggle-title", character.display_name),
         el("small", "toggle-note", character.session_name || ""),
+        el("small", "toggle-note plan-summary", own ? planSummary(own) : "No script plan"),
       );
+      const picker = button(own ? "Edit plan" : "Set up plan", "", false, () => openPlanEditor(character));
       const tick = el("input", "switch");
       tick.type = "checkbox";
       tick.checked = schedulerChosen.has(character.account_id);
@@ -385,9 +389,175 @@
         else schedulerChosen.delete(character.account_id);
         renderAccounts();
       });
-      row.append(text, tick);
+      row.append(text, picker, tick);
       list.appendChild(row);
     });
+  }
+
+  // ---- Script plans (one per character) ----
+
+  let editing = null;
+
+  function characterPlans() {
+    if (!state.config) return {};
+    if (!state.config.character_plans) state.config.character_plans = {};
+    return state.config.character_plans;
+  }
+
+  function nameOf(accountId) {
+    const character = everyCharacter().find((c) => c.account_id === accountId);
+    return character ? character.display_name : "Character";
+  }
+
+  function saveConfig() {
+    if (state.config) send({ type: "save_config", config: state.config });
+  }
+
+  function planSummary(plan) {
+    const steps = plan.steps.map(
+      (st) => st.script + " " + st.min_minutes + (st.max_minutes !== st.min_minutes ? "-" + st.max_minutes : "") + " min",
+    );
+    return steps.join(" › ") + (plan.repeat ? " · repeats" : "");
+  }
+
+  function fillScriptNames() {
+    const names = new Set();
+    (state.storeScripts || []).forEach((sc) => {
+      if (sc.owned || sc.free) names.add(sc.name);
+    });
+    Object.values(characterPlans()).forEach((plan) => plan.steps.forEach((st) => names.add(st.script)));
+    const datalist = $("#script-names");
+    datalist.textContent = "";
+    [...names].sort().forEach((name) => datalist.appendChild(new Option(name)));
+    if (!state.storeScripts && !state.storeScriptsAsked) {
+      state.storeScriptsAsked = true;
+      send({ type: "store_scripts" });
+    }
+  }
+
+  function numberInput(value, title) {
+    const input = el("input", "input input-small");
+    input.type = "number";
+    input.min = "1";
+    input.max = "1440";
+    input.value = value;
+    input.title = title;
+    return input;
+  }
+
+  function stepRow(step) {
+    const row = el("div", "plan-step");
+    const script = el("input", "input plan-script");
+    script.type = "text";
+    script.placeholder = "Script name";
+    script.setAttribute("list", "script-names");
+    script.value = step.script || "";
+    script.dataset.role = "script";
+    const min = numberInput(step.min_minutes || 30, "Shortest run, in minutes");
+    min.dataset.role = "min";
+    const max = numberInput(step.max_minutes || 60, "Longest run, in minutes");
+    max.dataset.role = "max";
+    row.append(script, min, el("span", "muted", "to"), max, el("span", "muted", "min"));
+    const up = button("↑", "plan-move", false, () => row.previousElementSibling && row.parentElement.insertBefore(row, row.previousElementSibling));
+    up.title = "Run this script earlier";
+    const down = button("↓", "plan-move", false, () => row.nextElementSibling && row.parentElement.insertBefore(row.nextElementSibling, row));
+    down.title = "Run this script later";
+    row.append(up, down, button("Remove", "btn-danger", false, () => row.remove()));
+    return row;
+  }
+
+  function showPlan(plan) {
+    $("#plan-repeat").checked = !!plan.repeat;
+    $("#plan-pause-min").value = plan.pause_min_seconds ?? 15;
+    $("#plan-pause-max").value = plan.pause_max_seconds ?? 90;
+    const steps = $("#plan-steps");
+    steps.textContent = "";
+    plan.steps.forEach((st) => steps.appendChild(stepRow(st)));
+  }
+
+  function openPlanEditor(character) {
+    editing = character.account_id;
+    const own = characterPlans()[editing];
+    $("#plan-title").textContent = character.display_name + "'s script plan";
+    showPlan(
+      own || {
+        steps: [{ script: "", min_minutes: 30, max_minutes: 60 }],
+        repeat: true,
+        pause_min_seconds: 15,
+        pause_max_seconds: 90,
+      },
+    );
+    const copy = $("#plan-copy");
+    copy.textContent = "";
+    copy.appendChild(new Option("Another character…", ""));
+    Object.keys(characterPlans())
+      .filter((id) => id !== editing)
+      .forEach((id) => copy.appendChild(new Option(nameOf(id), id)));
+    copy.parentElement.hidden = copy.options.length < 2;
+    $("#btn-plan-delete").hidden = !own;
+    $("#plan-error").hidden = true;
+    $("#plan-card").hidden = false;
+    fillScriptNames();
+    $("#plan-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function closePlanEditor() {
+    editing = null;
+    $("#plan-card").hidden = true;
+  }
+
+  function copyPlan() {
+    const from = characterPlans()[$("#plan-copy").value];
+    if (from) showPlan(from);
+    $("#plan-copy").value = "";
+  }
+
+  function planError(message) {
+    const box = $("#plan-error");
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  function savePlan(e) {
+    e.preventDefault();
+    if (!editing) return;
+    const steps = [...$("#plan-steps").children]
+      .map((row) => ({
+        script: row.querySelector('[data-role="script"]').value.trim(),
+        min_minutes: Number(row.querySelector('[data-role="min"]').value),
+        max_minutes: Number(row.querySelector('[data-role="max"]').value),
+      }))
+      .filter((st) => st.script);
+    const pauseMin = Number($("#plan-pause-min").value);
+    const pauseMax = Number($("#plan-pause-max").value);
+    if (!steps.length) return planError("Add at least one script.");
+    const bad = steps.find((st) => !(st.min_minutes >= 1 && st.max_minutes <= 1440 && st.min_minutes <= st.max_minutes));
+    if (bad) return planError(bad.script + " needs a shortest run of at least 1 minute, no longer than its longest (up to 1440).");
+    if (!(pauseMin >= 0 && pauseMax <= 600 && pauseMin <= pauseMax)) {
+      return planError("The pause must be between 0 and 600 seconds, the shorter first.");
+    }
+    const name = nameOf(editing);
+    characterPlans()[editing] = {
+      name,
+      steps,
+      repeat: $("#plan-repeat").checked,
+      pause_min_seconds: pauseMin,
+      pause_max_seconds: pauseMax,
+    };
+    saveConfig();
+    logStatus("Script plan for " + name + " saved", "success");
+    closePlanEditor();
+    renderScheduler();
+  }
+
+  function deletePlan() {
+    if (!editing) return;
+    const name = nameOf(editing);
+    delete characterPlans()[editing];
+    saveConfig();
+    logStatus("Script plan for " + name + " removed");
+    closePlanEditor();
+    renderScheduler();
   }
 
   function onSchedulerStatus(event) {
@@ -732,7 +902,7 @@
 
     // Rebuilding identical cards every poll would steal focus from a button, so redraw only on change.
     const signature = JSON.stringify(
-      clients.map((c) => [c.pid, c.state, c.version, c.reloads, c.detail, isBusy(state.busyPids, c.pid)])
+      clients.map((c) => [c.pid, c.state, c.version, c.reloads, c.detail, c.plan, Object.keys(characterPlans()).length, isBusy(state.busyPids, c.pid)])
     );
     if (signature === state.renderedClients) return;
     state.renderedClients = signature;
@@ -763,6 +933,10 @@
     card.appendChild(el("span", "run-script", parts.length ? parts.join(" · ") : "No engine loaded"));
     // A client that never answered its control socket has nothing else to act on, so show the bootstrap's words.
     if (c.detail) card.appendChild(el("span", "run-note run-error", c.detail));
+    if (c.plan) {
+      card.appendChild(el("span", "run-note", "Plan " + c.plan.name + ": " + c.plan.detail));
+      if (c.plan.problem) card.appendChild(el("span", "run-note run-error", c.plan.problem));
+    }
 
     const actions = el("div", "run-buttons");
     if (c.state === "not-injected" || c.state === "unloaded") {
@@ -770,6 +944,24 @@
     } else if (c.state === "active") {
       actions.appendChild(button(busy ? "…" : "Reinject", "", busy, () => clientAction(c.pid, "reinject_client")));
       actions.appendChild(button("Uninject", "btn-danger", busy, () => clientAction(c.pid, "uninject_client")));
+    }
+    if (c.state === "active" && c.plan) {
+      actions.appendChild(button("Stop plan", "", busy, () => clientAction(c.pid, "stop_plan")));
+    } else if (c.state === "active" && Object.keys(characterPlans()).length) {
+      const select = el("select", "input input-small plan-picker");
+      select.title = "Whose script plan to run on this client";
+      Object.keys(characterPlans()).forEach((id) => select.appendChild(new Option(nameOf(id) + "'s plan", id)));
+      actions.appendChild(select);
+      actions.appendChild(
+        button("Run plan", "btn-strong", busy, () => {
+          const plan = characterPlans()[select.value];
+          if (!plan) return;
+          state.busyPids[c.pid] = Date.now();
+          state.renderedClients = null;
+          renderClients();
+          send({ type: "run_plan", pid: c.pid, plan: plan });
+        }),
+      );
     }
     // "starting" and "error" have no socket to command yet, and re-injecting a mapped bootstrap is never right.
     if (actions.childElementCount) card.appendChild(actions);
@@ -993,6 +1185,11 @@
   navItems.forEach((item) => item.addEventListener("click", () => showView(item.dataset.view)));
   $("#btn-scheduler-start").addEventListener("click", startScheduler);
   $("#btn-scheduler-stop").addEventListener("click", () => send({ type: "scheduler_stop" }));
+  $("#plan-copy").addEventListener("change", copyPlan);
+  $("#btn-plan-add-step").addEventListener("click", () => $("#plan-steps").appendChild(stepRow({})));
+  $("#btn-plan-cancel").addEventListener("click", closePlanEditor);
+  $("#btn-plan-delete").addEventListener("click", deletePlan);
+  $("#plan-editor").addEventListener("submit", savePlan);
 
   btnLogin.addEventListener("click", () => send({ type: "login" }));
   btnHeroPlay.addEventListener("click", () => {

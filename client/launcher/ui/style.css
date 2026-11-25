@@ -1609,3 +1609,121 @@ a {
     transform: none;
   }
 }
+
+/* ---- Script plans ---- */
+
+.plan-card {
+  margin-top: 14px;
+}
+
+.plan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--abyss-1);
+  border: 1px solid var(--edge);
+}
+
+.plan-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--abyss-1);
+  border: 1px solid var(--edge-hi);
+}
+
+.plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-script {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.plan-step .input-small {
+  width: 76px;
+}
+
+.plan-add {
+  align-self: flex-start;
+}
+
+.plan-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.plan-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-range .input-small {
+  width: 90px;
+}
+
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plan-picker {
+  flex: 0 0 auto;
+  width: 150px;
+  max-width: 45%;
+}
+
+.plan-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.plan-summary {
+  color: var(--gold-dim);
+}
+
+.plan-move {
+  min-width: 32px;
+  padding-left: 0;
+  padding-right: 0;
+}

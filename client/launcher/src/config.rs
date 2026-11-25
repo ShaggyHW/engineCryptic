@@ -2,12 +2,14 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::game::process::launcher_binary_name;
 use crate::game::renderer::RendererPref;
+use crate::scheduler::ScriptPlan;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum ServerMode {
@@ -79,6 +81,9 @@ pub struct Config {
     pub renderer: RendererPref,
     #[serde(default)]
     pub plugins: PluginsConfig,
+    /// Each character's own script plan, run when its client starts: account id to plan.
+    #[serde(default)]
+    pub character_plans: HashMap<String, ScriptPlan>,
 }
 
 /// Where the launcher reads the engine release from; overridable so a fork can point it at its own repository.
@@ -105,6 +110,7 @@ impl Default for Config {
             debug_logging: false,
             renderer: RendererPref::default(),
             plugins: PluginsConfig::default(),
+            character_plans: HashMap::new(),
         }
     }
 }

@@ -194,8 +194,8 @@
           <div class="page-head">
             <div class="page-head-text">
               <span class="eyebrow">Scheduler</span>
-              <h1 class="page-title">Launch in turn</h1>
-              <p class="page-sub">Starts each character in turn and injects the engine, waiting between them. The next one begins only once the previous client is up.</p>
+              <h1 class="page-title">Launch in turn, run plans</h1>
+              <p class="page-sub">Starts each character in turn and injects the engine, waiting between them. Each character can have its own script plan: the scripts it runs, in its own order and for its own times, started as soon as it is in game.</p>
             </div>
             <div class="page-actions">
               <button id="btn-scheduler-start" class="btn btn-small btn-primary" type="button">
@@ -233,6 +233,49 @@
               </div>
             </section>
           </div>
+          <section id="plan-card" class="card plan-card" hidden>
+            <div class="plan-head">
+              <div>
+                <h2 id="plan-title" class="card-title">Script plan</h2>
+                <p class="muted plan-sub">Runs these scripts one after another, each for a random time between the shortest and longest you set, with a short pause between them. It starts once this character is in game.</p>
+              </div>
+              <label class="plan-copy">
+                <span class="muted">Copy from</span>
+                <select id="plan-copy" class="input input-small plan-picker"></select>
+              </label>
+            </div>
+            <form id="plan-editor" class="plan-editor">
+              <div class="field">
+                <span class="field-label">Scripts, in order</span>
+                <div id="plan-steps" class="plan-steps"></div>
+                <button id="btn-plan-add-step" class="btn btn-small plan-add" type="button">Add a script</button>
+              </div>
+              <div class="plan-options">
+                <label class="toggle-row">
+                  <span class="toggle-text">
+                    <span class="toggle-title">Repeat the plan</span>
+                    <small class="toggle-note">Starts over from the first script after the last one.</small>
+                  </span>
+                  <input type="checkbox" id="plan-repeat" class="switch">
+                </label>
+                <label class="field">
+                  <span class="field-label">Pause between scripts (seconds)</span>
+                  <span class="plan-range">
+                    <input id="plan-pause-min" class="input input-small" type="number" min="0" max="600" value="15">
+                    <span class="muted">to</span>
+                    <input id="plan-pause-max" class="input input-small" type="number" min="0" max="600" value="90">
+                  </span>
+                </label>
+              </div>
+              <p id="plan-error" class="notice notice-error" hidden></p>
+              <div class="plan-actions">
+                <button id="btn-plan-save" class="btn btn-small btn-primary" type="submit">Save plan</button>
+                <button id="btn-plan-cancel" class="btn btn-small" type="button">Cancel</button>
+                <button id="btn-plan-delete" class="btn btn-small btn-danger" type="button">Remove plan</button>
+              </div>
+            </form>
+            <datalist id="script-names"></datalist>
+          </section>
         </div>
       </section>
 

@@ -1,5 +1,7 @@
 package com.projectx.game.bootstrap
 
+import com.projectx.scheduler.ScriptPlan
+import com.projectx.scheduler.ScriptPlans
 import com.projectx.script.ConfigurableScript
 import com.projectx.script.ScriptConfigStore
 import com.projectx.script.ScriptExecutor
@@ -8,10 +10,11 @@ import com.projectx.script.Script
 import com.projectx.script.api.hopToWorld
 import com.projectx.store.RunEnd
 import com.projectx.store.RunReports
+import java.util.Base64
 
 /**
  * The control-socket commands only the engine can answer, for a launcher driving an unattended
- * client: which scripts this client has, start one, stop it, hop a world.
+ * client: which scripts this client has, start one, stop it, hop a world, or run a plan of them.
  *
  * Separate from the MCP tools that do the same things because the MCP server is off unless someone
  * turns it on (see [Bootstrap]), and a scheduler cannot ask a user to turn anything on. The socket
@@ -33,6 +36,7 @@ object EngineCommands {
                 "STOP" -> stop(argument)
                 "RUNNING" -> running()
                 "WORLD" -> world(argument)
+                "PLAN" -> plan(argument)
                 else -> "ERR unknown command: $verb"
             }
         }.getOrElse { "ERR ${it::class.java.simpleName}: ${it.message}" }
@@ -88,7 +92,29 @@ object EngineCommands {
         }
     }
 
-    private fun find(name: String): ScriptMetadata? {
+    /**
+     * `PLAN SET <base64 json>` runs a [ScriptPlan] in place of any other, `PLAN STOP` ends it and its script, and
+     * `PLAN STATUS` says where it is. The plan is base64 so it stays on one line.
+     */
+    private fun plan(argument: String): String {
+        val sub = argument.substringBefore(' ').uppercase()
+        val rest = argument.substringAfter(' ', "").trim()
+        return when (sub) {
+            "SET" -> {
+                val json = runCatching { String(Base64.getDecoder().decode(rest), Charsets.UTF_8) }.getOrNull()
+                    ?: return "ERR PLAN SET needs a base64 plan"
+                ScriptPlan.parse(json).fold(
+                    onSuccess = { ScriptPlans.set(it); "OK running plan ${it.name}" },
+                    onFailure = { "ERR ${it.message}" },
+                )
+            }
+            "STOP" -> if (ScriptPlans.stop()) "OK plan stopped" else "OK no plan"
+            "STATUS" -> "OK ${ScriptPlans.status()}"
+            else -> "ERR PLAN takes SET, STOP or STATUS"
+        }
+    }
+
+    internal fun find(name: String): ScriptMetadata? {
         val all = ScriptExecutor.scripts.values
         return all.firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?: all.firstOrNull { it.scriptClass.simpleName.equals(name, ignoreCase = true) }

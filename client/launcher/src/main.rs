@@ -11,6 +11,7 @@ mod helpers;
 mod java;
 mod navpath;
 mod plugins;
+mod scheduler;
 mod store;
 mod ui;
 

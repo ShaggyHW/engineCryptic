@@ -23,6 +23,7 @@ import com.projectx.game.nxt.OFunctions
 import com.projectx.mcp.MainLogicTickQueue
 import com.projectx.puzzle.invention.InventionDiscoveryFeature
 import com.projectx.script.ScriptExecutor
+import com.projectx.scheduler.ScriptPlans
 import com.projectx.store.RareDrops
 import com.projectx.store.RunReports
 import com.projectx.traversal.MasterFarmerHat
@@ -50,6 +51,7 @@ object ClientMainLogic {
                 ScriptExecutor.mainLogic()
                 RunReports.tick()
                 RareDrops.tick()
+                ScriptPlans.tick()
                 MasterFarmerHat.tick()
                 CS2Executor.mainLogicTick()
                 InputRecorder.tickFlush()

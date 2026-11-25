@@ -17,6 +17,7 @@ use crate::game::process::{host_os_dir, launcher_binary_name, LaunchParams, Patc
 use crate::game::renderer::{note_vulkan_launch_crash, Renderer, RendererPref};
 use crate::game::rs3::{with_host_binary_type, JS5_RSA_PARAM, LOGIN_RSA_PARAM};
 use crate::plugins::{self, Catalog, LauncherStatus};
+use crate::scheduler::{self as plans, PlanState, ScriptPlan};
 use crate::store;
 use url::Url;
 
@@ -69,6 +70,12 @@ pub enum IpcMessage {
     /// Stop the run after the launch in flight; nothing already started is killed.
     #[serde(rename = "scheduler_stop")]
     SchedulerStop,
+    /// Hand a script plan to the engine in a running client, in place of any plan it runs.
+    #[serde(rename = "run_plan")]
+    RunPlan { pid: u32, plan: ScriptPlan },
+    /// End the plan in a running client and the script it is running.
+    #[serde(rename = "stop_plan")]
+    StopPlan { pid: u32 },
     /// Persist the character last selected under a Jagex account (no response).
     #[serde(rename = "select_character")]
     SelectCharacter { user_id: String, account_id: String },
@@ -149,7 +156,7 @@ pub enum IpcEvent {
     },
     /// The current list of discovered rs2client processes + their engine state.
     #[serde(rename = "clients_list")]
-    ClientsList { clients: Vec<ClientStatus> },
+    ClientsList { clients: Vec<ClientRow> },
     /// Result of an inject/uninject/reinject action on a specific pid.
     #[serde(rename = "client_control_result")]
     ClientControlResult {
@@ -321,6 +328,7 @@ fn do_launch_live(
     patch: PatchEnv<'_>,
     auto_inject: bool,
     close_after: bool,
+    plan: Option<ScriptPlan>,
 ) {
     let mut attempt = 1;
     let mut config_uri = config_uri.to_string();
@@ -367,7 +375,7 @@ fn do_launch_live(
         #[cfg(not(windows))]
         let _ = (attempt, &mut config_uri, &mut opengl_fallback_uri);
 
-        return finish_launch(reporter, pid, auto_inject, close_after);
+        return finish_launch(reporter, pid, auto_inject, close_after, plan);
     }
 }
 
@@ -381,12 +389,12 @@ const LAUNCHER_ATTEMPTS: u32 = 3;
 const LAUNCHER_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Common tail of a successful spawn: announce completion, optionally inject the
-/// Project X engine, optionally close the launcher.
-fn finish_launch(reporter: &LaunchReporter, pid: u32, auto_inject: bool, close_after: bool) {
+/// Project X engine (and hand it the character's script plan), optionally close the launcher.
+fn finish_launch(reporter: &LaunchReporter, pid: u32, auto_inject: bool, close_after: bool, plan: Option<ScriptPlan>) {
     crate::navpath::note_client_launch();
     reporter.complete();
     if auto_inject {
-        crate::game::inject::maybe_inject_projectx(pid);
+        crate::game::inject::maybe_inject_projectx(pid, plan);
     }
     if close_after {
         let _ = reporter.cmd_tx.send(AppCommand::CloseWindow);
@@ -734,6 +742,25 @@ pub struct IpcState {
     store_pairing: Arc<AtomicBool>,
 }
 
+/// A client as the Clients panel shows it: its engine state and the plan it runs, if any.
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientRow {
+    #[serde(flatten)]
+    pub status: ClientStatus,
+    pub plan: Option<PlanState>,
+}
+
+/// Every running client with the plan it runs, for the Clients panel. Blocking: one or two socket round trips each.
+fn client_rows() -> Vec<ClientRow> {
+    crate::game::control::discover_clients()
+        .into_iter()
+        .map(|status| {
+            let plan = if status.state == "active" { plans::status(status.pid) } else { None };
+            ClientRow { status, plan }
+        })
+        .collect()
+}
+
 /// One account in a scheduler run.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScheduledAccount {
@@ -859,6 +886,12 @@ impl IpcState {
                     index: None,
                     total: None,
                 });
+            }
+            IpcMessage::RunPlan { pid, ref plan } => {
+                self.handle_plan_action(pid, Some(plan.clone()));
+            }
+            IpcMessage::StopPlan { pid } => {
+                self.handle_plan_action(pid, None);
             }
             IpcMessage::SelectCharacter {
                 ref user_id,
@@ -1000,11 +1033,29 @@ impl IpcState {
     fn handle_list_clients(&self) {
         let cmd_tx = self.cmd_tx.clone();
         tokio::task::spawn_blocking(move || {
-            let clients = crate::game::control::discover_clients();
+            let clients = client_rows();
             send_webview_event(&cmd_tx, &IpcEvent::ClientsList { clients });
             for (pid, message) in crate::game::control::take_exit_reports() {
                 send_webview_event(&cmd_tx, &IpcEvent::ClientControlResult { pid, ok: false, message });
             }
+        });
+    }
+
+    /// Hands `plan` to the engine in `pid`, or with None ends the plan it runs, then reports back and refreshes the list.
+    fn handle_plan_action(&self, pid: u32, plan: Option<ScriptPlan>) {
+        let cmd_tx = self.cmd_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = match &plan {
+                Some(plan) => plans::deliver(pid, plan),
+                None => plans::stop(pid),
+            };
+            let (ok, message) = match result {
+                Ok(reply) => (true, reply),
+                Err(e) => (false, e.to_string()),
+            };
+            send_webview_event(&cmd_tx, &IpcEvent::ClientControlResult { pid, ok, message });
+            let clients = client_rows();
+            send_webview_event(&cmd_tx, &IpcEvent::ClientsList { clients });
         });
     }
 
@@ -1091,7 +1142,7 @@ impl IpcState {
             // scan is a process walk plus a socket round-trip per client, so it
             // stays off the async runtime.
             if let Ok(clients) =
-                tokio::task::spawn_blocking(crate::game::control::discover_clients).await
+                tokio::task::spawn_blocking(client_rows).await
             {
                 send_webview_event(&cmd_tx, &IpcEvent::ClientsList { clients });
             }
@@ -1303,7 +1354,9 @@ impl IpcState {
         let scheduled = self.scheduler_running.load(Ordering::SeqCst);
         let close_after = config.close_after_launch && !scheduled;
         let custom_cmd = config.custom_launch_command.clone();
-        let auto_inject = config.auto_inject_projectx || scheduled;
+        // A character with a script plan needs the engine to run it.
+        let plan = config.character_plans.get(&account_id).filter(|p| !p.steps.is_empty()).cloned();
+        let auto_inject = config.auto_inject_projectx || scheduled || plan.is_some();
         let plugins_cfg = config.plugins.clone();
         let renderer_pref = config.renderer;
         let base_config_uri = config
@@ -1387,6 +1440,7 @@ impl IpcState {
                 PatchEnv::default(),
                 auto_inject,
                 close_after,
+                plan,
             );
         });
     }
@@ -1544,7 +1598,7 @@ impl IpcState {
                 Some(&projectx_dir), // CWD = custom data dir
                 &ServerMode::Custom,
             ) {
-                Ok(pid) => finish_launch(&reporter, pid, auto_inject, close_after),
+                Ok(pid) => finish_launch(&reporter, pid, auto_inject, close_after, None),
                 Err(e) => reporter.error(format!("Failed to launch: {}", e)),
             }
         });
