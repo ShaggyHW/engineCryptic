@@ -427,11 +427,11 @@
   }
 
   function fillScriptNames() {
+    // Only scripts this account may run now: a live subscription or trial.
     const names = new Set();
     (state.storeScripts || []).forEach((sc) => {
-      if (sc.owned || sc.free) names.add(sc.name);
+      if (sc.owned) names.add(sc.name);
     });
-    Object.values(characterPlans()).forEach((plan) => plan.steps.forEach((st) => names.add(st.script)));
     const datalist = $("#script-names");
     datalist.textContent = "";
     [...names].sort().forEach((name) => datalist.appendChild(new Option(name)));
