@@ -19,12 +19,12 @@ class Inventories(val ptr: MemorySegment) {
         return Inventory(inventory.reinterpret(0x40L))
     }
 
-    /** An inventory the client has not built yet (a closed interface) yields a non-existent
-     *  [Inventory] that reads as empty, so callers can poll it without guarding. */
+    /** An inventory the client has not built yet (an empty backpack, a closed interface) yields a non-existent
+     *  [Inventory] that reads as empty, with every slot free, so callers can poll it without guarding. */
     fun getWithInterface(invId: Int, interfaceId: Int, componentId: Int) : Inventory {
         val inventory = getInventoryHandle.invokeExact(ptr, invId, 0.toByte()) as MemorySegment
-        if (inventory.address() == 0L) return Inventory(MemorySegment.ofAddress(0L), interfaceId, componentId)
-        return Inventory(inventory.reinterpret(0x40L), interfaceId, componentId)
+        if (inventory.address() == 0L) return Inventory(MemorySegment.ofAddress(0L), interfaceId, componentId, invId)
+        return Inventory(inventory.reinterpret(0x40L), interfaceId, componentId, invId)
     }
 
     fun exists(invId: Int) = (getInventoryHandle.invokeExact(ptr, invId, 0.toByte()) as MemorySegment).address() != 0L

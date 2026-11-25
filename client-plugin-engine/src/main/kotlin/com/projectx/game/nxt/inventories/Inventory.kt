@@ -17,12 +17,26 @@ import world.gregs.voidps.cache.type.data.VarBitType.Companion.BIT_MASKS
 import java.lang.foreign.MemorySegment
 
 class Inventory(raw: MemorySegment, val interfaceId: Int = -1, val componentId: Int = -1) : Iterable<Item> {
+    private var requestedId = -1
+
+    /** [invId] names an inventory the client may not have built yet, so it still knows its id and size. */
+    constructor(raw: MemorySegment, interfaceId: Int, componentId: Int, invId: Int) : this(raw, interfaceId, componentId) {
+        requestedId = invId
+    }
+
     val ptr: MemorySegment = raw.atLeast(OInventory.extent)
     val exists: Boolean
         get() = ptr.address() != 0L
 
     val id: Int
-        get() = ptr.getInt(OInventory.INVENTORY_ID)
+        get() = if (exists) ptr.getInt(OInventory.INVENTORY_ID) else requestedId
+
+    /**
+     * How many slots it has. The client only builds an inventory once something goes in it, so an empty backpack
+     * has no slots in memory; its size then comes from the inventory's cache definition.
+     */
+    val capacity: Int
+        get() = if (exists) items.size.toInt() else Cache.inv(requestedId)?.length ?: 0
 
     val items: Vector
         get() = Vector(ptr.pointerAtOffset(OInventory.INVENTORY_ITEMS, 0x20L), 8)
@@ -117,7 +131,7 @@ class Inventory(raw: MemorySegment, val interfaceId: Int = -1, val componentId: 
         get() = if (!exists) 0 else count { true }
 
     val freeSlots: Int
-        get() = if (!exists) 0 else items.size.toInt() - count { true }
+        get() = capacity - usedSlots
 
     val isFull
         get() = exists && items.size != 0L && freeSlots == 0

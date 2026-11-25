@@ -127,13 +127,14 @@ object InventoryTools {
                 val id = args["id"]?.jsonPrimitive?.content?.toIntOrNull() ?: throw BadRequest("missing/invalid 'id'")
                 val includeEmpty = args["include_empty_slots"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
                 val client = requireLoggedIn()
-                if (!client.inventoryManager.exists(id)) throw EngineState("inventory $id not allocated for this player")
-                val inv = client.inventoryManager[id]
+                val inv = client.inventoryManager.getWithInterface(id, -1, -1)
+                if (!inv.exists && inv.capacity == 0) throw EngineState("inventory $id not allocated for this player")
                 put("inv_id", id)
+                put("allocated", inv.exists)
                 putAddr(inv.ptr.address())
                 put("interface_id", inv.interfaceId)
                 put("component_id", inv.componentId)
-                val size = inv.items.size.toInt()
+                val size = inv.capacity
                 val free = inv.freeSlots
                 put("size", size)
                 put("used_slots", size - free)
