@@ -7,13 +7,17 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
-/// One script in a plan, run for a random while between `min_minutes` and `max_minutes`.
+/// One script in a plan, run for a random while between `min_minutes` and `max_minutes`, with `settings` (the script's
+/// setting keys to values) on top of the ones the player saved for it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
     pub script: String,
     pub min_minutes: u32,
     pub max_minutes: u32,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub settings: Map<String, Value>,
 }
 
 fn default_pause_min() -> u32 {
@@ -85,6 +89,19 @@ pub fn deliver_in_background(pid: u32, plan: ScriptPlan) {
     }
 }
 
+/// A script's settings as the engine in `pid` describes them (`CONFIG`): its name there and a list of settings, each
+/// with a key, name, kind, value and, for a choice, its choices.
+pub fn script_settings(pid: u32, script: &str) -> anyhow::Result<(String, Value)> {
+    let reply = crate::game::control::send_command(pid, &format!("CONFIG {}", script))?;
+    let body = match reply.trim().strip_prefix("OK ") {
+        Some(body) => body,
+        None => anyhow::bail!("{}", reply.trim_start_matches("ERR ").trim()),
+    };
+    let (name, encoded) = body.split_once('|').ok_or_else(|| anyhow::anyhow!("the engine sent no settings"))?;
+    let json = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+    Ok((name.to_string(), serde_json::from_slice(&json)?))
+}
+
 /// Ends the plan in `pid` and the script it is running.
 pub fn stop(pid: u32) -> anyhow::Result<String> {
     let reply = crate::game::control::send_command(pid, "PLAN STOP")?;
@@ -132,7 +149,12 @@ mod tests {
     fn a_plan_written_by_the_launcher_has_the_shape_the_engine_reads() {
         let plan = ScriptPlan {
             name: "Skills".into(),
-            steps: vec![PlanStep { script: "Fishing".into(), min_minutes: 30, max_minutes: 60 }],
+            steps: vec![PlanStep {
+                script: "Fishing".into(),
+                min_minutes: 30,
+                max_minutes: 60,
+                settings: Map::from_iter([("bank".to_string(), Value::Bool(true))]),
+            }],
             repeat: true,
             pause_min_seconds: 15,
             pause_max_seconds: 90,
@@ -141,6 +163,7 @@ mod tests {
         assert_eq!(json["steps"][0]["min_minutes"], 30);
         assert_eq!(json["pause_max_seconds"], 90);
         assert_eq!(json["repeat"], true);
+        assert_eq!(json["steps"][0]["settings"]["bank"], true);
         let old: ScriptPlan = serde_json::from_str(r#"{"name":"x","steps":[]}"#).unwrap();
         assert_eq!(old.pause_min_seconds, 15);
     }

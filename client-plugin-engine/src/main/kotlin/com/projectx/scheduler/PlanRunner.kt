@@ -1,13 +1,17 @@
 package com.projectx.scheduler
 
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.max
 
 /** What a plan needs of the client. */
 internal interface PlanHost {
     fun loggedIn(): Boolean
 
-    /** Starts [script]; returns the name it runs under, or null when there is no such script or it was refused. */
-    fun start(script: String): String?
+    /**
+     * Starts [script] with [settings] on top of its saved ones; returns the name it runs under, or null when there is no
+     * such script or it was refused.
+     */
+    fun start(script: String, settings: Map<String, JsonPrimitive>): String?
 
     fun isRunning(name: String): Boolean
 
@@ -58,7 +62,7 @@ internal class PlanRunner(val plan: ScriptPlan, private val host: PlanHost) {
 
     private fun begin(step: Int, now: Long) {
         val wanted = plan.steps[step]
-        val name = host.start(wanted.script)
+        val name = host.start(wanted.script, wanted.settings)
         if (name == null) {
             problem = "${wanted.script} would not start: check its name and that you own it"
             pauseBefore(step + 1, now)

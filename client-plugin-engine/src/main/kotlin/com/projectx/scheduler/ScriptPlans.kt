@@ -8,6 +8,7 @@ import com.projectx.script.ScriptConfigStore
 import com.projectx.script.ScriptExecutor
 import com.projectx.store.RunEnd
 import com.projectx.store.RunReports
+import kotlinx.serialization.json.JsonPrimitive
 import java.util.concurrent.ThreadLocalRandom
 
 /**
@@ -58,11 +59,14 @@ internal object ScriptPlans {
 private object EnginePlanHost : PlanHost {
     override fun loggedIn(): Boolean = Bootstrap.client.mainState == MainState.LOGGED_IN
 
-    override fun start(script: String): String? {
+    override fun start(script: String, settings: Map<String, JsonPrimitive>): String? {
         val meta = EngineCommands.find(script) ?: return null
         if (!ScriptExecutor.isScriptRunning(meta.scriptClass)) {
             val instance = meta.scriptClass.getDeclaredConstructor().newInstance()
-            if (instance is ConfigurableScript) ScriptConfigStore.applyTo(instance)
+            if (instance is ConfigurableScript) {
+                ScriptConfigStore.applyTo(instance)
+                ScriptConfigStore.applyValues(instance, settings)
+            }
             ScriptExecutor.activate(instance)
         }
         return meta.name.takeIf { ScriptExecutor.isScriptRunning(meta.scriptClass) }

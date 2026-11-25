@@ -1,5 +1,6 @@
 package com.projectx.scheduler
 
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -13,13 +14,15 @@ class PlanRunnerTest {
         var rolled = 0.0
         val running = mutableSetOf<String>()
         val started = mutableListOf<String>()
+        val settingsGiven = mutableListOf<Map<String, JsonPrimitive>>()
         val stopped = mutableListOf<String>()
 
         override fun loggedIn() = loggedIn
-        override fun start(script: String): String? {
+        override fun start(script: String, settings: Map<String, JsonPrimitive>): String? {
             if (script !in known) return null
             running += script
             started += script
+            settingsGiven += settings
             return script
         }
         override fun isRunning(name: String) = name in running
@@ -142,5 +145,18 @@ class PlanRunnerTest {
         assertTrue(ScriptPlan.parse("""{"name":"x","steps":[]}""").isFailure)
         assertTrue(ScriptPlan.parse("""{"name":"x","steps":[{"script":"Fishing","min_minutes":60,"max_minutes":30}]}""").isFailure)
         assertTrue(ScriptPlan.parse("not json").isFailure)
+    }
+
+    @Test
+    fun `a step's own settings go to its script`() {
+        val plan = ScriptPlan.parse(
+            """{"name":"x","steps":[{"script":"Fishing","min_minutes":5,"max_minutes":5,"settings":{"bank":true,"spot":"Barbarian","count":3,"nested":{"a":1}}}]}""",
+        ).getOrThrow()
+        val host = FakeHost()
+        PlanRunner(plan, host).tick()
+        assertEquals(
+            mapOf("bank" to JsonPrimitive(true), "spot" to JsonPrimitive("Barbarian"), "count" to JsonPrimitive(3L)),
+            host.settingsGiven.single(),
+        )
     }
 }

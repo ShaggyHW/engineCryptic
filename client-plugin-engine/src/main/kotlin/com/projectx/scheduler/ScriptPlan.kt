@@ -1,10 +1,20 @@
 package com.projectx.scheduler
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject as GsonObject
 import com.google.gson.annotations.SerializedName
+import kotlinx.serialization.json.JsonPrimitive
 
-/** One script in a plan, run for a random while between [minMinutes] and [maxMinutes]. */
-internal data class PlanStep(val script: String, val minMinutes: Int, val maxMinutes: Int)
+/**
+ * One script in a plan, run for a random while between [minMinutes] and [maxMinutes], with [settings] (stored setting
+ * keys to values) on top of the ones the player saved for it.
+ */
+internal data class PlanStep(
+    val script: String,
+    val minMinutes: Int,
+    val maxMinutes: Int,
+    val settings: Map<String, JsonPrimitive> = emptyMap(),
+)
 
 /**
  * Scripts run one after another, each for its own random while, with a short random pause between them. A plan that
@@ -22,6 +32,7 @@ internal data class ScriptPlan(
         val script: String?,
         @SerializedName("min_minutes") val minMinutes: Int?,
         @SerializedName("max_minutes") val maxMinutes: Int?,
+        val settings: GsonObject?,
     )
 
     private class RawPlan(
@@ -38,6 +49,17 @@ internal data class ScriptPlan(
         private const val MAX_MINUTES = 24 * 60
         private const val MAX_PAUSE_SECONDS = 10 * 60
 
+        /** Booleans, numbers and text only: what a setting can hold. */
+        private fun settingsOf(raw: GsonObject?): Map<String, JsonPrimitive> =
+            raw?.entrySet()?.mapNotNull { (key, value) ->
+                val p = value?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive ?: return@mapNotNull null
+                key to when {
+                    p.isBoolean -> JsonPrimitive(p.asBoolean)
+                    p.isNumber -> JsonPrimitive(p.asLong)
+                    else -> JsonPrimitive(p.asString)
+                }
+            }?.toMap().orEmpty()
+
         /** The plan in [json], or why it cannot run. */
         fun parse(json: String): Result<ScriptPlan> = runCatching {
             val raw = Gson().fromJson(json, RawPlan::class.java) ?: error("empty plan")
@@ -48,7 +70,7 @@ internal data class ScriptPlan(
                 require(min in 1..MAX_MINUTES && max in min..MAX_MINUTES) {
                     "$script must run between 1 minute and 24 hours, with the shortest no longer than the longest"
                 }
-                PlanStep(script, min, max)
+                PlanStep(script, min, max, settingsOf(step.settings))
             }
             require(steps.isNotEmpty()) { "a plan needs at least one script" }
             val pauseMin = raw.pauseMinSeconds ?: DEFAULT_PAUSE_MIN_SECONDS

@@ -76,6 +76,9 @@ pub enum IpcMessage {
     /// End the plan in a running client and the script it is running.
     #[serde(rename = "stop_plan")]
     StopPlan { pid: u32 },
+    /// Ask a running client to describe a script's settings, for setting it up in a plan.
+    #[serde(rename = "script_settings")]
+    ScriptSettings { pid: u32, script: String },
     /// Persist the character last selected under a Jagex account (no response).
     #[serde(rename = "select_character")]
     SelectCharacter { user_id: String, account_id: String },
@@ -143,6 +146,14 @@ pub enum IpcEvent {
         rank: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         xp: Option<u64>,
+    },
+    /// A script's settings as a running client describes them, or why it could not.
+    #[serde(rename = "script_settings")]
+    ScriptSettings {
+        script: String,
+        name: Option<String>,
+        fields: Option<serde_json::Value>,
+        error: Option<String>,
     },
     /// Where a scheduler run has got to. `running` false means it has finished or been stopped.
     #[serde(rename = "scheduler_status")]
@@ -892,6 +903,17 @@ impl IpcState {
             }
             IpcMessage::StopPlan { pid } => {
                 self.handle_plan_action(pid, None);
+            }
+            IpcMessage::ScriptSettings { pid, ref script } => {
+                let cmd_tx = self.cmd_tx.clone();
+                let script = script.clone();
+                tokio::task::spawn_blocking(move || {
+                    let event = match plans::script_settings(pid, &script) {
+                        Ok((name, fields)) => IpcEvent::ScriptSettings { script, name: Some(name), fields: Some(fields), error: None },
+                        Err(e) => IpcEvent::ScriptSettings { script, name: None, fields: None, error: Some(e.to_string()) },
+                    };
+                    send_webview_event(&cmd_tx, &event);
+                });
             }
             IpcMessage::SelectCharacter {
                 ref user_id,

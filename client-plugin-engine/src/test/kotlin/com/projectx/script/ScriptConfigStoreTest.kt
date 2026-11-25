@@ -1,5 +1,6 @@
 package com.projectx.script
 
+import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -125,5 +126,38 @@ class ScriptConfigStoreTest {
 
         assertEquals(true, script.settings.enabled.value)
         assertEquals(7, script.settings.count.value)
+    }
+
+    @Test
+    fun `a plan's values apply on top of the saved settings for that run only`() {
+        val saved = Settings().apply { count.value = 7 }
+        ScriptConfigStore.save(saved)
+        val run = Settings()
+        ScriptConfigStore.applyTo(run)
+        ScriptConfigStore.applyValues(
+            run,
+            mapOf(
+                "enabled" to JsonPrimitive(true),
+                "mode" to JsonPrimitive("FAST"),
+                "count" to JsonPrimitive(99),
+                "gone" to JsonPrimitive("x"),
+            ),
+        )
+        assertEquals(true, run.enabled.value)
+        assertEquals(Mode.FAST, run.mode.value)
+        assertEquals(10, run.count.value, "kept inside the item's range")
+        val next = Settings()
+        ScriptConfigStore.applyTo(next)
+        assertEquals(7, next.count.value, "the saved settings are untouched")
+        assertEquals(false, next.enabled.value)
+    }
+
+    @Test
+    fun `settings are described with their kind, value and choices`() {
+        val described = ScriptConfigStore.describe(Settings().apply { count.value = 3 }).map { it.toString() }
+        assertTrue(described.any { "\"key\":\"section\"" in it && "\"kind\":\"section\"" in it })
+        assertTrue(described.any { "\"key\":\"count\"" in it && "\"value\":3" in it && "\"max\":10" in it })
+        assertTrue(described.any { "\"key\":\"mode\"" in it && "\"choices\":[\"SAFE\",\"FAST\"]" in it })
+        assertTrue(described.none { "\"key\":\"status\"" in it }, "information-only items are left out")
     }
 }

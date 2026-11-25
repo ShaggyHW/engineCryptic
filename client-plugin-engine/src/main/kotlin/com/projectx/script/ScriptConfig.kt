@@ -1,6 +1,8 @@
 package com.projectx.script
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -186,6 +188,55 @@ object ScriptConfigStore {
             }
         }
     }
+
+    /**
+     * Sets [values] (stored keys to stored values) on [script] for this run only, after its saved settings: a script plan
+     * runs a script with settings of its own without changing what the player saved. Unknown keys are skipped.
+     */
+    internal fun applyValues(script: Any, values: Map<String, JsonPrimitive>) {
+        if (values.isEmpty()) return
+        storedItems(script).forEach { field ->
+            val given = values[field.key] ?: return@forEach
+            val value = field.item.decode(given) ?: return@forEach
+            runCatching {
+                @Suppress("UNCHECKED_CAST")
+                (field.item as ConfigItem<Any?>).value = value
+            }.onFailure { println("[x] Failed to set ${field.key}: $it") }
+        }
+    }
+
+    /** [script]'s settings as a launcher draws them: key, name, description, kind, current value and choices. */
+    internal fun describe(script: Any): JsonArray = JsonArray(
+        configItems(script).filter { it.item !is InfoDisplayConfigItem }.map { field ->
+            val item = field.item
+            val entries = LinkedHashMap<String, JsonElement>()
+            entries["key"] = JsonPrimitive(field.key)
+            entries["name"] = JsonPrimitive(item.name)
+            entries["description"] = JsonPrimitive(item.description)
+            entries["kind"] = JsonPrimitive(
+                when (item) {
+                    is ConfigSection -> "section"
+                    is BooleanConfigItem -> "bool"
+                    is IntConfigItem -> "int"
+                    is StringConfigItem -> "text"
+                    is EnumConfigItem<*>, is OptionsConfigItem<*> -> "choice"
+                    else -> "other"
+                },
+            )
+            if (item !is ConfigSection) encode(item.value)?.let { entries["value"] = it }
+            if (item is IntConfigItem) {
+                entries["min"] = JsonPrimitive(item.min)
+                entries["max"] = JsonPrimitive(item.max)
+            }
+            val choices = when (item) {
+                is EnumConfigItem<*> -> item.enumValues.map { it.name }
+                is OptionsConfigItem<*> -> item.options.mapNotNull { choiceName(it) }
+                else -> null
+            }
+            choices?.let { entries["choices"] = JsonArray(it.map(::JsonPrimitive)) }
+            JsonObject(entries)
+        },
+    )
 
     private fun storedItems(script: Any): List<ConfigField> =
         configItems(script).filter { it.item !is InfoDisplayConfigItem && it.item !is ConfigSection }

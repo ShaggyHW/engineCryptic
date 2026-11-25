@@ -14,7 +14,7 @@ import java.util.Base64
 
 /**
  * The control-socket commands only the engine can answer, for a launcher driving an unattended
- * client: which scripts this client has, start one, stop it, hop a world, or run a plan of them.
+ * client: which scripts this client has, start one, stop it, hop a world, run a plan of them, or describe one's settings.
  *
  * Separate from the MCP tools that do the same things because the MCP server is off unless someone
  * turns it on (see [Bootstrap]), and a scheduler cannot ask a user to turn anything on. The socket
@@ -37,6 +37,7 @@ object EngineCommands {
                 "RUNNING" -> running()
                 "WORLD" -> world(argument)
                 "PLAN" -> plan(argument)
+                "CONFIG" -> config(argument)
                 else -> "ERR unknown command: $verb"
             }
         }.getOrElse { "ERR ${it::class.java.simpleName}: ${it.message}" }
@@ -112,6 +113,19 @@ object EngineCommands {
             "STATUS" -> "OK ${ScriptPlans.status()}"
             else -> "ERR PLAN takes SET, STOP or STATUS"
         }
+    }
+
+    /**
+     * `CONFIG <script>`: the script's settings with the values the player saved, as base64 JSON so it stays on one line.
+     * A launcher draws them to set a script up for a step of a plan.
+     */
+    private fun config(name: String): String {
+        if (name.isEmpty()) return "ERR CONFIG needs a script name"
+        val meta = find(name) ?: return "ERR no script named $name"
+        val instance = meta.scriptClass.getDeclaredConstructor().newInstance()
+        if (instance is ConfigurableScript) ScriptConfigStore.applyTo(instance)
+        val fields = ScriptConfigStore.describe(instance).toString()
+        return "OK ${meta.name}|${Base64.getEncoder().encodeToString(fields.toByteArray(Charsets.UTF_8))}"
     }
 
     internal fun find(name: String): ScriptMetadata? {

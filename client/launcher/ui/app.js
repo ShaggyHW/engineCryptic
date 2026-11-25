@@ -219,6 +219,10 @@
         renderSignInDialog();
         break;
 
+      case "script_settings":
+        onScriptSettings(event);
+        break;
+
       case "store_scripts":
         state.storeScripts = event.scripts || [];
         state.storeError = event.error || null;
@@ -269,6 +273,8 @@
     });
     return b;
   }
+
+  const button_ = (...args) => button(...args);
 
   function badge(label, cls) {
     return el("span", "badge" + (cls ? " badge-" + cls : ""), label);
@@ -445,8 +451,118 @@
     return input;
   }
 
+  // Script name (lower case) -> what to do with its settings when a client describes them.
+  const settingsWanted = {};
+
+  function settingsLabel(row) {
+    const n = Object.keys(row.settings).length;
+    return n ? "Settings (" + n + ")" : "Settings";
+  }
+
+  function settingInput(field, row, refresh) {
+    const current = Object.prototype.hasOwnProperty.call(row.settings, field.key) ? row.settings[field.key] : field.value;
+    const set = (value) => {
+      row.settings[field.key] = value;
+      refresh();
+    };
+    if (field.kind === "bool") {
+      const box = el("input", "switch");
+      box.type = "checkbox";
+      box.checked = !!current;
+      box.addEventListener("change", () => set(box.checked));
+      return box;
+    }
+    if (field.kind === "int") {
+      const input = el("input", "input input-small");
+      input.type = "number";
+      if (field.min > -1000000000) input.min = String(field.min);
+      if (field.max < 1000000000) input.max = String(field.max);
+      input.value = current ?? "";
+      input.addEventListener("change", () => set(Math.round(Number(input.value) || 0)));
+      return input;
+    }
+    if (field.kind === "choice") {
+      const select = el("select", "input input-small plan-choice");
+      (field.choices || []).forEach((choice) => select.appendChild(new Option(choice, choice)));
+      select.value = current ?? "";
+      select.addEventListener("change", () => set(select.value));
+      return select;
+    }
+    const input = el("input", "input");
+    input.type = "text";
+    input.value = current ?? "";
+    input.addEventListener("change", () => set(input.value));
+    return input;
+  }
+
+  function drawSettings(panel, row, button, event) {
+    panel.textContent = "";
+    if (event.error) {
+      panel.appendChild(el("p", "notice notice-error", event.error));
+      return;
+    }
+    const fields = (event.fields || []).filter((f) => f.kind !== "other");
+    if (!fields.length) {
+      panel.appendChild(el("p", "muted", event.name + " has no settings to choose."));
+      return;
+    }
+    const refresh = () => (button.textContent = settingsLabel(row));
+    panel.appendChild(
+      el("p", "muted plan-settings-note", "Used for " + event.name + " in this plan only. Anything left alone keeps your saved setting."),
+    );
+    fields.forEach((field) => {
+      if (field.kind === "section") {
+        panel.appendChild(el("span", "field-label plan-settings-section", field.name));
+        return;
+      }
+      const line = el("label", "toggle-row plan-setting");
+      const text = el("span", "toggle-text");
+      text.append(el("span", "toggle-title", field.name));
+      if (field.description) text.append(el("small", "toggle-note", field.description));
+      line.append(text, settingInput(field, row, refresh));
+      panel.appendChild(line);
+    });
+    const reset = button_("Use my saved settings", "plan-reset", false, () => {
+      row.settings = {};
+      refresh();
+      drawSettings(panel, row, button, event);
+    });
+    panel.appendChild(reset);
+  }
+
+  function toggleSettings(row, script, button) {
+    let panel = row.querySelector(".plan-settings");
+    if (panel) {
+      panel.remove();
+      return;
+    }
+    panel = el("div", "plan-settings");
+    row.appendChild(panel);
+    const name = script.value.trim();
+    if (!name) {
+      panel.appendChild(el("p", "muted", "Pick the script first."));
+      return;
+    }
+    const client = (state.clients || []).find((c) => c.state === "active");
+    if (!client) {
+      panel.appendChild(el("p", "muted", "Start a client with the engine loaded, then open this again to load the script's settings."));
+      return;
+    }
+    panel.appendChild(el("p", "muted", "Loading " + name + "'s settings…"));
+    settingsWanted[name.toLowerCase()] = (event) => drawSettings(panel, row, button, event);
+    send({ type: "script_settings", pid: client.pid, script: name });
+  }
+
+  function onScriptSettings(event) {
+    const key = (event.script || "").toLowerCase();
+    const draw = settingsWanted[key];
+    delete settingsWanted[key];
+    if (draw) draw(event);
+  }
+
   function stepRow(step) {
     const row = el("div", "plan-step");
+    row.settings = Object.assign({}, step.settings || {});
     const script = el("input", "input plan-script");
     script.type = "text";
     script.placeholder = "Script name";
@@ -462,7 +578,16 @@
     up.title = "Run this script earlier";
     const down = button("↓", "plan-move", false, () => row.nextElementSibling && row.parentElement.insertBefore(row.nextElementSibling, row));
     down.title = "Run this script later";
-    row.append(up, down, button("Remove", "btn-danger", false, () => row.remove()));
+    const settings = button(settingsLabel(row), "", false, () => toggleSettings(row, script, settings));
+    settings.title = "Choose this script's settings for this plan";
+    // A different script's settings do not carry over.
+    script.addEventListener("change", () => {
+      row.settings = {};
+      settings.textContent = settingsLabel(row);
+      const open = row.querySelector(".plan-settings");
+      if (open) open.remove();
+    });
+    row.append(up, down, settings, button("Remove", "btn-danger", false, () => row.remove()));
     return row;
   }
 
@@ -522,11 +647,15 @@
     e.preventDefault();
     if (!editing) return;
     const steps = [...$("#plan-steps").children]
-      .map((row) => ({
-        script: row.querySelector('[data-role="script"]').value.trim(),
-        min_minutes: Number(row.querySelector('[data-role="min"]').value),
-        max_minutes: Number(row.querySelector('[data-role="max"]').value),
-      }))
+      .map((row) => {
+        const step = {
+          script: row.querySelector('[data-role="script"]').value.trim(),
+          min_minutes: Number(row.querySelector('[data-role="min"]').value),
+          max_minutes: Number(row.querySelector('[data-role="max"]').value),
+        };
+        if (Object.keys(row.settings || {}).length) step.settings = row.settings;
+        return step;
+      })
       .filter((st) => st.script);
     const pauseMin = Number($("#plan-pause-min").value);
     const pauseMax = Number($("#plan-pause-max").value);
