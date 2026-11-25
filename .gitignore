@@ -102,3 +102,6 @@ __pycache__/
 
 # Cache source tree (unpacked cache) - becomes its own repository later
 /unpacked-cache
+
+# Working plan for the traversal port; kept locally, not in the repository
+/client-plugin-engine/docs/TRAVERSAL_PARITY_PLAN.md
