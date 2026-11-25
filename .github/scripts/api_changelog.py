@@ -41,6 +41,10 @@ AREAS = (
     ("com/projectx/ui/backend/dsl/", "Overlay DSL"),
     ("com/projectx/script/", "Script calls"),
     ("com/projectx/webwalker/", "Web walker"),
+    ("com/projectx/traversal/local/LocalNav", "Web walker"),
+    ("com/projectx/pathfinder/WalkMap", "Web walker"),
+    ("com/projectx/pathfinder/WalkField", "Web walker"),
+    ("com/projectx/traversal/MasterFarmerHat", "Web walker"),
     ("com/projectx/game/interfaces/", "Interfaces"),
     ("com/projectx/game/nxt/entity/", "Entities"),
     ("com/projectx/game/cs2/", "Client scripts"),
@@ -54,8 +58,13 @@ INTERNAL_TYPES = {
     "com.projectx.script.InMemoryJarClassLoader",
     "com.projectx.script.LiveValues",
     "com.projectx.script.api.AttackLedger",
+    "com.projectx.script.api.BankQuantity",
+    "com.projectx.script.api.Deaths$Fired",
+    "com.projectx.script.api.Deaths$Pass",
+    "com.projectx.traversal.local.LocalNav$StaticScope",
     "com.projectx.script.api.NecromancyImprovise",
     "com.projectx.game.nxt.entity.BearingsKt",
+    "com.projectx.game.nxt.entity.HitmarksAndHeadbarsKt",
     "com.projectx.store.GameSnapshot",
     "com.projectx.store.Instances",
     "com.projectx.store.LiveRun",
@@ -83,6 +92,16 @@ INTERNAL_TYPES = {
     "com.projectx.webwalker.WebGrid",
     "com.projectx.webwalker.WebLinkActions",
     "com.projectx.webwalker.WebPathfinder",
+}
+
+# Types that were Kotlin `internal` in the previous release and are public now. Their old members compiled to
+# public bytecode no script could reach, so they are compared as new rather than reported as removed. Clear
+# the set once the release that made them public has gone out.
+NEWLY_PUBLIC = {
+    "com.projectx.pathfinder.WalkField",
+    "com.projectx.pathfinder.WalkMap",
+    "com.projectx.traversal.MasterFarmerHat",
+    "com.projectx.traversal.local.LocalNav",
 }
 
 # Members that are an implementation detail of how Kotlin and the Compose compiler build a class, not
@@ -117,7 +136,7 @@ def api_classes(jar: Path) -> list[str]:
         if area_of(stem) is None or GENERATED_TYPE.search(stem):
             continue
         name = stem.replace("/", ".")
-        if name.split("$")[0] in INTERNAL_TYPES:
+        if name in INTERNAL_TYPES or name.split("$")[0] in INTERNAL_TYPES:
             continue
         out.append(name)
     return sorted(out)
@@ -446,7 +465,7 @@ def main() -> int:
     else:
         new_sigs = signatures(args.new, api_classes(args.new))
         has_old = bool(args.old and args.old.exists())
-        old_sigs = signatures(args.old, api_classes(args.old)) if has_old else {}
+        old_sigs = signatures(args.old, [c for c in api_classes(args.old) if c not in NEWLY_PUBLIC]) if has_old else {}
         previous = (args.old_version or "the previous release") if has_old else None
         payload = announcement(args.version, previous, notes, describe(old_sigs, new_sigs), args.link, args.title)
     payload["allowed_mentions"] = {"parse": []}
