@@ -6,7 +6,13 @@ internal object SyntheticFires {
     var count = 0L
         private set
 
-    fun fired() {
+    /** Synthetic actions other than a walk click: a walk's predicted route holds only while this stands still. */
+    @Volatile
+    var others = 0L
+        private set
+
+    fun fired(walk: Boolean = false) {
         count++
+        if (!walk) others++
     }
 }

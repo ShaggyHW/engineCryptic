@@ -8,17 +8,12 @@ import com.projectx.script.api.TeleportSpell
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * The links a route may use: those taken from a place in the world, indexed by the tile the player stands on to
- * take one, and the global ones - teleports - that can be taken from anywhere.
+ * Our measured links, from `/webwalker/links.json` (converted from navpathService's `worldReachableTiles.db` with the
+ * author's permission): those taken from a place in the world, indexed by the tile they are taken from, and the global
+ * ones, teleports, taken from anywhere. Its fairy rings are expanded into a link from every ring to every other.
  *
- * The shipped set is loaded once from `/webwalker/links.json`, converted from navpathService's
- * `worldReachableTiles.db` with the author's permission. Only the endpoints, what to use and the requirements are
- * kept: walkability comes from the game cache, so the tile table that makes up the bulk of that database is not
- * needed here. Its fairy rings are expanded into a link from every ring to every other.
- *
- * A script can add its own with [register]. That is how a script that finds its own way somewhere - through a
- * dungeon the shipped set does not cover, say - can hand what it learned to the walker, so later routes are
- * planned through it instead of being searched for again. Registered links live until the client restarts.
+ * Routes come only from navpath, whose map has this set merged in at release. At runtime the set supplies the per-link
+ * action data that map lacks ([MeasuredLinks]): prompt answers, ring actions and landings, and ring permissions.
  */
 object WebLinks {
     private const val RESOURCE = "/webwalker/links.json"
@@ -97,8 +92,6 @@ object WebLinks {
         val requirementIds: List<Int>? = null
     }
 
-    // Buckets are replaced rather than mutated, so the planner thread always reads a whole list while a script
-    // registers on the game thread.
     private val byTile = ConcurrentHashMap<Int, List<WebLink>>()
     private val known = ConcurrentHashMap.newKeySet<WebLink>()
     private val teleports = ConcurrentHashMap.newKeySet<WebLink>()
@@ -106,7 +99,7 @@ object WebLinks {
     @Volatile
     private var loaded = false
 
-    /** Every link the walker knows, shipped and registered alike, teleports included. */
+    /** Every link the walker knows, teleports included. */
     val all: List<WebLink>
         get() {
             ensureLoaded()
@@ -137,48 +130,6 @@ object WebLinks {
         ensureLoaded()
         return byTile[WebGrid.key(x, y, plane)] ?: emptyList()
     }
-
-    /**
-     * Teaches the walker a link a script worked out for itself, so later routes can be planned through it.
-     *
-     * Returns false when the link is already known or its rectangles are inverted. Safe to call from a script
-     * body; the search sees it on its next plan.
-     */
-    fun register(link: WebLink): Boolean {
-        ensureLoaded()
-        if (!link.isGlobal && (link.from.maxX < link.from.minX || link.from.maxY < link.from.minY)) return false
-        if (link.to.maxX < link.to.minX || link.to.maxY < link.to.minY) return false
-        if (!known.add(link)) return false
-        if (link.isGlobal) teleports.add(link) else index(link)
-        return true
-    }
-
-    /** Builds an object link between two tiles and registers it; the common case for a script that found a way through. */
-    @JvmStatic
-    @JvmOverloads
-    fun registerObjectLink(
-        fromX: Int,
-        fromY: Int,
-        fromPlane: Int,
-        toX: Int,
-        toY: Int,
-        toPlane: Int,
-        objectId: Int,
-        action: String,
-        costTiles: Int = 1,
-        searchRadius: Int = 16,
-    ): Boolean = register(
-        WebLink(
-            kind = WebLinkKind.OBJECT,
-            from = WebArea(fromX, fromX, fromY, fromY, fromPlane),
-            to = WebArea(toX, toX, toY, toY, toPlane),
-            cost = costTiles.coerceAtLeast(1) * WebGrid.STEP_COST,
-            action = action,
-            objectId = objectId,
-            searchRadius = searchRadius.coerceIn(1, 64),
-            requirements = emptyList(),
-        ),
-    )
 
     private fun index(link: WebLink) {
         val from = link.from

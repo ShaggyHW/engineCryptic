@@ -401,6 +401,18 @@
         "confidence": "MEDIUM",
         "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
         "verified_build": "951-1"
+      },
+      "EVENTMASK_BUCKETS": {
+        "value": "0x150",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_IFMGR_EVENTMASK_BUCKETS).",
+        "verified_build": "951-4"
+      },
+      "EVENTMASK_COUNT": {
+        "value": "0x158",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_IFMGR_EVENTMASK_COUNT).",
+        "verified_build": "951-4"
       }
     },
     "OInterfaceList": {
@@ -613,57 +625,69 @@
         "verified_build": "951-1"
       },
       "STATIC_CHILDREN": {
-        "value": "0x1a8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_IFCOMP_CHILDREN = 0x1b0). Not yet checked against the 951-4 binary, so this value is kept until it is.",
-        "verified_build": "951-1"
+        "value": "0x1b0",
+        "confidence": "HIGH",
+        "note": "Imported from the third-party 951-4 table (GS_IFCOMP_CHILDREN): the layout children vector, read only on a kind that carries child vectors. It records each child vector at its begin word; the previous value was the word before it, which reads 0 live, so the old reading found no children. Previous value 0x1a8.",
+        "verified_build": "951-4"
       },
       "STATIC_CHILDREN_END": {
-        "value": "0x1b0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
-        "verified_build": "951-1"
+        "value": "0x1b8",
+        "confidence": "HIGH",
+        "note": "Imported from the third-party 951-4 table: end word of GS_IFCOMP_CHILDREN. Previous value 0x1b0.",
+        "verified_build": "951-4"
       },
       "STATIC_CHILDREN_CAPACITY": {
-        "value": "0x1b8",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
-        "verified_build": "951-1"
+        "value": "0x1c0",
+        "confidence": "HIGH",
+        "note": "Imported from the third-party 951-4 table: capacity word of GS_IFCOMP_CHILDREN. Previous value 0x1b8.",
+        "verified_build": "951-4"
       },
       "DYNAMIC_CHILDREN": {
-        "value": "0x1c0",
-        "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table disagrees (GS_IFCOMP_DYNAMIC_CHILDREN = 0x1c8). Not yet checked against the 951-4 binary, so this value is kept until it is.",
-        "verified_build": "951-1"
-      },
-      "DYNAMIC_CHILDREN_END": {
         "value": "0x1c8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
-        "verified_build": "951-1"
+        "note": "Imported from the third-party 951-4 table (GS_IFCOMP_DYNAMIC_CHILDREN): the list the client draws instead of STATIC_CHILDREN while it is non-empty, not the cc_create list (that is SLOT_CHILDREN). Previous value 0x1c0.",
+        "verified_build": "951-4"
       },
-      "DYNAMIC_CHILDREN_CAPACITY": {
+      "DYNAMIC_CHILDREN_END": {
         "value": "0x1d0",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
-        "verified_build": "951-1"
+        "note": "Imported from the third-party 951-4 table: end word of GS_IFCOMP_DYNAMIC_CHILDREN. Previous value 0x1c8.",
+        "verified_build": "951-4"
+      },
+      "DYNAMIC_CHILDREN_CAPACITY": {
+        "value": "0x1d8",
+        "confidence": "MEDIUM",
+        "note": "Imported from the third-party 951-4 table: capacity word of GS_IFCOMP_DYNAMIC_CHILDREN. Previous value 0x1d0.",
+        "verified_build": "951-4"
+      },
+      "SLOT_CHILDREN": {
+        "value": "0x1e0",
+        "confidence": "HIGH",
+        "note": "Imported from the third-party 951-4 table (GS_IFCOMP_SLOT_CHILDREN): the slot children vector cc_create fills, e.g. the backpack's item slots. New key.",
+        "verified_build": "951-4"
+      },
+      "DYNAMIC_SLOT_CHILDREN": {
+        "value": "0x1f8",
+        "confidence": "MEDIUM",
+        "note": "Imported from the third-party 951-4 table (GS_IFCOMP_DYNAMIC_SLOT_CHILDREN): drawn instead of SLOT_CHILDREN while non-empty. New key.",
+        "verified_build": "951-4"
       },
       "PAGES": {
         "value": "0x1d8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. Not read on Linux: the third-party 951-4 table puts DYNAMIC_CHILDREN's capacity and SLOT_CHILDREN's begin here, and treats paged layers as having no child vectors.",
         "verified_build": "951-1"
       },
       "PAGES_END": {
         "value": "0x1e0",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. Not read on Linux: the third-party 951-4 table puts DYNAMIC_CHILDREN's capacity and SLOT_CHILDREN's begin here, and treats paged layers as having no child vectors.",
         "verified_build": "951-1"
       },
       "PAGES_CAPACITY": {
         "value": "0x1e8",
         "confidence": "MEDIUM",
-        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
+        "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. Not read on Linux: the third-party 951-4 table puts DYNAMIC_CHILDREN's capacity and SLOT_CHILDREN's begin here, and treats paged layers as having no child vectors.",
         "verified_build": "951-1"
       },
       "PAGE_STRIDE": {
@@ -737,6 +761,44 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_IFCOMP_ASPECT_LOCK_MODE).",
         "verified_build": "951-1"
+      },
+      "OPS_BEGIN": {
+        "value": "0xa0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_IFCOMP_OPS_BEGIN).",
+        "verified_build": "951-4"
+      },
+      "OPS_END": {
+        "value": "0xa8",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_IFCOMP_OPS_END).",
+        "verified_build": "951-4"
+      },
+      "OPS_STRIDE": {
+        "value": "0x40",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_IFCOMP_OPS_STRIDE).",
+        "verified_build": "951-4"
+      },
+      "ACTIVE_PROPS": {
+        "value": "0x140",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_IFCOMP_ACTIVE_PROPS).",
+        "verified_build": "951-4"
+      },
+      "KIND_GETTER": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "Imported from the third-party 951-4 table (GS_IFCOMP_VT_KIND): vtable slot 2 answers the component's kind with a constant thunk, which the engine decodes rather than calls. New key.",
+        "verified_build": "951-4"
+      }
+    },
+    "OComponentKind": {
+      "CHILD_VECTOR_KINDS": {
+        "value": "0x17000a0",
+        "confidence": "HIGH",
+        "note": "Imported from the third-party 951-4 table (GS_IFCOMP_KIND_HAS_CHILD_VECTORS): bit n is set for every kind n whose class carries the child vectors, kinds 5, 7, 20, 21, 22, 24. Every other kind keeps its own fields in those bytes.",
+        "verified_build": "951-4"
       }
     },
     "OLoggedInPlayer": {
@@ -1021,6 +1083,12 @@
         "confidence": "MEDIUM",
         "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it.",
         "verified_build": "951-1"
+      },
+      "SETTINGS_LEVELS": {
+        "value": "0x200",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_TERRAINOBJ_SETTINGS_LEVELS). Per-level vector of 66x66 u8 terrain settings grids (64 tiles and a one-tile border), entries laid out as PLANE_STRIDE / PLANE_ELEM.",
+        "verified_build": "951-4"
       }
     },
     "OMapSquare": {
@@ -1065,6 +1133,68 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: Windows 951 did not move it and the third-party table moves nothing next to it. The third-party 951-4 table agrees (GS_MAPSQUARE_CONT_ENTRY_PTR).",
         "verified_build": "951-1"
+      },
+      "PLACEMENTS": {
+        "value": "0xeb70",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_MAPSQUARE_PLACEMENTS). Vector of {ctrl, Placement*} pairs: every loc the client placed in the square.",
+        "verified_build": "951-4"
+      },
+      "PLACEMENT_ENTRY_STRIDE": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_MAPSQUARE_PLACEMENT_ENTRY_STRIDE).",
+        "verified_build": "951-4"
+      },
+      "PLACEMENT_ENTRY_PTR_OFFSET": {
+        "value": "0x8",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_MAPSQUARE_PLACEMENT_ENTRY_PTR).",
+        "verified_build": "951-4"
+      }
+    },
+    "OPlacement": {
+      "TYPE_ID": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_TYPE_ID). i32 base loc id.",
+        "verified_build": "951-4"
+      },
+      "PLANE": {
+        "value": "0x4",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_PLANE). u8 bridge-shifted plane, 0xFF under a bridge.",
+        "verified_build": "951-4"
+      },
+      "LOCAL_X": {
+        "value": "0x5",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_LOCAL_X). u8 tile within the square.",
+        "verified_build": "951-4"
+      },
+      "LOCAL_Y": {
+        "value": "0x6",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_LOCAL_Y). u8 tile within the square.",
+        "verified_build": "951-4"
+      },
+      "SHAPE": {
+        "value": "0x8",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_SHAPE).",
+        "verified_build": "951-4"
+      },
+      "ROTATION": {
+        "value": "0x9",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_ROTATION).",
+        "verified_build": "951-4"
+      },
+      "LOCATION_TYPE": {
+        "value": "0x50",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_PLACEMENT_LOCTYPE). The base LocType* (value half of the shared_ptr before it).",
+        "verified_build": "951-4"
       }
     },
     "OLocationContainer": {
@@ -1133,6 +1263,30 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOCATIONCONTAINER_DISPATCH_SLOT_COUNT).",
         "verified_build": "951-1"
+      },
+      "SPAWNED_LOCATIONS_BEGIN": {
+        "value": "0xc0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_LC_SPAWN_BEGIN). The LOC_ADD spawn vector (an opened door's replacement lives only here); the same slot MULTI_LOCATIONS_BEGIN names.",
+        "verified_build": "951-4"
+      },
+      "SPAWNED_LOCATIONS_END": {
+        "value": "0xc8",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_LC_SPAWN_END).",
+        "verified_build": "951-4"
+      },
+      "SPAN_LOCATIONS_BEGIN": {
+        "value": "0x2f0",
+        "confidence": "MEDIUM",
+        "note": "From the third-party 951-4 table (GS_LC_MULTI_BEGIN). Multi-tile span entries; the third party extrapolated it from the +0x240 container move and saw it empty in every sample.",
+        "verified_build": "951-4"
+      },
+      "SPAN_LOCATIONS_END": {
+        "value": "0x2f8",
+        "confidence": "MEDIUM",
+        "note": "From the third-party 951-4 table (GS_LC_MULTI_END).",
+        "verified_build": "951-4"
       }
     },
     "OLocation": {
@@ -1219,6 +1373,12 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOC_SHOW_AS_IMPORTANT).",
         "verified_build": "951-1"
+      },
+      "OWN_TYPE": {
+        "value": "0xc0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_LOC_OWN_TYPE). The loc's own LocType*: equals ORIGINAL_TYPE when that is set, and is still set on spawned locs where ORIGINAL_TYPE is null.",
+        "verified_build": "951-4"
       }
     },
     "OCombinedLocation": {
@@ -1303,6 +1463,18 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_LOCTYPE_SIZE_Y).",
         "verified_build": "951-1"
+      },
+      "CLIP_TYPE": {
+        "value": "0x384",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_LOCTYPE_CLIP_TYPE). i32: 0 no collision, 1 ground decor blocks, 2 solid; op74 already folded in.",
+        "verified_build": "951-4"
+      },
+      "BLOCKS_PROJECTILE": {
+        "value": "0x388",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_LOCTYPE_BLOCKS_PROJECTILE). u8.",
+        "verified_build": "951-4"
       }
     },
     "OSpotAnimManager": {
@@ -1853,6 +2025,18 @@
         "confidence": "HIGH",
         "note": "Unchanged from 950-1: the third-party 951-1 table and the Windows 950 -> 951 move agree. The third-party 951-4 table agrees (GS_GRAPHNODE_FRAME_COUNT).",
         "verified_build": "951-1"
+      },
+      "MATRIX_COS": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_GRAPHNODE_MATRIX_COS).",
+        "verified_build": "951-4"
+      },
+      "MATRIX_SIN": {
+        "value": "0x20",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_GRAPHNODE_MATRIX_SIN).",
+        "verified_build": "951-4"
       }
     },
     "OEntity": {
@@ -3242,6 +3426,86 @@
         "confidence": "HIGH",
         "verified_build": "951-1",
         "note": "Third-party 951-1 table (GS_SERVERPROT_DESC_HANDLER): TcpIn calls through this slot once per incoming packet with the handler, the connection's packet, the size and the ISAAC pointer. The third-party 951-4 table agrees (GS_SERVERPROT_DESC_HANDLER)."
+      }
+    },
+    "ORouteWaypointManager": {
+      "WAYPOINTS_BEGIN": {
+        "value": "0x20",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_ROUTEWPM_WAYPOINTS_BEGIN).",
+        "verified_build": "951-4"
+      },
+      "WAYPOINTS_END": {
+        "value": "0x28",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_ROUTEWPM_WAYPOINTS_END).",
+        "verified_build": "951-4"
+      }
+    },
+    "ORouteWaypoint": {
+      "STRIDE": {
+        "value": "0x18",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_ROUTEWAYPOINT_STRIDE).",
+        "verified_build": "951-4"
+      },
+      "FINE_X": {
+        "value": "0x4",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_ROUTEWAYPOINT_FINE_X).",
+        "verified_build": "951-4"
+      },
+      "FINE_Y": {
+        "value": "0xc",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_ROUTEWAYPOINT_FINE_Y).",
+        "verified_build": "951-4"
+      }
+    },
+    "OEventMaskNode": {
+      "KEY": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_NODE_KEY).",
+        "verified_build": "951-4"
+      },
+      "SLOT_BUCKETS": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_NODE_SLOTBUCKETS).",
+        "verified_build": "951-4"
+      },
+      "SLOT_COUNT": {
+        "value": "0x18",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_NODE_SLOTCOUNT).",
+        "verified_build": "951-4"
+      },
+      "NEXT": {
+        "value": "0x38",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_NODE_NEXT).",
+        "verified_build": "951-4"
+      }
+    },
+    "OEventMaskSlot": {
+      "KEY": {
+        "value": "0x0",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_SLOT_KEY).",
+        "verified_build": "951-4"
+      },
+      "VALUE": {
+        "value": "0x4",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_SLOT_VALUE).",
+        "verified_build": "951-4"
+      },
+      "NEXT": {
+        "value": "0x10",
+        "confidence": "HIGH",
+        "note": "From the third-party 951-4 table (GS_EVMASK_SLOT_NEXT).",
+        "verified_build": "951-4"
       }
     }
   },

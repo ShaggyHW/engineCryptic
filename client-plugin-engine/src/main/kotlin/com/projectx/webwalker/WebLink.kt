@@ -2,6 +2,7 @@ package com.projectx.webwalker
 
 import com.projectx.script.api.Lodestone
 import com.projectx.script.api.TeleportSpell
+import com.projectx.traversal.pathing.RingPermissions
 import world.gregs.voidps.type.Tile
 
 /** What a route has to do to cross a [WebLink], which is what tells the walker how to perform it. */
@@ -71,7 +72,7 @@ data class WebArea(
  *
  * [key] is `varbit_<id>`, `varp_<id>`, `<skill>Level`, `coins`, or an opaque flag the converter carried over;
  * anything this engine cannot evaluate is treated as met, so an unrecognised gate costs a re-plan rather than
- * making a destination unreachable. See [WebLinkPermissions].
+ * making a destination unreachable. See [RingPermissions].
  */
 data class WebRequirement(
     val about: String?,
@@ -115,8 +116,18 @@ data class WebInterfaceStep(
  * Using a backpack item partway through a link, as a house tablet's Modify chain ends by breaking the new tablet. Only
  * the planner's routes build these.
  */
-internal data class WebItemStep(val itemId: Int, val action: String) : WebStep {
-    override fun toString(): String = "$action item $itemId"
+internal data class WebItemStep(val itemId: Int, val action: String, val optionNumber: Int? = null) : WebStep {
+    override fun toString(): String = if (optionNumber != null) "op$optionNumber item $itemId" else "$action item $itemId"
+}
+
+/** Another link taken partway through this one, as an NPC a teleport chain talks to. Only the planner's routes build these. */
+internal data class WebNestedStep(val link: WebLink) : WebStep {
+    override fun toString(): String = link.toString()
+}
+
+/** Walking to [tile] partway through a link. Only the planner's routes build these. */
+internal data class WebWalkStep(val tile: Tile, val minimap: Boolean) : WebStep {
+    override fun toString(): String = "walk to ${tile.x},${tile.y},${tile.plane}"
 }
 
 /** Using another scene object partway through a link, as a trapdoor climbed down once it has been picked open. */
@@ -199,6 +210,12 @@ data class WebLink(
         it.steps = chain.filterIsInstance<WebInterfaceStep>()
     }
 
+    /** The item op an [WebLinkKind.ITEM] link fires by its number, counting from one, when it has no [action] text. */
+    var optionNumber: Int? = null
+        private set
+
+    fun byOption(number: Int): WebLink = also { it.optionNumber = number }
+
     /** The NPC an [WebLinkKind.NPC] link talks to, or the item an item-based link uses; null for objects. */
     var target: WebTarget? = null
         private set
@@ -238,7 +255,7 @@ data class WebLink(
     val isGlobal: Boolean get() = kind.isGlobal || portable
 
     private val identity: List<Any?>
-        get() = listOf(kind, from, to, cost, action, objectId, searchRadius, requirements, choice, chain, target, menu, lodestone, fairyCode, portable, spell)
+        get() = listOf(kind, from, to, cost, action, objectId, searchRadius, requirements, choice, chain, target, menu, lodestone, fairyCode, portable, spell, optionNumber)
 
     override fun equals(other: Any?): Boolean = this === other || other is WebLink && identity == other.identity
 

@@ -11,16 +11,17 @@ class TraversalNodeList(start: TraversalNode) {
     }
 
     fun copy(): TraversalNodeList {
-        return TraversalNodeList(head.copy()).also { newList ->
+        return TraversalNodeList(head.copy().also { it.copyRouteFlagsFrom(head) }).also { newList ->
             var originalNode = head
             var currentNode = newList.head
             while (originalNode.next != null) {
-                val nextCopy = originalNode.next?.copy()
+                val original = originalNode.next!!
+                val nextCopy = original.copy().also { it.copyRouteFlagsFrom(original) }
                 currentNode.next = nextCopy
-                nextCopy?.prev = currentNode
+                nextCopy.prev = currentNode
 
-                originalNode = originalNode.next!!
-                currentNode = currentNode.next!!
+                originalNode = original
+                currentNode = nextCopy
             }
             var newCurrent = newList.head
             var origCurrent = head

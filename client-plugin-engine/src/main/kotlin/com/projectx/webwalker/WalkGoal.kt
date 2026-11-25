@@ -1,6 +1,6 @@
 package com.projectx.webwalker
 
-import com.projectx.pathfinder.navpath.NavGoalSet
+import com.projectx.traversal.pathing.NavGoalSet
 import com.projectx.script.api.Area
 import world.gregs.voidps.type.Tile
 import kotlin.math.abs

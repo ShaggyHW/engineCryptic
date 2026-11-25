@@ -41,23 +41,27 @@ internal object AbyssPassage {
     // logged once so a report from one shows whether they are right.
     private val logged = HashSet<String>()
 
-    /** Every key the passages carried give, with its value. */
+    /** Every key the passages carried give, with its value: for each colour, the backpack's passage before a worn one. */
     fun keys(backpack: List<Item>, worn: List<Item>): Map<String, Int> {
         val colours = ids.get() ?: return emptyMap()
         val out = LinkedHashMap<String, Int>()
-        for (passage in backpack + worn) {
-            val colour = colours[passage.id] ?: continue
-            val vars = passage.varDomain ?: continue
-            val charges = vars.getVarBit(CHARGES_VARBIT)
+        for ((id, colour) in colours) {
+            val passage = backpack.firstOrNull { it.id == id } ?: worn.firstOrNull { it.id == id } ?: continue
+            val charges = passage.varDomainVarBit(CHARGES_VARBIT)
             val value = if (charges > 1) charges else 0
-            val slots = SLOT_VARBITS.map { vars.getVarBit(it) }
+            val slots = SLOT_VARBITS.map { passage.varDomainVarBit(it) }
             for (raw in slots) {
                 val jewellery = JEWELLERY[raw] ?: continue
-                out.putIfAbsent("${colour}POA_$jewellery", value)
+                out["${colour}POA_$jewellery"] = value
             }
             val reading = "$colour passage: slots $slots, charges $charges"
             if (logged.add(reading)) println("[WebWalk] Passage of the Abyss read as $reading")
         }
         return out
     }
+
+    fun isPassage(itemId: Int): Boolean = ids.get()?.containsKey(itemId) == true
+
+    /** The raw value of each of [passage]'s six slots in slot order, 0 for an empty slot. */
+    fun slotValues(passage: Item): List<Int> = SLOT_VARBITS.map { passage.varDomainVarBit(it) }
 }

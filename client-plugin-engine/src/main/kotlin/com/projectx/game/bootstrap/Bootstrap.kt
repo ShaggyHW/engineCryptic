@@ -1,5 +1,6 @@
 package com.projectx.game.bootstrap
 
+import com.projectx.game.collision.CollisionMap
 import com.projectx.BuildInfo
 import com.projectx.game.combat.CombatBridge
 import com.projectx.game.hooks.HookManager
@@ -139,6 +140,7 @@ object Bootstrap {
         runCatching { McpServer.stop() }
         runCatching { StringAllocator.shutdown() }
         runCatching { TileMarkerStore.stopFlusher() }
+        runCatching { CollisionMap.stop() }
         runCatching { OverlayHost.dispose() }
         runCatching { RunReports.close() }
         runCatching { Entitlements.stop() }

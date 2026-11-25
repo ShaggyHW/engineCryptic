@@ -40,6 +40,13 @@ class InterfaceParent(val id: Int, val ptr: MemorySegment) : Iterable<InterfaceC
         return InterfaceComponent(compAddr.toMemorySegment(OInterfaceComponent.extent))
     }
 
+    /** Whether the client has [componentId] hidden outright in this interface's flat component array. */
+    fun isHidden(componentId: Int): Boolean {
+        if (componentId !in 0..<size) return false
+        val slot = (begin + componentId * OInterfaceParent.CHILD_SLOT_STRIDE).toMemorySegment(OInterfaceParent.CHILD_SLOT_STRIDE)
+        return slot.readByte(OInterfaceParent.CHILD_SLOT_HIDDEN_FLAG) != 0.toByte()
+    }
+
     override fun iterator(): Iterator<InterfaceComponent> = object : Iterator<InterfaceComponent> {
         private val total = size
         private var index = 0

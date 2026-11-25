@@ -1,7 +1,7 @@
 package com.projectx.script.api
 
-import com.projectx.pathfinder.HopModel
 import com.projectx.script.Script
+import com.projectx.traversal.hops.HopModel
 import com.projectx.util.gaussian
 import org.projectx.core.game.combat.Ability
 import world.gregs.voidps.type.Tile

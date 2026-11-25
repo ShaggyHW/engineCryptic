@@ -1428,6 +1428,18 @@
         "confidence": "HIGH",
         "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 949-4: stable across paired functions (0xdc:113).",
         "verified_build": "951-1"
+      },
+      "MATRIX_COS": {
+        "value": "0x0",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_GRAPHNODE_MATRIX_COS): the struct's surrounding fields share one layout on both platforms (SCENE_X, FLAGS and ENTITY agree).",
+        "verified_build": "951-4"
+      },
+      "MATRIX_SIN": {
+        "value": "0x20",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_GRAPHNODE_MATRIX_SIN): the struct's surrounding fields share one layout on both platforms (SCENE_X, FLAGS and ENTITY agree).",
+        "verified_build": "951-4"
       }
     },
     "OWorld": {
@@ -1628,7 +1640,7 @@
       "STATIC_CHILDREN": {
         "value": "0x1b0",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged: most votes keep it, the dissent matches other structs' known moves at the same displacement, and every sibling field is unanimously unchanged.",
+        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged: most votes keep it, the dissent matches other structs' known moves at the same displacement, and every sibling field is unanimously unchanged. The third-party 951-4 table agrees (GS_IFCOMP_CHILDREN).",
         "verified_build": "951-1"
       },
       "STATIC_CHILDREN_END": {
@@ -1644,39 +1656,51 @@
         "verified_build": "951-1"
       },
       "DYNAMIC_CHILDREN": {
-        "value": "0x1e0",
+        "value": "0x1c8",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1e0:172 0x1f8:7).",
-        "verified_build": "951-1"
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_DYNAMIC_CHILDREN): the struct's surrounding fields share one layout on both platforms (STATIC_CHILDREN, ITEM_ID and the slot children vector agree). The list the client draws instead of STATIC_CHILDREN while it is non-empty. Previous value 0x1e0, the cc_create vector, which is now SLOT_CHILDREN.",
+        "verified_build": "951-4"
       },
       "DYNAMIC_CHILDREN_END": {
-        "value": "0x1e8",
+        "value": "0x1d0",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged: most votes keep it, the dissent matches other structs' known moves at the same displacement, and every sibling field is unanimously unchanged.",
-        "verified_build": "951-1"
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_DYNAMIC_CHILDREN): the struct's surrounding fields share one layout on both platforms (STATIC_CHILDREN, ITEM_ID and the slot children vector agree). End word. Previous value 0x1e8.",
+        "verified_build": "951-4"
       },
       "DYNAMIC_CHILDREN_CAPACITY": {
-        "value": "0x1f0",
+        "value": "0x1d8",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1f0:194 0x228:4 0x208:3 0x1e8:1).",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_DYNAMIC_CHILDREN): the struct's surrounding fields share one layout on both platforms (STATIC_CHILDREN, ITEM_ID and the slot children vector agree). Capacity word. Previous value 0x1f0.",
+        "verified_build": "951-4"
+      },
+      "SLOT_CHILDREN": {
+        "value": "0x1e0",
+        "confidence": "MEDIUM",
+        "note": "Recorded until now as DYNAMIC_CHILDREN, the cc_create child vector; the third-party 951-4 table calls it GS_IFCOMP_SLOT_CHILDREN and agrees on the value. Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1e0:172 0x1f8:7).",
         "verified_build": "951-1"
+      },
+      "DYNAMIC_SLOT_CHILDREN": {
+        "value": "0x1f8",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_DYNAMIC_SLOT_CHILDREN): the struct's surrounding fields share one layout on both platforms (STATIC_CHILDREN, ITEM_ID and the slot children vector agree). Drawn instead of SLOT_CHILDREN while non-empty. New key.",
+        "verified_build": "951-4"
       },
       "PAGES": {
         "value": "0x1d8",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1d8:176 0x1f0:3).",
+        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1d8:176 0x1f0:3). Read only on the paged carousel kind (PAGED_LAYER_KIND): on a layer the same bytes are DYNAMIC_CHILDREN's capacity and SLOT_CHILDREN's begin.",
         "verified_build": "951-1"
       },
       "PAGES_END": {
         "value": "0x1e0",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1e0:172 0x1f8:7).",
+        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x1e0:172 0x1f8:7). Read only on the paged carousel kind (PAGED_LAYER_KIND): on a layer the same bytes are DYNAMIC_CHILDREN's capacity and SLOT_CHILDREN's begin.",
         "verified_build": "951-1"
       },
       "PAGES_CAPACITY": {
         "value": "0x1e8",
         "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged: most votes keep it, the dissent matches other structs' known moves at the same displacement, and every sibling field is unanimously unchanged.",
+        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged: most votes keep it, the dissent matches other structs' known moves at the same displacement, and every sibling field is unanimously unchanged. Read only on the paged carousel kind (PAGED_LAYER_KIND): on a layer the same bytes are DYNAMIC_CHILDREN's capacity and SLOT_CHILDREN's begin.",
         "verified_build": "951-1"
       },
       "PAGE_STRIDE": {
@@ -1695,12 +1719,6 @@
         "value": "0x8",
         "confidence": "HIGH",
         "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: stable across paired functions (0x8:22164).",
-        "verified_build": "951-1"
-      },
-      "LAYER_KIND": {
-        "value": "0x14",
-        "confidence": "MEDIUM",
-        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x14:1609 0x15:1).",
         "verified_build": "951-1"
       },
       "PAGED_LAYER_KIND": {
@@ -1768,6 +1786,38 @@
         "confidence": "HIGH",
         "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: stable across paired functions (0x6c:260).",
         "verified_build": "951-1"
+      },
+      "OPS_BEGIN": {
+        "value": "0xa0",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_OPS_BEGIN): the struct's surrounding fields share one layout on both platforms (every field from INTERFACE_ID to TEXT agrees).",
+        "verified_build": "951-4"
+      },
+      "OPS_END": {
+        "value": "0xa8",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_OPS_END): the struct's surrounding fields share one layout on both platforms (every field from INTERFACE_ID to TEXT agrees).",
+        "verified_build": "951-4"
+      },
+      "OPS_STRIDE": {
+        "value": "0x40",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_OPS_STRIDE): the struct's surrounding fields share one layout on both platforms (every field from INTERFACE_ID to TEXT agrees).",
+        "verified_build": "951-4"
+      },
+      "ACTIVE_PROPS": {
+        "value": "0x140",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_ACTIVE_PROPS): the struct's surrounding fields share one layout on both platforms (every field from INTERFACE_ID to TEXT agrees).",
+        "verified_build": "951-4"
+      }
+    },
+    "OComponentKind": {
+      "CHILD_VECTOR_KINDS": {
+        "value": "0x17000a0",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_IFCOMP_KIND_HAS_CHILD_VECTORS): kinds are the client's own class numbering, and the two this table read independently agree with it (the layer class answers 20, inside the set; the paged carousel answers 23, outside it). Replaces LAYER_KIND, which held 20 alone.",
+        "verified_build": "951-4"
       }
     },
     "OInterfaceParent": {
@@ -3905,6 +3955,40 @@
         "value": "0x1947b56",
         "confidence": "HIGH",
         "note": "RIGHT_BUTTON_STATE at 951-4 (951-3: 0x1947bce): 2/2 data-reference votes from paired functions.",
+        "verified_build": "951-4"
+      }
+    },
+    "ORouteWaypointManager": {
+      "WAYPOINTS_BEGIN": {
+        "value": "0x20",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_ROUTEWPM_WAYPOINTS_BEGIN): the struct's surrounding fields share one layout on both platforms (OPathingEntity.WAYPOINT_COUNT agrees and the waypoint queue is an eastl::vector).",
+        "verified_build": "951-4"
+      },
+      "WAYPOINTS_END": {
+        "value": "0x28",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_ROUTEWPM_WAYPOINTS_END): the struct's surrounding fields share one layout on both platforms (OPathingEntity.WAYPOINT_COUNT agrees and the waypoint queue is an eastl::vector).",
+        "verified_build": "951-4"
+      }
+    },
+    "ORouteWaypoint": {
+      "STRIDE": {
+        "value": "0x18",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_ROUTEWAYPOINT_STRIDE): the struct's surrounding fields share one layout on both platforms (OPathingEntity.WAYPOINT_COUNT agrees and the waypoint queue is an eastl::vector).",
+        "verified_build": "951-4"
+      },
+      "FINE_X": {
+        "value": "0x4",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_ROUTEWAYPOINT_FINE_X): the struct's surrounding fields share one layout on both platforms (OPathingEntity.WAYPOINT_COUNT agrees and the waypoint queue is an eastl::vector).",
+        "verified_build": "951-4"
+      },
+      "FINE_Y": {
+        "value": "0xc",
+        "confidence": "MEDIUM",
+        "note": "Mirrored from the Linux 951-4 table (GS_ROUTEWAYPOINT_FINE_Y): the struct's surrounding fields share one layout on both platforms (OPathingEntity.WAYPOINT_COUNT agrees and the waypoint queue is an eastl::vector).",
         "verified_build": "951-4"
       }
     }

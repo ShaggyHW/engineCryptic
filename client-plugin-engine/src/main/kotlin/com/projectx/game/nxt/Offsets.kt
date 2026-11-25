@@ -258,6 +258,22 @@ object OInterfaceManager : OffsetObject {
     val INTERFACE_LIST by offset()
     val KEY_EVENT_BEGIN by offset()
     val KEY_EVENT_END by offset()
+    val EVENTMASK_BUCKETS by portPending(LINUX)
+    val EVENTMASK_COUNT by portPending(LINUX)
+}
+
+/** One component's entry in the interface manager's if_setevents override map; its slots hang off [SLOT_BUCKETS]. */
+object OEventMaskNode : OffsetObject {
+    val KEY by portPending(LINUX)
+    val SLOT_BUCKETS by portPending(LINUX)
+    val SLOT_COUNT by portPending(LINUX)
+    val NEXT by portPending(LINUX)
+}
+
+object OEventMaskSlot : OffsetObject {
+    val KEY by portPending(LINUX)
+    val VALUE by portPending(LINUX)
+    val NEXT by portPending(LINUX)
 }
 
 object OInterfaceList : OffsetObject {
@@ -322,13 +338,23 @@ object OInterfaceComponent : OffsetObject {
     val STATIC_CHILDREN_END by offset()
     val DYNAMIC_CHILDREN by offset()
     val DYNAMIC_CHILDREN_END by offset()
+    val SLOT_CHILDREN by offset()
+    val DYNAMIC_SLOT_CHILDREN by offset()
     val PAGES by offset()
     val PAGES_END by offset()
     val PAGE_STRIDE by offset()
     val ACTIVE_PAGE by offset()
-    val KIND_GETTER by offset(WINDOWS)
-    val LAYER_KIND by count(WINDOWS)
+    val OPS_BEGIN by offset()
+    val OPS_END by offset()
+    val OPS_STRIDE by offset()
+    val ACTIVE_PROPS by offset()
+    val KIND_GETTER by offset()
     val PAGED_LAYER_KIND by count(WINDOWS)
+}
+
+/** Bit n of [CHILD_VECTOR_KINDS] is set when a component of kind n owns the child vectors. */
+object OComponentKind : OffsetObject {
+    val CHILD_VECTOR_KINDS by count()
 }
 
 object OLoggedInPlayer : OffsetObject {
@@ -395,6 +421,7 @@ object ORegionHeightContainer : OffsetObject {
     val LINK_PLANE_STRIDE by offset()
     val LINK_COL_STRIDE by offset()
     val LINK_ROW_STRIDE by offset()
+    val SETTINGS_LEVELS by portPending(LINUX)
 }
 
 object OMapSquare : OffsetObject {
@@ -405,6 +432,19 @@ object OMapSquare : OffsetObject {
     val LOCATION_CONTAINERS by offset()
     val LOCATION_CONTAINER_ENTRY_STRIDE by offset()
     val LOCATION_CONTAINER_ENTRY_PTR_OFFSET by offset()
+    val PLACEMENTS by portPending(LINUX)
+    val PLACEMENT_ENTRY_STRIDE by portPending(LINUX)
+    val PLACEMENT_ENTRY_PTR_OFFSET by portPending(LINUX)
+}
+
+object OPlacement : OffsetObject {
+    val TYPE_ID by portPending(LINUX)
+    val PLANE by portPending(LINUX)
+    val LOCAL_X by portPending(LINUX)
+    val LOCAL_Y by portPending(LINUX)
+    val SHAPE by portPending(LINUX)
+    val ROTATION by portPending(LINUX)
+    val LOCATION_TYPE by portPending(LINUX)
 }
 
 object OLocationContainer : OffsetObject {
@@ -416,6 +456,10 @@ object OLocationContainer : OffsetObject {
     val MULTI_LOCATIONS_END by offset()
     val TERTIARY_LOCATIONS_BEGIN by offset()
     val TERTIARY_LOCATIONS_END by offset()
+    val SPAWNED_LOCATIONS_BEGIN by portPending(LINUX)
+    val SPAWNED_LOCATIONS_END by portPending(LINUX)
+    val SPAN_LOCATIONS_BEGIN by portPending(LINUX)
+    val SPAN_LOCATIONS_END by portPending(LINUX)
     val DISPATCH_SLOT_TABLE_START by offset()
     val DISPATCH_SLOT_STRIDE by offset()
     val DISPATCH_SLOT_COUNT by count()
@@ -436,6 +480,7 @@ object OLocation : OffsetObject {
     val HIGHLIGHT_INTENSITY by offset()
     val HIGHLIGHT_CATEGORY by offset()
     val SHOW_AS_IMPORTANT by offset()
+    val OWN_TYPE by portPending(LINUX)
 }
 
 object OCombinedLocation : OffsetObject {
@@ -457,6 +502,8 @@ object OLocationType : OffsetObject {
     val ID by offset()
     val SIZE_X by offset()
     val SIZE_Y by offset()
+    val CLIP_TYPE by portPending(LINUX)
+    val BLOCKS_PROJECTILE by portPending(LINUX)
 }
 
 object OSpotAnimManager : OffsetObject {
@@ -619,6 +666,8 @@ object OGraphNode : OffsetObject {
     val CHILDREN by offset()
     val ENTITY by offset()
     val FRAME_COUNT by offset()
+    val MATRIX_COS by offset()
+    val MATRIX_SIN by offset()
 }
 
 object OEntity : OffsetObject {
@@ -822,5 +871,14 @@ object OVarInfo : OffsetObject {
     val VAR_ID by offset()
 }
 
-/** No field of it is read yet; declared so the wrapper sizes its window from the table like every other object. */
-object ORouteWaypointManager : OffsetObject
+object ORouteWaypointManager : OffsetObject {
+    val WAYPOINTS_BEGIN by offset()
+    val WAYPOINTS_END by offset()
+}
+
+/** One entry of the route waypoint manager's queue: a fine (x512) scene position as floats. */
+object ORouteWaypoint : OffsetObject {
+    val STRIDE by offset()
+    val FINE_X by offset()
+    val FINE_Y by offset()
+}

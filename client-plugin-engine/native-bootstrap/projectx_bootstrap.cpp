@@ -422,6 +422,13 @@ void *initialize_projectx(void *base_address) {
     // Without this the JVM elides stack data on recurring throws after JIT warm-up, which makes
     // hs_err logs far less useful when a crash follows a chain of trapped exceptions.
     options[option_count++].optionString = const_cast<char *>("-XX:-OmitStackTraceInFastThrow");
+    // Uncapped, the JVM defaults to a quarter of physical RAM and G1 keeps whatever it commits: about 4 GB resident
+    // inside the game for about 0.6 GB of live data. The cap plus a periodic collection and tight free ratios let
+    // the heap shrink back after a burst.
+    options[option_count++].optionString = const_cast<char *>("-Xmx2g");
+    options[option_count++].optionString = const_cast<char *>("-XX:G1PeriodicGCInterval=15000");
+    options[option_count++].optionString = const_cast<char *>("-XX:MinHeapFreeRatio=10");
+    options[option_count++].optionString = const_cast<char *>("-XX:MaxHeapFreeRatio=30");
 
     char jdwp_agent[512];
     char debug_option[128];

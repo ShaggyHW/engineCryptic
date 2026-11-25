@@ -36,6 +36,17 @@ object RecentChat {
         }
     }
 
+    /** The newest message containing [needle], ignoring case, that arrived at or after [sinceMillis]; null when none did. */
+    fun findSince(needle: String, sinceMillis: Long): String? {
+        synchronized(lock) {
+            for (i in buffer.indices.reversed()) {
+                val entry = buffer[i]
+                if (entry.at >= sinceMillis && entry.text.contains(needle, ignoreCase = true)) return entry.text
+            }
+        }
+        return null
+    }
+
     fun containsRecent(needle: String, windowMs: Long = DEFAULT_WINDOW_MS): Boolean {
         if (needle.isBlank()) return false
         val n = needle.lowercase()

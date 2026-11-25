@@ -16,4 +16,7 @@ interface WalkEquivalent {
 
     /** True when the walk before this node may aim clicks through its tiles while it is passable. */
     fun walkThrough(): Boolean = true
+
+    /** True while this node's tiles carry a tour stop not yet visited: skipping ahead never passes it. */
+    fun holdsStop(): Boolean = false
 }
