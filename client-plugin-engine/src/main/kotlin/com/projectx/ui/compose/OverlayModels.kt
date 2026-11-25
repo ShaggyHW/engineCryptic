@@ -124,6 +124,7 @@ object OverlayModels {
     private fun feedFor(page: Page): Feed<*>? = when (page) {
         Page.Library -> null
         Page.Store -> StoreModel.feed
+        Page.Local -> null
         Page.Quests -> QuestsModel.feed
         Page.Xp -> XpModel.feed
         Page.Inventory -> InventoryModel.feed

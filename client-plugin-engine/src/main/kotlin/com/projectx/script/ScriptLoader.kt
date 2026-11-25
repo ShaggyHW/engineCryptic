@@ -63,28 +63,45 @@ class JarDirectoryScanner(
     // resolve. Detecting subclasses by reflection (not ClassGraph's jar-only graph) catches
     // transitive Script subclasses (e.g. StateMachineScript-based). Per-class failures are isolated
     // so one bad script can't drop the whole jar. initialize=false avoids running <clinit> at scan.
-    private fun scanJarFiles(sourceJarPaths: List<String>): List<Class<*>> {
-        if (sourceJarPaths.isEmpty()) return emptyList()
-        val jarPaths = ScriptJarShadow.copiesOf(sourceJarPaths)
-        val urls = jarPaths.map { File(it).toURI().toURL() }.toTypedArray()
-        val loader = URLClassLoader(urls, Script::class.java.classLoader)
-        val classNames = ClassGraph()
-            .enableClassInfo()
-            .overrideClasspath(jarPaths)
-            .scan()
-            .use { it.allClasses.names }
-        return scriptClassesIn(classNames, loader)
+    private fun scanJarFiles(sourceJarPaths: List<String>): List<Class<*>> = scriptClassesInJars(sourceJarPaths)
+
+    private fun scriptClassesIn(classNames: List<String>, loader: ClassLoader): List<Class<*>> = scriptClassesNamed(classNames, loader)
+}
+
+internal fun scriptClassesInJars(sourceJarPaths: List<String>): List<Class<*>> {
+    if (sourceJarPaths.isEmpty()) return emptyList()
+    val jarPaths = ScriptJarShadow.copiesOf(sourceJarPaths)
+    val urls = jarPaths.map { File(it).toURI().toURL() }.toTypedArray()
+    val loader = URLClassLoader(urls, Script::class.java.classLoader)
+    val classNames = ClassGraph()
+        .enableClassInfo()
+        .overrideClasspath(jarPaths)
+        .scan()
+        .use { it.allClasses.names }
+    return scriptClassesNamed(classNames, loader)
+}
+
+internal fun scriptClassesNamed(classNames: List<String>, loader: ClassLoader): List<Class<*>> =
+    classNames.mapNotNull { name ->
+        runCatching { Class.forName(name, false, loader) }.getOrNull()
+            ?.takeIf {
+                Script::class.java.isAssignableFrom(it) &&
+                    it != Script::class.java &&
+                    !Modifier.isAbstract(it.modifiers)
+            }
     }
 
-    private fun scriptClassesIn(classNames: List<String>, loader: ClassLoader): List<Class<*>> =
-        classNames.mapNotNull { name ->
-            runCatching { Class.forName(name, false, loader) }.getOrNull()
-                ?.takeIf {
-                    Script::class.java.isAssignableFrom(it) &&
-                        it != Script::class.java &&
-                        !Modifier.isAbstract(it.modifiers)
-                }
-        }
+/**
+ * A developer's own scripts in `~/.projectx/scripts/dev`: every plain jar and class file there, exactly as built. The
+ * store never writes or cleans this folder, so nothing here is filtered as a leftover of a store build.
+ */
+internal class LocalScriptsScanner(private val directory: File) : ClassScanner {
+    override fun scan(): List<Class<*>> {
+        val jars = directory.listFiles { file -> file.isFile && file.name.lowercase().endsWith(FileExtensions.JAR) }
+            .orEmpty().map { it.absolutePath }.sorted()
+        val fromJars = runCatching { scriptClassesInJars(jars) }.getOrDefault(emptyList())
+        return fromJars + ClassFileScanner(directory.absolutePath).scan()
+    }
 }
 
 /**

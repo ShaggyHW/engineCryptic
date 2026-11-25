@@ -46,6 +46,16 @@ object ScriptExecutor {
     private val _scripts = mutableMapOf<String, ScriptMetadata>()
     val scripts: Map<String, ScriptMetadata> get() = _scripts
 
+    // Held by class, not name: a developer's own copy of a store script has the same name but is a different class.
+    private val localClasses = HashSet<Class<*>>()
+
+    /** Whether [scriptClass] came from the developer's own folder, `~/.projectx/scripts/dev`, rather than the store. */
+    internal fun isLocal(scriptClass: Class<*>): Boolean = scriptClass in localClasses
+
+    /** Where a developer puts the scripts they build themselves; the store never writes here. */
+    internal val localScriptsDirectory: File
+        get() = File(System.getProperty("user.home"), ".projectx/scripts/dev").also { it.mkdirs() }
+
     private val _activeScripts = ConcurrentHashMap<String, Script>()
     val activeScripts: Collection<Script> get() = _activeScripts.values
     private val eventBus = ConcurrentLinkedDeque<Event>()
@@ -202,7 +212,7 @@ object ScriptExecutor {
                 author = annotation.author,
                 description = annotation.description
             )
-            _scripts[metadata.toString()] = metadata
+            _scripts[if (isLocal(scriptClass)) "$metadata (local)" else metadata.toString()] = metadata
         }
     }
 
@@ -231,12 +241,16 @@ object ScriptExecutor {
 
         val currentProjectScanner = CurrentProjectScriptsScanner()
 
+        val local = LocalScriptsScanner(localScriptsDirectory).scan().mapNotNull { isScriptClass(it) }
         val foundClassPaths = scriptsDirectoryScanner.scan() + currentProjectScanner.scan()
         val scripts = foundClassPaths
             .mapNotNull { isScriptClass(it) }
+            .plus(local)
             .sortedBy { it.getAnnotation(ScriptDescription::class.java).name }
 
         clearScripts()
+        localClasses.clear()
+        localClasses += local
         scripts.forEach(::registerScript)
     }
 

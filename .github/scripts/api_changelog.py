@@ -57,6 +57,8 @@ INTERNAL_TYPES = {
     "com.projectx.script.InMemoryJar",
     "com.projectx.script.InMemoryJarClassLoader",
     "com.projectx.script.LiveValues",
+    "com.projectx.script.LocalScriptsScanner",
+    "com.projectx.script.ScriptLoaderKt",
     "com.projectx.script.api.AttackLedger",
     "com.projectx.script.api.BankQuantity",
     "com.projectx.script.api.Deaths$Fired",
@@ -209,8 +211,10 @@ def display(cls: str, sig: str, members: set[str] | None = None) -> str:
         target = f"{name}()"  # a constructor
     elif re.fullmatch(r"(get|is)[A-Z]\w*", name) and not params:
         prop = re.sub(r"^(get|is)", "", name)
-        # Compose names its CompositionLocals with a capital (LocalType), so those keep theirs.
-        target = prop if "CompositionLocal" in sig.split(name)[0] else prop[0].lower() + prop[1:]
+        # Compose names its CompositionLocals with a capital (LocalType), and a constant-style name
+        # (PRESET_TAB_COMPONENT_ID, compiled to getPRESET_TAB_COMPONENT_ID) is written in capitals; both keep theirs.
+        keep = "CompositionLocal" in sig.split(name)[0] or (len(prop) > 1 and not any(c.islower() for c in prop))
+        target = prop if keep else prop[0].lower() + prop[1:]
     elif re.fullmatch(r"set[A-Z]\w*", name) and params and "," not in params and has_getter(name, members):
         target = name[3].lower() + name[4:]
     else:

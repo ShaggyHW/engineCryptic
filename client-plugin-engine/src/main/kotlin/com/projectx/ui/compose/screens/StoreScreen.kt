@@ -51,7 +51,7 @@ object StoreModel {
     var source by mutableStateOf<ScriptSource?>(null)
 
     val feed = Feed(500) {
-        ScriptExecutor.scripts.values.map { meta ->
+        ScriptExecutor.scripts.values.filter { !ScriptExecutor.isLocal(it.scriptClass) }.map { meta ->
             StoreEntry(
                 meta,
                 ScriptLibrary.sourceOf(meta),
@@ -91,7 +91,7 @@ fun StoreScreen() {
             Hint("${shown.size} of ${all.size} scripts · store scripts run once you have them on xclient.dev")
         }
         ScreenScroll {
-            if (shown.isEmpty()) EmptyState(if (all.isEmpty()) "No scripts are loaded" else "Nothing matches", "Scripts in ~/.projectx/scripts show up here.")
+            if (shown.isEmpty()) EmptyState(if (all.isEmpty()) "No scripts are loaded" else "Nothing matches", "Store scripts show up here once they are installed. Your own builds go in ~/.projectx/scripts/dev and show under Local.")
             shown.chunked(2).forEach { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     pair.forEach { StoreCard(it, Modifier.weight(1f)) }
