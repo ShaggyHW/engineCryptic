@@ -62863,168 +62863,6 @@
    "action": "Activate",
    "objectId": -1,
    "searchRadius": 0,
-   "costTiles": 7,
-   "global": true,
-   "itemId": 22332,
-   "toMinX": 3128,
-   "toMaxX": 3128,
-   "toMinY": 3407,
-   "toMaxY": 3407,
-   "toPlane": 0,
-   "requirements": [
-    60,
-    390,
-    391
-   ],
-   "steps": [
-    [
-     1153,
-     24,
-     -1,
-     3
-    ]
-   ]
-  },
-  {
-   "kind": "ITEM",
-   "action": "Activate",
-   "objectId": -1,
-   "searchRadius": 0,
-   "costTiles": 6,
-   "global": true,
-   "itemId": 22332,
-   "toMinX": 2980,
-   "toMaxX": 2980,
-   "toMinY": 3511,
-   "toMaxY": 3511,
-   "toPlane": 0,
-   "requirements": [
-    60,
-    390,
-    392
-   ],
-   "steps": [
-    [
-     1153,
-     25,
-     -1,
-     3
-    ]
-   ]
-  },
-  {
-   "kind": "ITEM",
-   "action": "Activate",
-   "objectId": -1,
-   "searchRadius": 0,
-   "costTiles": 6,
-   "global": true,
-   "itemId": 22332,
-   "toMinX": 3183,
-   "toMaxX": 3183,
-   "toMinY": 3156,
-   "toMaxY": 3156,
-   "toPlane": 0,
-   "requirements": [
-    60,
-    390,
-    393
-   ],
-   "steps": [
-    [
-     1153,
-     27,
-     -1,
-     3
-    ]
-   ]
-  },
-  {
-   "kind": "ITEM",
-   "action": "Activate",
-   "objectId": -1,
-   "searchRadius": 0,
-   "costTiles": 6,
-   "global": true,
-   "itemId": 22332,
-   "toMinX": 3302,
-   "toMaxX": 3302,
-   "toMinY": 3477,
-   "toMaxY": 3477,
-   "toPlane": 0,
-   "requirements": [
-    60,
-    390,
-    394
-   ],
-   "steps": [
-    [
-     1153,
-     29,
-     -1,
-     3
-    ]
-   ]
-  },
-  {
-   "kind": "ITEM",
-   "action": "Activate",
-   "objectId": -1,
-   "searchRadius": 0,
-   "costTiles": 6,
-   "global": true,
-   "itemId": 22332,
-   "toMinX": 3310,
-   "toMaxX": 3310,
-   "toMinY": 3252,
-   "toMaxY": 3252,
-   "toPlane": 0,
-   "requirements": [
-    60,
-    390,
-    395
-   ],
-   "steps": [
-    [
-     1153,
-     31,
-     -1,
-     3
-    ]
-   ]
-  },
-  {
-   "kind": "ITEM",
-   "action": "Activate",
-   "objectId": -1,
-   "searchRadius": 0,
-   "costTiles": 6,
-   "global": true,
-   "itemId": 22332,
-   "toMinX": 3050,
-   "toMaxX": 3050,
-   "toMinY": 3442,
-   "toMaxY": 3442,
-   "toPlane": 0,
-   "requirements": [
-    60,
-    390,
-    396
-   ],
-   "steps": [
-    [
-     1153,
-     33,
-     -1,
-     3
-    ]
-   ]
-  },
-  {
-   "kind": "ITEM",
-   "action": "Activate",
-   "objectId": -1,
-   "searchRadius": 0,
    "costTiles": 6,
    "global": true,
    "itemId": 22332,
@@ -63035,7 +62873,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     397,
     630
    ],
@@ -63063,7 +62900,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     398,
     631
    ],
@@ -63091,7 +62927,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     399,
     632
    ],
@@ -63119,7 +62954,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     400,
     633
    ],
@@ -63147,7 +62981,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     401,
     634
    ],
@@ -63175,7 +63008,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     402,
     635
    ],
@@ -63203,7 +63035,6 @@
    "toPlane": 0,
    "requirements": [
     60,
-    390,
     403,
     636
    ],
