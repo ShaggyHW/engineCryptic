@@ -1,88 +1,139 @@
 package com.projectx.util
 
-import world.gregs.voidps.type.Tile
 import com.projectx.profiling.PlayerProfiles
+import world.gregs.voidps.type.Tile
 import java.security.SecureRandom
-import java.text.NumberFormat
-import java.util.*
+import java.util.Locale
+import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-private val RANDOM = SecureRandom()
+private val entropy = SecureRandom()
 
-fun random(max: Int): Int = random(0, max)
-fun random(min: Int, max: Int): Int = min + RANDOM.nextInt(max - min)
-fun random(max: Long): Long = random(0L, max)
-fun random(min: Long, max: Long): Long = min + RANDOM.nextLong(max - min)
-fun randomInclusive(max: Int): Int = randomInclusive(0, max)
-fun randomInclusive(min: Int, max: Int): Int = random(min, max + 1)
-fun randomD(max: Double): Double = randomD(0.0, max)
-fun randomD(min: Double, max: Double): Double = min + (max - min) * RANDOM.nextDouble()
-fun randomD(): Double = RANDOM.nextDouble()
+fun random(max: Int): Int = entropy.nextInt(max)
 
-fun gaussian(mean: Int, variance: Int) = (RANDOM.nextGaussian() * sqrt(variance * PlayerProfiles.get().gaussVariance) + mean).toInt()
-fun gaussian(mean: Long, variance: Long) = (RANDOM.nextGaussian() * sqrt(variance * PlayerProfiles.get().gaussVariance) + mean).toLong()
-fun nonProfiledGaussian(mean: Int, variance: Int) = (RANDOM.nextGaussian() * sqrt(variance.toDouble()) + mean).toInt()
+fun random(min: Int, max: Int): Int = entropy.nextInt(min, max)
 
-val ANGLE_DIRECTION_DELTA = arrayOf(0 to -1, -1 to -1, -1 to 0, -1 to 1, 0 to 1, 1 to 1, 1 to 0, 1 to -1)
+fun random(max: Long): Long = entropy.nextLong(max)
+
+fun random(min: Long, max: Long): Long = entropy.nextLong(min, max)
+
+fun randomInclusive(max: Int): Int = entropy.nextInt(max + 1)
+
+fun randomInclusive(min: Int, max: Int): Int = entropy.nextInt(min, max + 1)
+
+fun randomD(max: Double): Double = entropy.nextDouble() * max
+
+fun randomD(min: Double, max: Double): Double = min + (max - min) * entropy.nextDouble()
+
+fun randomD(): Double = entropy.nextDouble()
+
+private fun normalSpread(variance: Double, scale: Double): Double = entropy.nextGaussian() * sqrt(variance * scale)
+
+private fun profileScale(): Double = PlayerProfiles.get().gaussVariance
+
+fun gaussian(mean: Int, variance: Int): Int = (mean + normalSpread(variance.toDouble(), profileScale())).toInt()
+
+fun gaussian(mean: Long, variance: Long): Long = (mean + normalSpread(variance.toDouble(), profileScale())).toLong()
+
+fun nonProfiledGaussian(mean: Int, variance: Int): Int = (mean + normalSpread(variance.toDouble(), 1.0)).toInt()
+
+val ANGLE_DIRECTION_DELTA: Array<Pair<Int, Int>> = arrayOf(
+    0 to -1,
+    -1 to -1,
+    -1 to 0,
+    -1 to 1,
+    0 to 1,
+    1 to 1,
+    1 to 0,
+    1 to -1,
+)
+
+private const val FULL_TURN = 16384
+private const val ANGLE_UNITS_PER_RADIAN = FULL_TURN / (2 * PI)
+
 fun getDirDelta(angle: Int): Pair<Int, Int>? = ANGLE_DIRECTION_DELTA.getOrNull(angle shr 11)
 
-fun getAngleTo(from: Tile, to: Tile) = getAngleTo(to.x - from.x, to.y - from.y)
-fun getAngleTo(xOffset: Int, yOffset: Int) = (atan2(-xOffset.toDouble(), -yOffset.toDouble()) * 2607.5945876176133).toInt() and 0x3fff
+fun getAngleTo(from: Tile, to: Tile): Int = getAngleTo(to.x - from.x, to.y - from.y)
 
-fun hashFromInterface(interfaceId: Int, componentId: Int) = (interfaceId shl 16) + componentId
-fun interfaceIdFromHash(hash: Int) = hash shr 16
-fun componentIdFromHash(hash: Int) = hash - ((hash shr 16) shl 16)
-
-fun millisElapsed(startTime: Long) = System.currentTimeMillis() - startTime
-fun secondsElapsed(startTime: Long) = millisElapsed(startTime) / 1000f
-fun minutesElapsed(startTime: Long) = secondsElapsed(startTime) / 60f
-fun hoursElapsed(startTime: Long) = minutesElapsed(startTime) / 60f
-
-fun getXpPerHour(startingXp: Int, currentXp: Int, startTime: Long) = ((currentXp - startingXp) / hoursElapsed(startTime)).toInt()
-fun getFormattedXpPerHour(startingXp: Int, currentXp: Int, startTime: Long) = format(getXpPerHour(startingXp, currentXp, startTime))
-
-fun getUnitsPerHour(unitsGained: Int, startTime: Long) = (unitsGained / hoursElapsed(startTime)).toInt()
-fun getFormattedUnitsPerHour(unitsGained: Int, startTime: Long) = format(getUnitsPerHour(unitsGained, startTime))
-
-fun format(number: Int) = NumberFormat.getNumberInstance(Locale.US).format(number)
-@JvmOverloads
-fun format(number: Float, decimals: Int = 2): String = String.format(Locale.US, "%.${decimals}f", number)
-@JvmOverloads
-fun format(number: Double, decimals: Int = 2): String = String.format(Locale.US, "%.${decimals}f", number)
-
-fun formatElapsedTime(currTime: Long, startTime: Long): String {
-    val totalSecs = (currTime - startTime) / 1000
-    val hours = totalSecs / 3600
-    val mins = (totalSecs / 60) % 60
-    val secs = totalSecs % 60
-
-    return "%02d:%02d:%02d".format(hours, mins, secs)
+fun getAngleTo(xOffset: Int, yOffset: Int): Int {
+    val radians = atan2(-xOffset.toDouble(), -yOffset.toDouble())
+    return (radians * ANGLE_UNITS_PER_RADIAN).toInt() and (FULL_TURN - 1)
 }
 
-fun Byte.toBitString() = (7 downTo 0).joinToString("") { if (toInt() and (1 shl it) != 0) "1" else "0" }.chunked(4).joinToString(" ")
-fun Int.toBitString() = (31 downTo 0).joinToString("") { if (this and (1 shl it) != 0) "1" else "0" }.chunked(4).joinToString(" ")
+fun hashFromInterface(interfaceId: Int, componentId: Int): Int = (interfaceId shl 16) + componentId
 
-fun getXpForLevel(level: Int): Int {
-    var points = 0
-    var output = 0
-    for (lvl in 1..level) {
-        points = (points + floor(lvl + 300.0 * 2.0.pow(lvl / 7.0))).toInt()
-        if (lvl >= level) return output
-        output = (points.toDouble() / 4).toInt()
+fun interfaceIdFromHash(hash: Int): Int = hash shr 16
+
+fun componentIdFromHash(hash: Int): Int = hash and 0xFFFF
+
+fun millisElapsed(start: Long): Long = System.currentTimeMillis() - start
+
+fun secondsElapsed(start: Long): Float = millisElapsed(start) / 1000f
+
+fun minutesElapsed(start: Long): Float = secondsElapsed(start) / 60f
+
+fun hoursElapsed(start: Long): Float = minutesElapsed(start) / 60f
+
+fun getXpPerHour(startingXp: Int, currentXp: Int, startTime: Long): Int =
+    ((currentXp - startingXp) / hoursElapsed(startTime)).toInt()
+
+fun getFormattedXpPerHour(startingXp: Int, currentXp: Int, startTime: Long): String =
+    format(getXpPerHour(startingXp, currentXp, startTime))
+
+fun getUnitsPerHour(unitsGained: Int, startTime: Long): Int = (unitsGained / hoursElapsed(startTime)).toInt()
+
+fun getFormattedUnitsPerHour(unitsGained: Int, startTime: Long): String = format(getUnitsPerHour(unitsGained, startTime))
+
+fun format(number: Int): String = "%,d".format(Locale.US, number)
+
+@JvmOverloads
+fun format(number: Float, decimals: Int = 2): String = fixedPoint(number, decimals)
+
+@JvmOverloads
+fun format(number: Double, decimals: Int = 2): String = fixedPoint(number, decimals)
+
+private fun fixedPoint(number: Any, decimals: Int): String = "%.${decimals}f".format(Locale.US, number)
+
+fun formatElapsedTime(currTime: Long, startTime: Long): String {
+    val totalSeconds = (currTime - startTime) / 1000
+    val hours = totalSeconds / 3600
+    val minutes = totalSeconds / 60 % 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d:%02d".format(hours, minutes, seconds)
+}
+
+fun Byte.toBitString(): String = nibbles(toInt() and 0xFF, Byte.SIZE_BITS)
+
+fun Int.toBitString(): String = nibbles(this, Int.SIZE_BITS)
+
+private fun nibbles(bits: Int, width: Int): String = buildString(width + width / 4) {
+    for (position in width - 1 downTo 0) {
+        append(if ((bits ushr position) and 1 == 1) '1' else '0')
+        if (position != 0 && position % 4 == 0) append(' ')
     }
-    return 0
+}
+
+private const val MAX_TABLE_LEVEL = 120
+
+private fun experienceThreshold(level: Int): Int {
+    var points = 0L
+    for (step in 1 until level) points += floor(step + 300.0 * 2.0.pow(step / 7.0)).toLong()
+    return (points / 4).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+}
+
+private val experienceTable = IntArray(MAX_TABLE_LEVEL + 1) { if (it < 1) 0 else experienceThreshold(it) }
+
+fun getXpForLevel(level: Int): Int = when {
+    level <= 1 -> 0
+    level <= MAX_TABLE_LEVEL -> experienceTable[level]
+    else -> experienceThreshold(level)
 }
 
 fun getLevelForXp(xp: Int): Int {
-    var points = 0
-    var output = 0
-    for (lvl in 1..120) {
-        points = (points + floor(lvl + 300.0 * 2.0.pow(lvl / 7.0))).toInt()
-        output = (points.toDouble() / 4).toInt()
-        if ((output - 1) >= xp) return lvl
-    }
-    return 120
+    var level = MAX_TABLE_LEVEL
+    while (level > 1 && experienceTable[level] > xp) level--
+    return level
 }

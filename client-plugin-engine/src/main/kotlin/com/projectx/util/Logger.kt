@@ -1,60 +1,35 @@
 package com.projectx.util
 
 import java.io.File
-import java.io.FileWriter
-import java.io.PrintWriter
-import java.io.StringWriter
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 object Logger {
-    private val dateFormat = SimpleDateFormat("MM/dd/yy HH:mm:ss")
-    private val calendar: Calendar = Calendar.getInstance()
 
-    fun getDateString(): String {
-        return dateFormat.format(calendar.time)
-    }
+    private const val ERROR_LOG = "errorLog.log"
+    private val dateFormat = DateTimeFormatter.ofPattern("MM/dd/yy HH:mm:ss")
+
+    fun getDateString(): String = LocalDateTime.now().format(dateFormat)
 
     fun handle(throwable: Throwable) {
         logError(throwable)
-        System.err.println("ERROR! THREAD NAME: " + Thread.currentThread().name)
+        System.err.println("ERROR! THREAD NAME: ${Thread.currentThread().name}")
         throwable.printStackTrace()
     }
 
-    fun log(classInstance: Any, message: Any) {
-        log(classInstance.javaClass.simpleName ?: "Unknown", message)
-    }
+    fun log(instance: Any, message: Any) = log(instance.javaClass.simpleName, message)
 
-    fun log(className: String, message: Any) {
-        val text = "[$className] $message"
-        println(text)
-    }
+    fun log(className: String, message: Any) = println("[$className] $message")
 
     fun writeToFile(fileName: String, text: String) {
-        try {
-            val parts = fileName.split("/")
-
-            for (i in 0 until parts.size - 1) {
-                val file = File("${System.getProperty("user.home")}/.projectx/${parts[i]}")
-                if (!file.exists()) {
-                    file.mkdir()
-                }
-            }
-
-            FileWriter("${System.getProperty("user.home")}/.projectx/$fileName", true).use { writer ->
-                writer.write("[${getDateString()}]:  $text\r\n")
-            }
-        } catch (e: Exception) {
+        runCatching {
+            val target = File(File(System.getProperty("user.home"), ".projectx"), fileName)
+            target.parentFile.mkdirs()
+            target.appendText("[${getDateString()}]:  $text\r\n", Charsets.UTF_8)
         }
     }
 
-    fun logError(throwable: Throwable) {
-        val errors = StringWriter()
-        throwable.printStackTrace(PrintWriter(errors))
-        writeToFile("errorLog.log", "${Thread.currentThread().name}: $errors")
-    }
+    fun logError(throwable: Throwable) = writeToFile(ERROR_LOG, "${Thread.currentThread().name}: ${throwable.stackTraceToString()}")
 
-    fun logError(message: String) {
-        writeToFile("errorLog.log", message)
-    }
+    fun logError(message: String) = writeToFile(ERROR_LOG, message)
 }

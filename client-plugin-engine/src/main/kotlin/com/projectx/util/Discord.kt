@@ -4,71 +4,54 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import java.net.HttpURLConnection
 import java.net.URI
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 import kotlin.concurrent.thread
 
 object DiscordWebhook {
+
+    private const val EMBED_COLOUR = 0x3498DB
+
     fun sendDiscordNotification(title: String, message: String) {
-        val config = Configuration.config
-
-        if (!config.discordEnabled || config.discordWebhookUrl.isBlank())
-            return
-
-        thread(isDaemon = true) {
-            try {
-                sendWebhookMessage(config.discordWebhookUrl, title, message, config)
-            } catch (e: Exception) {
-                println("Failed to send Discord notification: ${e.message}")
-            }
-        }
+        val settings = Configuration.config
+        if (!settings.discordEnabled || settings.discordWebhookUrl.isBlank()) return
+        val body = payload(settings, title, message)
+        thread(isDaemon = true, name = "discord-webhook") { post(settings.discordWebhookUrl, body) }
     }
 
-    private fun sendWebhookMessage(webhookUrl: String, title: String, message: String, config: PersistentConfig) {
-        val url = URI(webhookUrl).toURL()
-        val connection = url.openConnection() as HttpURLConnection
+    private fun payload(settings: PersistentConfig, title: String, message: String): String {
+        val embed = JsonObject().apply {
+            addProperty("title", title)
+            addProperty("description", message)
+            addProperty("color", EMBED_COLOUR)
+            addProperty("timestamp", Instant.now().toString())
+            add("footer", JsonObject().apply { addProperty("text", "Project X Notification") })
+        }
+        return JsonObject().apply {
+            addProperty("username", settings.discordUsername)
+            if (settings.discordAvatarUrl.isNotBlank()) addProperty("avatar_url", settings.discordAvatarUrl)
+            add("embeds", JsonArray().apply { add(embed) })
+        }.toString()
+    }
 
+    private fun post(url: String, body: String) {
+        var connection: HttpURLConnection? = null
         try {
-            connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("User-Agent", "Project X-Notifications/1.0")
-            connection.doOutput = true
-
-            val embed = JsonObject().apply {
-                addProperty("title", title)
-                addProperty("description", message)
-                addProperty("color", 0x3498DB)
-                addProperty("timestamp", Instant.now().toString())
-
-                val footer = JsonObject().apply {
-                    addProperty("text", "Project X Notification")
-                }
-                add("footer", footer)
+            connection = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("User-Agent", "Project X-Notifications/1.0")
             }
-
-            val payload = JsonObject().apply {
-                addProperty("username", config.discordUsername)
-                if (!config.discordAvatarUrl.isBlank())
-                    addProperty("avatar_url", config.discordAvatarUrl)
-
-                val embeds = JsonArray().apply {
-                    add(embed)
-                }
-                add("embeds", embeds)
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                val reason = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: "Unknown error"
+                println("Discord webhook failed with code $status: $reason")
             }
-
-            connection.outputStream.use { outputStream ->
-                outputStream.write(payload.toString().toByteArray(StandardCharsets.UTF_8))
-            }
-
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                val errorMessage = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
-                println("Discord webhook failed with code $responseCode: $errorMessage")
-            }
-
+        } catch (e: Exception) {
+            println("Failed to send Discord notification: ${e.message}")
         } finally {
-            connection.disconnect()
+            connection?.disconnect()
         }
     }
 }

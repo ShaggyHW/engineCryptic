@@ -1,78 +1,60 @@
 package com.projectx.util
 
-import java.awt.*
+import java.awt.Color
+import java.awt.Image
+import java.awt.RenderingHints
+import java.awt.SystemTray
+import java.awt.Toolkit
+import java.awt.TrayIcon
 import java.awt.image.BufferedImage
-import java.net.URL
 import javax.imageio.ImageIO
 import javax.sound.sampled.AudioSystem
 import kotlin.concurrent.thread
 
-private val sharedIcon: Image by lazy { loadIconFromResources() }
-private val sharedTrayIcon: TrayIcon by lazy {
-    TrayIcon(sharedIcon, "Project X Notifications").apply {
-        isImageAutoSize = true
-        toolTip = "Project X Notification"
-    }
+private val notificationIcon: TrayIcon by lazy {
+    TrayIcon(trayImage(), "Project X Notification").apply { isImageAutoSize = true }
 }
 
 @JvmOverloads
 fun showNotification(title: String, message: String, playSound: Boolean = Configuration.config.soundEnabled) {
-    val config = Configuration.config
-
-    if (config.discordEnabled)
-        DiscordWebhook.sendDiscordNotification(title, message)
-
-    if (config.systemTrayEnabled && SystemTray.isSupported()) {
-        thread(isDaemon = true) {
-            try {
-                val systemTray = SystemTray.getSystemTray()
-                if (systemTray.trayIcons.isEmpty())
-                    systemTray.add(sharedTrayIcon)
-                sharedTrayIcon.displayMessage(title, message, TrayIcon.MessageType.INFO)
-
-                if (playSound && config.soundEnabled) {
-                    playNotificationSound()
-                }
-            } catch (_: Exception) { }
+    val settings = Configuration.config
+    if (settings.discordEnabled) DiscordWebhook.sendDiscordNotification(title, message)
+    if (!settings.systemTrayEnabled || !SystemTray.isSupported()) return
+    thread(isDaemon = true, name = "tray-notification") {
+        runCatching {
+            val tray = SystemTray.getSystemTray()
+            if (tray.trayIcons.isEmpty()) tray.add(notificationIcon)
+            notificationIcon.displayMessage(title, message, TrayIcon.MessageType.INFO)
+            if (playSound && settings.soundEnabled) playChime()
         }
     }
 }
 
-private fun loadIconFromResources(): Image {
-    return try {
-        val iconURL: URL? = object {}.javaClass.getResource("/icons/logo.png")
-        iconURL?.let { ImageIO.read(it) } ?: createDefaultIcon()
-    } catch (e: Exception) {
-        createDefaultIcon()
-    }
-}
+private fun trayImage(): Image =
+    runCatching { DiscordWebhook::class.java.getResource("/icons/logo.png")?.let(ImageIO::read) }.getOrNull()
+        ?: drawnTrayImage()
 
-private fun createDefaultIcon(): Image {
-    val size = 16
-    val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
-    val g = image.createGraphics()
-    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-    g.color = Color.BLUE
-    g.fillOval(2, 2, size - 4, size - 4)
-    g.color = Color.WHITE
-    g.fillOval(6, 6, size - 12, size - 12)
-    g.dispose()
+private fun drawnTrayImage(): Image {
+    val image = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
+    val canvas = image.createGraphics()
+    canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+    canvas.color = Color(52, 152, 219)
+    canvas.fillOval(0, 0, 16, 16)
+    canvas.color = Color.WHITE
+    canvas.fillOval(5, 5, 6, 6)
+    canvas.dispose()
     return image
 }
 
-private fun playNotificationSound() {
-    thread(isDaemon = true) {
-        try {
-            val soundURL: URL? = object {}.javaClass.getResource("/sounds/notification.wav")
-            if (soundURL != null) {
-                val audioInputStream = AudioSystem.getAudioInputStream(soundURL)
-                val clip = AudioSystem.getClip()
-                clip.open(audioInputStream)
-                clip.start()
-            } else
-                Toolkit.getDefaultToolkit().beep()
-        } catch (_: Exception) {
-            try { Toolkit.getDefaultToolkit().beep() } catch (_: Exception) { }
-        }
+private fun playChime() {
+    thread(isDaemon = true, name = "notification-sound") {
+        val played = runCatching {
+            val sound = DiscordWebhook::class.java.getResource("/sounds/notification.wav") ?: return@runCatching false
+            val clip = AudioSystem.getClip()
+            AudioSystem.getAudioInputStream(sound).use { clip.open(it) }
+            clip.start()
+            true
+        }.getOrDefault(false)
+        if (!played) runCatching { Toolkit.getDefaultToolkit().beep() }
     }
 }

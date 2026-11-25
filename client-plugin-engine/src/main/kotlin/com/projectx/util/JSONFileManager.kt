@@ -3,46 +3,41 @@ package com.projectx.util
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonIOException
-import com.google.gson.stream.JsonReader
-import com.google.gson.stream.JsonWriter
 import java.io.File
 import java.io.IOException
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
 import java.lang.reflect.Type
 
 object JsonFileManager {
-    private var gson: Gson = GsonBuilder().setPrettyPrinting().create()
 
-    fun setGson(customGson: Gson) {
-        gson = customGson
+    @Volatile
+    private var current: Gson = GsonBuilder().setPrettyPrinting().create()
+
+    fun setGson(gson: Gson) {
+        current = gson
     }
 
-    fun getGson(): Gson = gson
+    fun getGson(): Gson = current
 
     @Throws(IOException::class)
     fun <T> loadJsonFile(file: File, type: Type): T {
-        if (!file.exists()) error("File $file does not exist")
-        return file.inputStream().use { inputStream ->
-            JsonReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
-                gson.fromJson<T>(reader, type)
-            }
-        }
+        check(file.exists()) { "File ${file.absolutePath} does not exist" }
+        return file.bufferedReader(Charsets.UTF_8).use { current.fromJson(it, type) }
     }
 
     @Throws(JsonIOException::class)
-    fun <T> fromJsonString(json: String, type: Type): T = gson.fromJson(json, type)
+    fun <T> fromJsonString(json: String, type: Type): T = current.fromJson(json, type)
 
     @Throws(IOException::class)
     fun saveJsonFile(data: Any, file: File) {
-        file.parentFile?.takeIf { !it.exists() }?.mkdirs()
-        file.outputStream().use { outputStream ->
-            JsonWriter(OutputStreamWriter(outputStream, Charsets.UTF_8)).use { writer ->
-                writer.setIndent("  ")
-                gson.toJson(data, data::class.java, writer)
-            }
+        file.absoluteFile.parentFile?.mkdirs()
+        val gson = current
+        file.bufferedWriter(Charsets.UTF_8).use { out ->
+            val writer = gson.newJsonWriter(out)
+            writer.setIndent("  ")
+            gson.toJson(data, data.javaClass, writer)
+            writer.flush()
         }
     }
 
-    fun toJson(data: Any): String = gson.toJson(data)
+    fun toJson(data: Any): String = current.toJson(data)
 }

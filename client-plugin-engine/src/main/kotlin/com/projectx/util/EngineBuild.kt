@@ -2,16 +2,19 @@ package com.projectx.util
 
 import java.util.Properties
 
-/** The commit and time this jar was built from, stamped in at build time. */
 object EngineBuild {
-    private val properties: Properties by lazy {
-        Properties().also { props ->
-            EngineBuild::class.java.getResourceAsStream("/engine-build.properties")?.use(props::load)
+
+    private const val UNKNOWN = "unknown"
+
+    private val stamp: Properties by lazy {
+        Properties().apply {
+            EngineBuild::class.java.getResourceAsStream("/engine-build.properties")?.use { load(it) }
         }
     }
 
-    val commit: String get() = properties.getProperty("commit", "unknown")
-    val builtAt: String get() = properties.getProperty("builtAt", "unknown")
+    val commit: String get() = stamp.getProperty("commit") ?: UNKNOWN
+
+    val builtAt: String get() = stamp.getProperty("builtAt") ?: UNKNOWN
 
     fun describe(): String = "commit $commit built $builtAt"
 }
