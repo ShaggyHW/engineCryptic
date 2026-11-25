@@ -304,12 +304,15 @@ jobs:
             client-plugin-engine/src/main/resources/webwalker
       - name: Test the merge
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
-      - name: Merge links.json
+      # Upstream knows a few hundred doors; the game's other doors and the rooms behind them go in first, then our links.
+      - name: Add doors, then merge links.json
         run: |
           set -eu
           v='${{ needs.version.outputs.version }}'
-          mkdir -p dist
-          python3 .github/scripts/navpath_map.py navpath/worldReachableTiles.db \
+          mkdir -p dist work
+          python3 .github/scripts/navpath_doors.py --db navpath/worldReachableTiles.db \
+            --doors navpath/doors/navpath-doors.tsv --tiles navpath/doors/navpath-tiles.tsv --out work/doors.db
+          python3 .github/scripts/navpath_map.py work/doors.db \
             client-plugin-engine/src/main/resources/webwalker/links.json "dist/navpath-map-$v.db"
           cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
           ls -la
