@@ -1,6 +1,7 @@
 package com.projectx.game.magic
 
 import com.projectx.game.interfaces.IFSlot
+import com.projectx.game.nxt.interfaces.InterfaceComponent
 import com.projectx.quest.runtime.CacheQuests
 import com.projectx.script.Script
 import com.projectx.script.api.Spellbook
@@ -144,16 +145,18 @@ internal object SpellTeleports {
     /** Whether a book slot's ops name no destination, only "Cast". */
     fun onlyCast(ops: List<String>): Boolean = ops.all { it.isBlank() || it.equals(CAST_OP, ignoreCase = true) }
 
-    private fun bookSlot(abilityId: Int): IFSlot? {
+    fun bookSlot(abilityId: Int): IFSlot? {
         val known = ids.get() ?: return null
         return IFSlot(known.bookInterface, known.bookComponent, abilityId)
     }
 
-    private fun listedInBook(abilityId: Int): Boolean {
-        val known = ids.get() ?: return false
-        val grid = interfaces.getComponent(known.bookInterface, known.bookComponent) ?: return false
-        return grid.createdChildren.firstOrNull { it.slotId == abilityId }?.let { it.opCount > 0 } == true
+    fun drawnBookSlot(abilityId: Int): InterfaceComponent? {
+        val known = ids.get() ?: return null
+        val grid = interfaces.getComponent(known.bookInterface, known.bookComponent) ?: return null
+        return grid.createdChildren.firstOrNull { it.slotId == abilityId && it.opCount > 0 }
     }
+
+    private fun listedInBook(abilityId: Int): Boolean = drawnBookSlot(abilityId) != null
 
     private fun click(spell: SpellInfo, fromBar: Boolean): Boolean {
         if (fromBar) return castAbility(AbilityType(spell.structId))

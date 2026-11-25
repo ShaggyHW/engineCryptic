@@ -9,7 +9,7 @@ import kotlin.math.ceil
 import kotlin.math.max
 
 /** Walking distances from one start tile, as the collision stood when it was searched. */
-internal class WalkField(private val window: SearchWindow, val start: Tile, val maxDepth: Int, private val dist: IntArray) {
+class WalkField internal constructor(private val window: SearchWindow, val start: Tile, val maxDepth: Int, private val dist: IntArray) {
 
     /** Steps from the start; [WalkMap.UNREACHABLE] when no walk within [maxDepth] gets there, [WalkMap.UNKNOWN] off the window. */
     fun distanceTo(x: Int, y: Int, plane: Int): Int {
@@ -50,19 +50,19 @@ internal class WalkField(private val window: SearchWindow, val start: Tile, val 
  * would the server walk through. Every answer first asks [trusted]; an untrusted tile answers [UNKNOWN] and the
  * caller falls back to what it would do without a map.
  */
-internal open class WalkMap(
+open class WalkMap internal constructor(
     private val steps: () -> StepRule,
     private val trust: (x: Int, y: Int, plane: Int) -> Boolean = { _, _, _ -> true },
 ) {
-    constructor(rule: StepRule, trust: (x: Int, y: Int, plane: Int) -> Boolean = { _, _, _ -> true }) : this({ rule }, trust)
+    internal constructor(rule: StepRule, trust: (x: Int, y: Int, plane: Int) -> Boolean = { _, _, _ -> true }) : this({ rule }, trust)
 
-    open fun trusted(tile: Tile): Boolean = trust(tile.x, tile.y, tile.plane)
+    internal open fun trusted(tile: Tile): Boolean = trust(tile.x, tile.y, tile.plane)
 
-    open fun rule(): StepRule = steps()
+    internal open fun rule(): StepRule = steps()
 
-    open fun hopRule(): StepRule = rule()
+    internal open fun hopRule(): StepRule = rule()
 
-    fun canStep(x: Int, y: Int, plane: Int, direction: Direction): Boolean = rule().canStep(x, y, plane, direction)
+    internal fun canStep(x: Int, y: Int, plane: Int, direction: Direction): Boolean = rule().canStep(x, y, plane, direction)
 
     /** Trusted, and some step leads off it. */
     open fun walkable(tile: Tile): Boolean {
@@ -107,13 +107,13 @@ internal open class WalkMap(
     }
 
     /** The tiles the server walks for a walk click on [to] from [from], [from] first; null when unknown. */
-    open fun serverPath(from: Tile, to: Tile): List<Tile>? {
+    internal open fun serverPath(from: Tile, to: Tile): List<Tile>? {
         if (from.plane != to.plane || !trusted(from) || !trusted(to)) return null
         return GridSearch.serverPath(rule(), SearchWindow.around(from.x, from.y, from.plane, SERVER_PATH_RADIUS), from, to)
     }
 
     /** Whether a walk joins [a] and [b] in at most [maxSteps]: a door is open when its two sides do. Null when unknown. */
-    fun passage(a: Tile, b: Tile, maxSteps: Int): Boolean? {
+    internal fun passage(a: Tile, b: Tile, maxSteps: Int): Boolean? {
         val d = distance(a, b, maxSteps)
         return if (d == UNKNOWN) null else d >= 0
     }
@@ -122,7 +122,7 @@ internal open class WalkMap(
         const val UNREACHABLE = -1
         const val UNKNOWN = -2
         const val DEFAULT_MAX_DEPTH = 96
-        const val WINDOW_RADIUS = 96
+        internal const val WINDOW_RADIUS = 96
         private const val SERVER_PATH_RADIUS = 64
         private const val FIELD_TTL_MS = 150L
     }

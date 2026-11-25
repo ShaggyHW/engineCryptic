@@ -25,6 +25,10 @@ class Bank {
         @JvmStatic
         val TABS_ALL_COMPONENT_ID = component("tabs_all_button")
         @JvmStatic
+        val PRESET_TAB_COMPONENT_ID = component("side_tab_presets")
+        @JvmStatic
+        val TRANSFER_TAB_COMPONENT_ID = component("side_tab_options")
+        @JvmStatic
         val DEPOSIT_INVENTORY_COMPONENT_ID = component("bank_inv_button")
         @JvmStatic
         val DEPOSIT_WORN_COMPONENT_ID = component("bank_worn_button")

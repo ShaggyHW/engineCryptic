@@ -48,7 +48,7 @@ fun ScriptCategory.tint(): Color = when (this) {
 
     ScriptCategory.AGILITY, ScriptCategory.THIEVING, ScriptCategory.DUNGEONEERING -> Color(0xFF6FA8F0)
 
-    ScriptCategory.QUESTS -> Color(0xFFB48AF0)
+    ScriptCategory.QUESTS, ScriptCategory.CLUES -> Color(0xFFB48AF0)
     ScriptCategory.OTHER -> Color(0xFF8C95A8)
 }
 

@@ -34,7 +34,7 @@ import kotlin.math.max
  *
  * A client whose offset table lacks the reader falls back to [CacheWalkMap].
  */
-internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
+object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     const val UNREACHABLE = WalkMap.UNREACHABLE
     const val UNKNOWN = WalkMap.UNKNOWN
 
@@ -68,7 +68,7 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     private val staticDepth = ThreadLocal.withInitial { IntArray(1) }
 
     /** Closes one [allowStatic] level. */
-    class StaticScope internal constructor() : AutoCloseable {
+    internal class StaticScope internal constructor() : AutoCloseable {
         override fun close() {
             val depth = staticDepth.get()
             if (depth[0] > 0) depth[0]--
@@ -78,18 +78,18 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     private val scope = StaticScope()
 
     /** Opens a scope (`use { }`) in which this thread's questions may be answered from static squares during an arrival. */
-    fun allowStatic(): StaticScope {
+    internal fun allowStatic(): StaticScope {
         staticDepth.get()[0]++
         return scope
     }
 
-    inline fun <T> withStatic(block: () -> T): T = allowStatic().use { block() }
+    internal inline fun <T> withStatic(block: () -> T): T = allowStatic().use { block() }
 
     /**
      * [withStatic] for a block that suspends: the opt-in follows the coroutine onto whichever thread resumes it and
      * leaves the thread whenever it suspends, so another coroutine on the same thread never inherits it.
      */
-    suspend fun <T> withStaticSuspending(block: suspend () -> T): T =
+    internal suspend fun <T> withStaticSuspending(block: suspend () -> T): T =
         withContext(staticDepth.asContextElement(IntArray(1) { 1 })) { block() }
 
     private fun staticAllowed(): Boolean = staticDepth.get()[0] > 0
@@ -121,7 +121,7 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
 
     /** Wall-clock ms [observe] first saw the last teleport, 0 before the first. */
     @Volatile
-    var lastTeleportSeenAt = 0L
+    internal var lastTeleportSeenAt = 0L
         private set
 
     /** The first tile of the last teleport, null before the first. */
@@ -151,7 +151,7 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
         lastTeleportTile = player
     }
 
-    fun isTeleport(previous: Tile, player: Tile, elapsedMs: Long): Boolean {
+    internal fun isTeleport(previous: Tile, player: Tile, elapsedMs: Long): Boolean {
         val allowed = TELEPORT_JUMP_TILES + RUN_TILES_PER_TICK * ceil(elapsedMs / TICK_MS)
         val jump = previous.getLongestDelta(player)
         return previous.plane != player.plane && jump > TELEPORT_JUMP_TILES || jump > allowed
@@ -210,7 +210,7 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
             (!arriving(snapshot.header) || staticAllowed() && staticReady(snapshot.header))
 
     /** [trusted] on live squares only, even inside an [allowStatic] scope. */
-    fun trustedLive(tile: Tile): Boolean {
+    internal fun trustedLive(tile: Tile): Boolean {
         val depth = staticDepth.get()
         val was = depth[0]
         depth[0] = 0
@@ -222,10 +222,10 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     }
 
     /** [trusted] that also accepts an arrival complete with static squares: for hop and walk planning. */
-    fun usableForHops(tile: Tile): Boolean = withStatic { trusted(tile) }
+    internal fun usableForHops(tile: Tile): Boolean = withStatic { trusted(tile) }
 
     /** An arrival is open but the window is complete with live and static squares. */
-    fun staticReady(): Boolean = live && staticReady(CollisionMap.header())
+    internal fun staticReady(): Boolean = live && staticReady(CollisionMap.header())
 
     private fun staticReady(header: CollisionHeader): Boolean {
         val player = lastObserved
@@ -234,7 +234,7 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     }
 
     /** Why [trusted] is false for [tile], or null when it is trusted; for the logs. */
-    fun untrustedReason(tile: Tile): String? {
+    internal fun untrustedReason(tile: Tile): String? {
         if (!live) return if (CacheWalkMap.trusted(tile)) null else "cache map: not loaded, an instance or arriving"
         val snapshot = CollisionMap.snapshot()
         if (!snapshot.isAvailable) return "no live map"
@@ -317,5 +317,5 @@ internal object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     }
 
     /** Whether the tile's square is served from static data right now. */
-    fun isStatic(tile: Tile): Boolean = CollisionMap.snapshot().flags(tile.x, tile.y, tile.plane) and CollisionFlags.STATIC != 0
+    internal fun isStatic(tile: Tile): Boolean = CollisionMap.snapshot().flags(tile.x, tile.y, tile.plane) and CollisionFlags.STATIC != 0
 }

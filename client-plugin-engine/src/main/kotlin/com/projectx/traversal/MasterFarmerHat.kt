@@ -28,7 +28,7 @@ import world.gregs.voidps.type.Tile
  * from the backpack lands there too and leaves the banked count alone. Until a number has been seen the count is
  * [UNKNOWN] and the hat is left out of routes; [refreshIfUnknown] reads the chooser once before a route is planned.
  */
-internal object MasterFarmerHat {
+object MasterFarmerHat {
     const val UNKNOWN = -1
     const val UNLIMITED = Int.MAX_VALUE
 
@@ -77,7 +77,7 @@ internal object MasterFarmerHat {
     }
 
     /** Called every client frame on the game thread; observes once per server tick. */
-    fun tick() {
+    internal fun tick() {
         val tick = runCatching { ServerTick.count }.getOrDefault(-1L)
         if (tick < 0 || tick == lastObservedTick) return
         lastObservedTick = tick
@@ -85,7 +85,7 @@ internal object MasterFarmerHat {
     }
 
     /** One server tick's look at the chooser, the bank and a teleport in flight; never throws. */
-    fun observeTick(tick: Long) {
+    internal fun observeTick(tick: Long) {
         runCatching {
             if (!isLoggedIn()) return
             synchronized(lock) {
@@ -118,15 +118,15 @@ internal object MasterFarmerHat {
     }
 
     /** The count on a chooser line such as "3. Herblore Habitat (31)": the number, [UNLIMITED], or [UNKNOWN]. */
-    fun parseHabitatLine(line: String?): Int {
+    internal fun parseHabitatLine(line: String?): Int {
         val value = line?.let { HABITAT_LINE.find(it) }?.groupValues?.get(1) ?: return UNKNOWN
         if (value.equals("unlimited", ignoreCase = true)) return UNLIMITED
         return value.toIntOrNull() ?: UNKNOWN
     }
 
-    fun inLandingBox(tile: Tile): Boolean = inLandingBox(tile.x, tile.y, tile.plane)
+    internal fun inLandingBox(tile: Tile): Boolean = inLandingBox(tile.x, tile.y, tile.plane)
 
-    fun inLandingBox(x: Int, y: Int, plane: Int): Boolean =
+    internal fun inLandingBox(x: Int, y: Int, plane: Int): Boolean =
         plane == LAND_PLANE && x in LAND_X - LAND_RADIUS..LAND_X + LAND_RADIUS && y in LAND_Y - LAND_RADIUS..LAND_Y + LAND_RADIUS
 
     /** The hat worn or in the backpack: its teleport spends banked bags, so backpack bags never recharge it. */

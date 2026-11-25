@@ -29,6 +29,10 @@ import com.projectx.pathfinder.*
 import com.projectx.script.Script
 import com.projectx.script.api.Relics.NONE
 import com.projectx.traversal.local.LocalNav
+import com.projectx.game.collision.CollisionFlags
+import com.projectx.game.collision.CollisionMap
+import world.gregs.voidps.collision.CollisionFlag
+import world.gregs.voidps.type.Direction
 import com.projectx.util.gaussian
 import com.projectx.webwalker.WalkGoal
 import com.projectx.webwalker.WebWalkResult
@@ -427,6 +431,13 @@ fun interactClosestObject(objectName: String, option: String, range: Int = 20): 
 }
 
 @JvmOverloads
+fun interactClosestObject(objectName: Regex, option: String, range: Int = 20): Boolean {
+    val target = findClosestObjectToTile(localPlayer.tile, range) { objectName.matches(it.name()) && it.hasOption(option) }
+        ?: return false
+    return target.interact(option)
+}
+
+@JvmOverloads
 fun interactClosestObjectFromIds(vararg objectIds: Int, option: String, range: Int = 20): Boolean {
     val target = getAllObjectsWithinRange(range).filter { obj -> objectIds.any { obj.isType(it) } && obj.hasOption(option) }
         .minByOrNull { it.tile.getDistance(localPlayer.tile) } ?: return false
@@ -540,6 +551,12 @@ fun interactClosestNPC(npcName: String, option: String, range: Int = 20): Boolea
 }
 
 @JvmOverloads
+fun interactClosestNPC(npcName: Regex, option: String, range: Int = 20): Boolean {
+    val target = findClosestNPC(range) { npcName.matches(it.name()) && it.hasOption(option) } ?: return false
+    return target.interact(option)
+}
+
+@JvmOverloads
 fun findClosestReachableNPC(name: String, range: Int = 20) = findClosestReachableNPC(range) { it.name() == name }
 @JvmOverloads
 fun findClosestReachableNPC(id: Int, range: Int = 20) = findClosestReachableNPC(range) { it.id == id }
@@ -600,6 +617,33 @@ fun diveToTile(x: Int, y: Int) = dive(Tile.of(x, y, localPlayer.plane))
 @JvmOverloads
 fun walkingDistanceTo(x: Int, y: Int, plane: Int = localPlayer.plane, maxSteps: Int = 96): Int =
     LocalNav.distance(localPlayer.tile, Tile.of(x, y, plane), maxSteps)
+
+/**
+ * Whether a wall (or the wall half of a door, fence or gate) closes the [side] edge of [tile], whatever stands on the
+ * neighbour. [side] is one of the four cardinal directions; a diagonal answers false, as does a tile the live map does
+ * not cover. Without the live map it reads the cache collision, doors in their default state.
+ */
+fun hasWall(tile: Tile, side: Direction): Boolean {
+    if (CollisionMap.supported) {
+        val bit = when (side) {
+            Direction.WEST -> CollisionFlags.WALL_W
+            Direction.SOUTH -> CollisionFlags.WALL_S
+            Direction.EAST -> CollisionFlags.WALL_E
+            Direction.NORTH -> CollisionFlags.WALL_N
+            else -> return false
+        }
+        return CollisionMap.snapshot().walls(tile.x, tile.y, tile.plane) and bit != 0
+    }
+    val bit = when (side) {
+        Direction.WEST -> CollisionFlag.WALL_WEST
+        Direction.SOUTH -> CollisionFlag.WALL_SOUTH
+        Direction.EAST -> CollisionFlag.WALL_EAST
+        Direction.NORTH -> CollisionFlag.WALL_NORTH
+        else -> return false
+    }
+    val flags = WorldCollision.getFlags(tile.x, tile.y, tile.plane)
+    return flags != -1 && flags and bit != 0
+}
 
 fun diveToTile(x: Int, y: Int, plane: Int) = dive(Tile.of(x, y, plane))
 
@@ -991,73 +1035,204 @@ fun equipFromBank(id: Int) = doBankItemsAction(id, 9)
 fun equipFromBankInventory(id: Int) = doBankInventoryAction(id, 8)
 fun equipFromBankInventory(name: String) = doBankInventoryAction(name, 8)
 fun selectBankAllTab() = doBankAction(Bank.TABS_ALL_COMPONENT_ID)
+/** Clicks preset button [num] as the Presets tab shows it now; for presets 10-18 use [loadBankPresetPaged]. */
 fun loadBankPreset(num: Int) = doBankAction(Bank.SHARE_QUICK_COMPONENT_ID, num)
+fun selectBankPresetTab() = doBankAction(Bank.PRESET_TAB_COMPONENT_ID)
+fun selectBankTransferTab() = doBankAction(Bank.TRANSFER_TAB_COMPONENT_ID)
 fun depositBankInventory() = doBankAction(Bank.DEPOSIT_INVENTORY_COMPONENT_ID)
 fun depositBankWorn() = doBankAction(Bank.DEPOSIT_WORN_COMPONENT_ID)
 fun setBankWithdrawNotes(notes: Boolean) =
     if (bankWithdrawNotes != notes) doBankAction(Bank.CERT_COMPONENT_ID) else true
 
-@JvmOverloads
-fun depositBankItem(name: String, amount: Int = 0) = when (amount) {
-    1 -> doBankInventoryAction(name, 2)
-    5 -> doBankInventoryAction(name, 3)
-    10 -> doBankInventoryAction(name, 4)
-    50 -> doBankInventoryAction(name, 5)
-    0 -> doBankInventoryAction(name, 7) //deposit all (also option num 1)
-    else -> {
-        println("Deposit-X not implemented (needs keyboard support)") //option 6 is Deposit-x
-        false
+private const val BANK_OP_X = 6
+
+/**
+ * The fixed-quantity bank op for [amount] on either side of the bank, or -1 when it has to go through X. There is no
+ * fixed op for 50: the op after Withdraw-10 is "-<last X>", whatever quantity was typed last.
+ */
+internal fun bankQuantityOp(amount: Int): Int = when (amount) {
+    1 -> 2
+    5 -> 3
+    10 -> 4
+    0 -> 7
+    else -> -1
+}
+
+/** Fires the fixed op for [amount]; any other amount needs [withdrawBankAmount]/[depositBankAmount] and answers false. */
+private inline fun bankTransfer(verb: String, item: Any, amount: Int, fire: (op: Int) -> Boolean): Boolean {
+    val op = bankQuantityOp(amount)
+    if (op < 0) {
+        println("[Bank] $verb $amount x $item needs $verb-X: use the suspend ${verb}BankAmount")
+        return false
     }
+    return fire(op)
 }
 
 @JvmOverloads
-fun depositBankItem(name: Regex, amount: Int = 0) = when (amount) {
-    1 -> doBankInventoryAction(name, 2)
-    5 -> doBankInventoryAction(name, 3)
-    10 -> doBankInventoryAction(name, 4)
-    50 -> doBankInventoryAction(name, 5)
-    0 -> doBankInventoryAction(name, 7) //deposit all (also option num 1)
-    else -> {
-        println("Deposit-X not implemented (needs keyboard support)") //option 6 is Deposit-x
-        false
-    }
-}
+fun depositBankItem(name: String, amount: Int = 0) = bankTransfer("deposit", name, amount) { doBankInventoryAction(name, it) }
 
 @JvmOverloads
-fun withdrawBankItem(name: String, amount: Int = 0) = when (amount) {
-    1 -> doBankItemsAction(name, 2)
-    5 -> doBankItemsAction(name, 3)
-    10 -> doBankItemsAction(name, 4)
-    50 -> doBankItemsAction(name, 5)
-    0 -> doBankItemsAction(name, 7) //withdraw all
-    else -> {
-        println("Withdraw-X not implemented (needs keyboard support)") //option 6 is withdraw-x
-        false
-    }
-}
+fun depositBankItem(name: Regex, amount: Int = 0) = bankTransfer("deposit", name, amount) { doBankInventoryAction(name, it) }
+
+@JvmOverloads
+fun depositBankItem(itemId: Int, amount: Int = 0) = bankTransfer("deposit", itemId, amount) { doBankInventoryAction(itemId, it) }
+
+@JvmOverloads
+fun withdrawBankItem(name: String, amount: Int = 0) = bankTransfer("withdraw", name, amount) { doBankItemsAction(name, it) }
 
 /** Withdraws by item id, for items that share a name with another (a strung and an unstrung amulet). */
 @JvmOverloads
-fun withdrawBankItem(itemId: Int, amount: Int = 0) = when (amount) {
-    1 -> doBankItemsAction(itemId, 2)
-    5 -> doBankItemsAction(itemId, 3)
-    10 -> doBankItemsAction(itemId, 4)
-    50 -> doBankItemsAction(itemId, 5)
-    0 -> doBankItemsAction(itemId, 7)
-    else -> false
-}
+fun withdrawBankItem(itemId: Int, amount: Int = 0) = bankTransfer("withdraw", itemId, amount) { doBankItemsAction(itemId, it) }
 
 @JvmOverloads
-fun withdrawBankItem(name: Regex, amount: Int = 0) = when (amount) {
-    1 -> doBankItemsAction(name, 2)
-    5 -> doBankItemsAction(name, 3)
-    10 -> doBankItemsAction(name, 4)
-    50 -> doBankItemsAction(name, 5)
-    0 -> doBankItemsAction(name, 7) //withdraw all
-    else -> {
-        println("Withdraw-X not implemented (needs keyboard support)") //option 6 is withdraw-x
-        false
+fun withdrawBankItem(name: Regex, amount: Int = 0) = bankTransfer("withdraw", name, amount) { doBankItemsAction(name, it) }
+
+/** True when the open bank's item slots show fewer items than it holds: one bank tab is selected. */
+val bankTabSelected: Boolean
+    get() {
+        if (!bankOpen) return false
+        val held = bank.count { it.amount > 0 }
+        return held > 0 && Bank.fetchBankItemsArray().size < held
     }
+
+/**
+ * Switches the open bank to "View all" when one tab is selected and waits for the slots to refill: with a tab selected
+ * only that tab's items have a slot to click. True when every item has a slot (or the bank is closed).
+ */
+suspend fun Script.viewAllBankTabs(): Boolean {
+    if (!bankTabSelected) return true
+    println("[Bank] a bank tab is selected - switching to View all")
+    selectBankAllTab()
+    delayUntil(3000) { !bankTabSelected }
+    return !bankTabSelected
+}
+
+/**
+ * Withdraws [amount] of the bank item [itemId] from any tab: 1, 5 and 10 use their fixed ops, 0 withdraws all, and any
+ * other positive amount goes through Withdraw-X and the amount prompt. False when the item is absent or the prompt
+ * never opened.
+ */
+suspend fun Script.withdrawBankAmount(itemId: Int, amount: Int): Boolean {
+    viewAllBankTabs()
+    return transferAmount("withdraw", itemId, amount) { doBankItemsAction(itemId, it) }
+}
+
+suspend fun Script.withdrawBankAmount(name: String, amount: Int): Boolean {
+    viewAllBankTabs()
+    return transferAmount("withdraw", name, amount) { doBankItemsAction(name, it) }
+}
+
+suspend fun Script.withdrawBankAmount(name: Regex, amount: Int): Boolean {
+    viewAllBankTabs()
+    return transferAmount("withdraw", name, amount) { doBankItemsAction(name, it) }
+}
+
+/** [withdrawBankAmount]'s deposit side, from the bank's backpack view. */
+suspend fun Script.depositBankAmount(itemId: Int, amount: Int): Boolean =
+    transferAmount("deposit", itemId, amount) { doBankInventoryAction(itemId, it) }
+
+suspend fun Script.depositBankAmount(name: String, amount: Int): Boolean =
+    transferAmount("deposit", name, amount) { doBankInventoryAction(name, it) }
+
+suspend fun Script.depositBankAmount(name: Regex, amount: Int): Boolean =
+    transferAmount("deposit", name, amount) { doBankInventoryAction(name, it) }
+
+/** [equipFromBank] after [viewAllBankTabs], so an item in another tab is found. */
+suspend fun Script.equipBankItem(itemId: Int): Boolean {
+    viewAllBankTabs()
+    return equipFromBank(itemId)
+}
+
+suspend fun Script.equipBankItem(name: String): Boolean {
+    viewAllBankTabs()
+    return equipFromBank(name)
+}
+
+const val MAX_BANK_PRESET = 18
+private const val PRESETS_PER_PAGE = 9
+private const val PRESET_NEXT_PAGE_SLOT = 100
+private const val PRESET_PAGE_VARBIT = 49662
+private const val PRESET_LOAD_OP = 1
+private const val PRESET_SAVE_OP = 2
+
+/** The Presets tab's page: 0 shows presets 1-9, 1 shows 10-18. */
+val bankPresetPage: Int
+    get() = varps.getVarBit(PRESET_PAGE_VARBIT)
+
+/**
+ * Loads bank preset [num] (1-[MAX_BANK_PRESET]) at the open bank: the Presets tab, turned to the preset's page, then
+ * its button's Load. True when the click went in; the bank may close with the load.
+ */
+suspend fun Script.loadBankPresetPaged(num: Int): Boolean {
+    val button = presetButton(num)
+    return button > 0 && doBankAction(Bank.SHARE_QUICK_COMPONENT_ID, button, PRESET_LOAD_OP)
+}
+
+/**
+ * Saves the backpack and worn gear over bank preset [num] as [loadBankPresetPaged] finds it; false for a locked slot.
+ * The bank stays on its Presets tab: [selectBankTransferTab] before item clicks.
+ */
+suspend fun Script.saveBankPreset(num: Int): Boolean {
+    val button = presetButton(num)
+    return button > 0 && doBankAction(Bank.SHARE_QUICK_COMPONENT_ID, button, PRESET_SAVE_OP)
+}
+
+/** A button on the wrong page acts on another preset, so the page is turned and confirmed first; -1 when it can't be. */
+private suspend fun Script.presetButton(num: Int): Int {
+    if (num !in 1..MAX_BANK_PRESET || !bankOpen) {
+        println("[Bank] bank preset $num: " + if (bankOpen) "not 1-$MAX_BANK_PRESET" else "the bank is closed")
+        return -1
+    }
+    selectBankPresetTab()
+    delayUntil(3000) { presetButtonsDrawn() }
+    if (!presetButtonsDrawn()) {
+        println("[Bank] the bank's preset buttons didn't draw")
+        return -1
+    }
+    val page = (num - 1) / PRESETS_PER_PAGE
+    repeat(2) {
+        if (bankPresetPage == page) return@repeat
+        doBankAction(Bank.SHARE_QUICK_COMPONENT_ID, PRESET_NEXT_PAGE_SLOT)
+        delayUntil(2000) { bankPresetPage == page }
+    }
+    if (bankPresetPage != page) {
+        println("[Bank] the bank's preset page is $bankPresetPage, not $page for preset $num")
+        return -1
+    }
+    delayBetween(150, 250)
+    return (num - 1) % PRESETS_PER_PAGE + 1
+}
+
+private fun presetButtonsDrawn(): Boolean {
+    val root = interfaces.getComponent(BANK_INTERFACE_ID, Bank.SHARE_QUICK_COMPONENT_ID) ?: return false
+    return root.staticChildren.size + root.createdChildren.size + root.dynamicChildren.size +
+        root.dynamicCreatedChildren.size > 1
+}
+
+private const val AMOUNT_PROMPT_INTERFACE = 1469
+
+private suspend fun Script.transferAmount(verb: String, item: Any, amount: Int, fire: (op: Int) -> Boolean): Boolean {
+    if (amount < 0) {
+        println("[Bank] $verb $item: negative amount $amount")
+        return false
+    }
+    val op = bankQuantityOp(amount)
+    if (op > 0) return fire(op)
+    if (!fire(BANK_OP_X)) {
+        println("[Bank] $verb-X $item: no such item")
+        return false
+    }
+    delayUntil(5000) { interfaces.isOpen(AMOUNT_PROMPT_INTERFACE) }
+    if (!interfaces.isOpen(AMOUNT_PROMPT_INTERFACE)) {
+        println("[Bank] $verb-X $item: the amount prompt did not open")
+        return false
+    }
+    delayBetween(300, 700)
+    if (!typeText(amount.toString())) return false
+    delayBetween(120, 300)
+    pressKey(Key.RETURN)
+    delayBetween(450, 900)
+    return true
 }
 
 //TODO for these we can check if deposit box interface is open as well and call that instead if it is

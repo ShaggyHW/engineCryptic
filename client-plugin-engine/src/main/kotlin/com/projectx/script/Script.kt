@@ -380,5 +380,6 @@ enum class ScriptCategory(val readableName: String) {
 
     QUESTS("Quests"),
     BOSSES("Bosses"),
-    OTHER("Other")
+    OTHER("Other"),
+    CLUES("Clues")
 }

@@ -3,6 +3,7 @@ package com.projectx.script.api
 import com.projectx.game.magic.CastResult
 import com.projectx.game.magic.SpellCatalogue
 import com.projectx.game.magic.SpellTeleports
+import com.projectx.game.nxt.interfaces.InterfaceComponent
 import com.projectx.script.Script
 import world.gregs.voidps.type.Tile
 
@@ -84,6 +85,16 @@ enum class TeleportSpell(val abilityId: Int) {
 
 /** The spellbook the player is on, or null on Dungeoneering's or when it cannot be read. */
 val currentSpellbook: Spellbook? get() = SpellTeleports.currentBook()
+
+/** The Magic book's slot for [abilityId] when the book is open and draws it with options, else null. */
+fun magicBookSlot(abilityId: Int): InterfaceComponent? = SpellTeleports.drawnBookSlot(abilityId)
+
+/**
+ * Clicks [option] on the Magic book's slot for [abilityId]. The server takes the click even when the book's filters
+ * leave the slot undrawn, so check the outcome rather than [magicBookSlot].
+ */
+@JvmOverloads
+fun clickMagicBookSlot(abilityId: Int, option: Int = 1): Boolean = SpellTeleports.bookSlot(abilityId)?.click(option) == true
 
 /**
  * Whether [spell] can be cast now: unlocked, the Magic level (boosts count), the runes from the backpack, rune pouches

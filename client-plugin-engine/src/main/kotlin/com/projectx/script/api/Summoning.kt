@@ -173,9 +173,10 @@ suspend fun Script.familiarRenewFromBank(pouch: Familiar): Boolean {
     return inventory.getItem(pouch.pouchName)?.click("Summon") == true
 }
 
-suspend fun Script.familiarSummonFamiliar(pouch: Familiar): Boolean {
+/** Clicks Summon on [pouch] and waits up to [timeoutMillis] for the familiar; true when the click went in. */
+suspend fun Script.familiarSummonFamiliar(pouch: Familiar, timeoutMillis: Long = 5_000L): Boolean {
     return inventory.getItem(pouch.pouchName)?.click("Summon")?.also {
-        delayUntil { familiarSummoned }
+        if (it) delayUntil(timeoutMillis) { familiarSummoned }
     } == true
 }
 
@@ -184,7 +185,7 @@ suspend fun Script.familiarRenewFromInterface(pouch: Familiar): Boolean {
     val pouchCount = inventory.count(pouch.pouchId)
 
     return interfaces.isOpen(662) && IFSlot(662, 53, -1).click(1).also {
-        delayUntil { inventory.count(pouch.pouchId) < pouchCount }
+        if (it) delayUntil(3000) { inventory.count(pouch.pouchId) < pouchCount }
     }
 }
 
@@ -195,10 +196,10 @@ suspend fun Script.familiarDismiss(): Boolean {
     if (!interfaces.isOpen(662)) return false
     if (!IFSlot(662, 56, -1).click(1)) return false
 
-    delayUntil { interfaces.isOpen(1188) }
+    delayUntil(3000) { interfaces.isOpen(1188) }
 
     return interfaces.isOpen(1188) && IFSlot(1188, 8, -1).dialogueContinue().also {
-        delayUntil { !familiarSummoned }
+        if (it) delayUntil(3000) { !familiarSummoned }
     }
 }
 
@@ -209,7 +210,7 @@ suspend fun Script.bobGiveAllItems(): Boolean {
     val clicked = IFSlot(662, 15, -1).click(1) || IFSlot(662, 105, -1).click(1)
 
     return clicked.also {
-        if (it) delayUntil { inventory.freeSlots >= freeSlots }
+        if (it) delayUntil(3000) { inventory.freeSlots >= freeSlots }
     }
 }
 
@@ -220,7 +221,7 @@ suspend fun Script.bobTakeAllItems(): Boolean {
     val clicked = IFSlot(662, 16, -1).click(1) || IFSlot(662, 106, -1).click(1)
 
     return clicked.also {
-        if (it) delayUntil { inventory.freeSlots <= freeSlots }
+        if (it) delayUntil(3000) { inventory.freeSlots <= freeSlots }
     }
 }
 
@@ -306,7 +307,7 @@ fun Script.familiarStoreScrolls(): Boolean =
 
 suspend fun Script.familiarTakeScrolls(): Boolean =
     interfaces.isOpen(662) && IFSlot(662, 78, -1).click(2).also {
-        delayUntil { familiarScrolls == 0 }
+        if (it) delayUntil(3000) { familiarScrolls == 0 }
     }
 
 private suspend fun Script.castSpecialNpc(target: NPC?): Boolean {
@@ -359,14 +360,13 @@ private suspend fun Script.castSpecialObj(obj: SceneObject?): Boolean {
     return false
 }
 
-fun Script.familiarCastSpecial(): Boolean {
-    if (!interfaces.isOpen(662) || familiarScrolls == 0) return false
-    val scrollsRemaining = familiarScrolls
+private const val MEERKAT_SCROLL = 19621
 
-    if (IFSlot(662, 117, -1).click(1)) {
-        return true
-    }
-    return false
+/** Clicks the familiar's special; skipped when none are stored but the scrolls are still in the backpack. */
+fun Script.familiarCastSpecial(): Boolean {
+    if (!interfaces.isOpen(662)) return false
+    if (familiarScrolls == 0 && inventory.hasItem(MEERKAT_SCROLL)) return false
+    return IFSlot(662, 117, -1).click(1)
 }
 
 suspend fun Script.familiarCastSpecial(id: Int): Boolean {

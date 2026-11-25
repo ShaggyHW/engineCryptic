@@ -3,6 +3,8 @@ package com.projectx.script.api
 import org.projectx.core.game.combat.Ability
 import org.projectx.core.game.combat.AbilityRegistry
 import org.projectx.core.game.combat.AbilityType
+import org.projectx.core.game.combat.CombatContext
+import org.projectx.core.game.combat.CombatIds
 import org.projectx.core.game.combat.CombatNames
 import org.projectx.core.game.combat.Effect
 import org.projectx.core.game.combat.EffectRegistry
@@ -83,3 +85,16 @@ fun abilityReady(name: String, ignoreGCD: Boolean = false): Boolean {
     val ability = actionBarAbility(name) ?: return false
     return if (ignoreGCD) ability.offCdIgnoreGCD() else ability.offCd()
 }
+
+/** Ticks left on the global cooldown; 0 when it is not running. */
+val globalCooldownTicks: Double
+    get() {
+        val context = CombatContext.current
+        val end = context.varcs.getVar(CombatIds.GLOBAL_COOLDOWN_END_VARC)
+        val now = context.clock.now()
+        return if (end > now) (end - now).toDouble() / CombatIds.CYCLES_PER_TICK else 0.0
+    }
+
+/** More than a tick left on the global cooldown: a click sent now lands after the next tick boundary, so it counts as ready. */
+val onGlobalCooldown: Boolean
+    get() = globalCooldownTicks > 1.0
