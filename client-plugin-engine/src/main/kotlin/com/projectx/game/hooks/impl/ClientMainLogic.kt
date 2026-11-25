@@ -27,6 +27,7 @@ import com.projectx.scheduler.ScriptPlans
 import com.projectx.store.RareDrops
 import com.projectx.store.RunReports
 import com.projectx.traversal.MasterFarmerHat
+import com.projectx.traversal.local.LocalNav
 import com.projectx.ui.UIState
 import com.projectx.ui.backend.rendering.UiFrameProducer
 import java.lang.foreign.MemorySegment
@@ -48,6 +49,7 @@ object ClientMainLogic {
                 HookManager.rearmSlotHooks()
                 MainLogicTickQueue.drain()
                 MainStateWatch.tick()
+                LocalNav.tick()
                 ScriptExecutor.mainLogic()
                 RunReports.tick()
                 RareDrops.tick()

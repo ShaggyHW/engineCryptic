@@ -11,6 +11,7 @@ import com.projectx.pathfinder.StepRule
 import com.projectx.pathfinder.WalkField
 import com.projectx.pathfinder.WalkMap
 import com.projectx.traversal.hops.HopKnowledge
+import com.projectx.traversal.nodes.TraversalSupport
 import world.gregs.voidps.type.Tile
 import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.withContext
@@ -134,6 +135,11 @@ object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     val lastTeleportY: Int get() = lastTeleportTile?.y ?: -1
 
     val lastTeleportPlane: Int get() = lastTeleportTile?.plane ?: -1
+
+    /** Run from the main logic every frame, so a teleport is seen whether or not a walk is running. */
+    internal fun tick() {
+        TraversalSupport.serverTileOrNull()?.let(::observe)
+    }
 
     /**
      * Feed the player's tile in, every pass. A jump of more than [TELEPORT_JUMP_TILES] plus a running tick's two tiles
