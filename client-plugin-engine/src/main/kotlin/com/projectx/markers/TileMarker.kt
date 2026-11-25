@@ -1,14 +1,15 @@
 package com.projectx.markers
 
 import com.google.gson.GsonBuilder
-import com.google.gson.reflect.TypeToken
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonParseException
+import com.google.gson.JsonParser
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
+import java.nio.file.Files
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
-/** A single marked tile. [color] null means "inherit the owning group's color". */
 data class TileMarker(
     val x: Int,
     val y: Int,
@@ -23,7 +24,6 @@ data class TileMarker(
     }
 }
 
-/** A named, separately-toggleable set of markers sharing a default color. */
 data class MarkerGroup(
     val name: String,
     val color: Int,
@@ -31,303 +31,324 @@ data class MarkerGroup(
     val markers: List<TileMarker> = emptyList(),
 )
 
-/**
- * Gson-backed persistence for grouped tile markers, mirroring
- * [com.projectx.quest.data.QuestLibrary]'s on-disk pattern: one JSON file under
- * `~/.projectx/`, holding a list of [MarkerGroup]. Groups are keyed by name and a
- * tile is unique within a group.
- *
- * Persistence is decoupled from edits: a mutation only flips a dirty flag, and a daemon
- * thread coalesces writes once edits go idle (so rapid edits like typing a label don't
- * write per keystroke). Call [flush] to force an immediate write — e.g. when the user
- * leaves edit mode.
- */
 object TileMarkerStore {
-    private val file = File(System.getProperty("user.home"), ".projectx/tile-markers.json")
-    private val gson = GsonBuilder().setPrettyPrinting().create()
-    private val listType = object : TypeToken<List<MarkerGroup>>() {}.type
-
-    private val lock = Any()
-    private val groups = LinkedHashMap<String, MarkerGroup>()
-    @Volatile private var loaded = false
-
-    private val dirty = AtomicBoolean(false)
-    @Volatile private var lastChangeNanos = 0L
-    private const val IDLE_FLUSH_NANOS = 750_000_000L
-    private val flusher by lazy { startFlusher() }
-    @Volatile private var flusherThread: Thread? = null
-
-    private const val MAX_UNDO = 50
-    private val undoStack = ArrayDeque<List<MarkerGroup>>()
-    private val redoStack = ArrayDeque<List<MarkerGroup>>()
 
     data class Rendered(val x: Int, val y: Int, val plane: Int, val color: Int, val label: String)
 
-    fun groups(): List<MarkerGroup> {
-        ensureLoaded()
-        synchronized(lock) { return groups.values.toList() }
+    private const val HISTORY_DEPTH = 50
+    private const val FLUSHER_TICK_MS = 500L
+    private const val QUIET_BEFORE_SAVE_MS = 750L
+
+    private val stateLock = Any()
+    private val writeLock = Any()
+    private val byName = LinkedHashMap<String, MarkerGroup>()
+    private val undoHistory = ArrayDeque<List<MarkerGroup>>()
+    private val redoHistory = ArrayDeque<List<MarkerGroup>>()
+    private var diskRead = false
+    private var unsaved = false
+    private var lastEditAt = 0L
+    private var flusher: Thread? = null
+
+    private val storeFile: File
+        get() = File(File(System.getProperty("user.home"), ".projectx"), "tile-markers.json")
+
+    fun groups(): List<MarkerGroup> = locked { byName.values.toList() }
+
+    fun visibleOnPlane(plane: Int): List<Rendered> = locked {
+        byName.values.filter { it.enabled }.flatMap { group ->
+            group.markers.filter { it.plane == plane }.map { Rendered(it.x, it.y, it.plane, it.color ?: group.color, it.label) }
+        }
     }
 
-    /** Markers from enabled groups on [plane], each resolved to its effective color. */
-    fun visibleOnPlane(plane: Int): List<Rendered> {
-        ensureLoaded()
-        synchronized(lock) {
-            return groups.values.filter { it.enabled }.flatMap { g ->
-                g.markers.filter { it.plane == plane }
-                    .map { Rendered(it.x, it.y, plane, it.color ?: g.color, it.label) }
+    fun addGroup(name: String, color: Int): Boolean = step {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed in byName) return@step false
+        byName[trimmed] = MarkerGroup(trimmed, color)
+        true
+    }
+
+    fun removeGroup(name: String): Boolean = step { byName.remove(name) != null }
+
+    fun clearGroup(name: String): Boolean = step { update(name) { it.copy(markers = emptyList()) } }
+
+    fun clearAll(): Boolean = step {
+        if (byName.isEmpty()) return@step false
+        byName.clear()
+        true
+    }
+
+    fun setEnabled(name: String, enabled: Boolean): Boolean = step { update(name) { it.copy(enabled = enabled) } }
+
+    fun setGroupColor(name: String, color: Int): Boolean = step { update(name) { it.copy(color = color) } }
+
+    fun recolorGroup(name: String, color: Int): Boolean = step {
+        update(name) { group -> group.copy(color = color, markers = group.markers.map { it.copy(color = null) }) }
+    }
+
+    fun renameGroup(from: String, to: String): Boolean = step {
+        val newName = to.trim()
+        if (from !in byName || newName.isEmpty() || newName == from || newName in byName) return@step false
+        val reordered = byName.values.map { if (it.name == from) it.copy(name = newName) else it }
+        byName.clear()
+        reordered.forEach { byName[it.name] = it }
+        true
+    }
+
+    fun setLabel(name: String, key: String, label: String): Boolean = locked {
+        val group = byName[name] ?: return@locked false
+        byName[name] = group.withMarker(key) { it.copy(label = label) } ?: return@locked false
+        markUnsaved()
+        true
+    }
+
+    fun markAt(name: String, x: Int, y: Int, plane: Int, color: Int, label: String = ""): TileMarker? = locked {
+        val group = byName[name] ?: return@locked null
+        val undoPoint = current()
+        val tileKey = TileMarker.key(x, y, plane)
+        val present = group.markers.firstOrNull { it.key == tileKey }
+        val others = group.markers.filter { it.key != tileKey }
+        val result = when {
+            present == null -> TileMarker(x, y, plane, color, label)
+            (present.color ?: group.color) == color -> null
+            else -> present.copy(color = color)
+        }
+        byName[name] = group.copy(markers = if (result == null) others else others + result)
+        remember(undoPoint)
+        result
+    }
+
+    fun toggleTile(name: String, x: Int, y: Int, plane: Int, color: Int): Boolean = step {
+        val tileKey = TileMarker.key(x, y, plane)
+        update(name) { group ->
+            if (group.markers.any { it.key == tileKey }) group.copy(markers = group.markers.filter { it.key != tileKey })
+            else group.copy(markers = group.markers + TileMarker(x, y, plane, color, ""))
+        }
+    }
+
+    fun recolorMarker(name: String, key: String, color: Int): Boolean = step {
+        val group = byName[name] ?: return@step false
+        byName[name] = group.withMarker(key) { it.copy(color = color) } ?: return@step false
+        true
+    }
+
+    fun removeMarker(name: String, key: String): Boolean = step {
+        val group = byName[name] ?: return@step false
+        if (group.markers.none { it.key == key }) return@step false
+        byName[name] = group.copy(markers = group.markers.filter { it.key != key })
+        true
+    }
+
+    fun removeTile(x: Int, y: Int, plane: Int): Boolean = step {
+        val tileKey = TileMarker.key(x, y, plane)
+        var removed = false
+        for (group in byName.values.toList()) {
+            if (group.markers.none { it.key == tileKey }) continue
+            byName[group.name] = group.copy(markers = group.markers.filter { it.key != tileKey })
+            removed = true
+        }
+        removed
+    }
+
+    fun addRect(name: String, x1: Int, y1: Int, x2: Int, y2: Int, plane: Int, color: Int?, label: String = ""): Int = locked {
+        val group = byName[name] ?: return@locked 0
+        val taken = group.markers.mapTo(HashSet()) { it.key }
+        val fresh = ArrayList<TileMarker>()
+        for (x in minOf(x1, x2)..maxOf(x1, x2)) {
+            for (y in minOf(y1, y2)..maxOf(y1, y2)) {
+                if (taken.add(TileMarker.key(x, y, plane))) fresh += TileMarker(x, y, plane, color, label)
             }
         }
-    }
-
-    fun addGroup(name: String, color: Int): Boolean = mutate {
-        val n = name.trim()
-        if (n.isEmpty() || groups.containsKey(n)) false
-        else { groups[n] = MarkerGroup(n, color); true }
-    }
-
-    fun removeGroup(name: String): Boolean = mutate { groups.remove(name) != null }
-
-    fun clearGroup(name: String): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        groups[name] = g.copy(markers = emptyList()); true
-    }
-
-    fun clearAll(): Boolean = mutate {
-        val any = groups.isNotEmpty(); groups.clear(); any
-    }
-
-    fun setEnabled(name: String, enabled: Boolean): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        groups[name] = g.copy(enabled = enabled); true
-    }
-
-    fun setGroupColor(name: String, color: Int): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        groups[name] = g.copy(color = color); true
-    }
-
-    /** Recolors the whole group: sets the group color and clears every per-tile override. */
-    fun recolorGroup(name: String, color: Int): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        groups[name] = g.copy(color = color, markers = g.markers.map { it.copy(color = null) })
-        true
-    }
-
-    /** Renames a group, preserving insertion order. No-op if [to] is blank or already taken. */
-    fun renameGroup(from: String, to: String): Boolean = mutate {
-        val target = to.trim()
-        if (target.isEmpty() || target == from || target in groups || from !in groups) return@mutate false
-        val rebuilt = LinkedHashMap<String, MarkerGroup>(groups.size)
-        groups.forEach { (name, g) ->
-            if (name == from) rebuilt[target] = g.copy(name = target) else rebuilt[name] = g
-        }
-        groups.clear(); groups.putAll(rebuilt); true
-    }
-
-    // Label edits fire per keystroke, so they skip the undo stack to avoid flooding it with
-    // one-character snapshots (a typo is self-correcting; undo is for structural changes).
-    fun setLabel(name: String, key: String, label: String): Boolean = mutateSilent {
-        val g = groups[name] ?: return@mutateSilent false
-        if (g.markers.none { it.key == key }) return@mutateSilent false
-        groups[name] = g.copy(markers = g.markers.map { if (it.key == key) it.copy(label = label) else it })
-        true
-    }
-
-    /**
-     * Three-way tile edit within [name]: place when empty, recolor when the tile's
-     * effective color differs from [color], remove when it matches. Returns the
-     * resulting marker, or null when the tile was toggled off.
-     */
-    fun markAt(name: String, x: Int, y: Int, plane: Int, color: Int, label: String = ""): TileMarker? {
-        ensureLoaded()
-        var result: TileMarker? = null
-        val changed = synchronized(lock) {
-            val g = groups[name] ?: return@synchronized false
-            val before = groups.values.toList()
-            val k = TileMarker.key(x, y, plane)
-            val existing = g.markers.firstOrNull { it.key == k }
-            val effective = existing?.color ?: g.color
-            val next = when {
-                existing == null -> TileMarker(x, y, plane, color, label)
-                effective == color -> null
-                else -> existing.copy(color = color)
-            }
-            val rest = g.markers.filter { it.key != k }
-            groups[name] = g.copy(markers = if (next == null) rest else rest + next)
-            result = next
-            pushUndo(before)
-            true
-        }
-        if (changed) markDirty()
-        return result
-    }
-
-    /** Pure add/remove toggle for a tile in [name]: removes it if present, else adds it. */
-    fun toggleTile(name: String, x: Int, y: Int, plane: Int, color: Int): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        val k = TileMarker.key(x, y, plane)
-        val present = g.markers.any { it.key == k }
-        groups[name] = if (present) {
-            g.copy(markers = g.markers.filter { it.key != k })
-        } else {
-            g.copy(markers = g.markers + TileMarker(x, y, plane, color))
-        }
-        true
-    }
-
-    fun recolorMarker(name: String, key: String, color: Int): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        if (g.markers.none { it.key == key }) return@mutate false
-        groups[name] = g.copy(markers = g.markers.map { if (it.key == key) it.copy(color = color) else it })
-        true
-    }
-
-    fun removeMarker(name: String, key: String): Boolean = mutate {
-        val g = groups[name] ?: return@mutate false
-        val rest = g.markers.filter { it.key != key }
-        if (rest.size == g.markers.size) return@mutate false
-        groups[name] = g.copy(markers = rest); true
-    }
-
-    /** Removes the tile from whichever group(s) hold it. Returns true if anything was removed. */
-    fun removeTile(x: Int, y: Int, plane: Int): Boolean = mutate {
-        val key = TileMarker.key(x, y, plane)
-        var changed = false
-        groups.keys.toList().forEach { name ->
-            val g = groups.getValue(name)
-            val rest = g.markers.filter { it.key != key }
-            if (rest.size != g.markers.size) { groups[name] = g.copy(markers = rest); changed = true }
-        }
-        changed
-    }
-
-    /** Adds every tile in the [x1,y1]–[x2,y2] rectangle on [plane] not already present. Returns count added. */
-    fun addRect(name: String, x1: Int, y1: Int, x2: Int, y2: Int, plane: Int, color: Int?, label: String = ""): Int {
-        ensureLoaded()
-        var added = 0
-        val changed = synchronized(lock) {
-            val g = groups[name] ?: return@synchronized false
-            val before = groups.values.toList()
-            val have = g.markers.associateBy { it.key }.toMutableMap()
-            for (xx in min(x1, x2)..max(x1, x2)) {
-                for (yy in min(y1, y2)..max(y1, y2)) {
-                    val k = TileMarker.key(xx, yy, plane)
-                    if (k !in have) { have[k] = TileMarker(xx, yy, plane, color, label); added++ }
-                }
-            }
-            if (added == 0) return@synchronized false
-            groups[name] = g.copy(markers = have.values.toList())
-            pushUndo(before)
-            true
-        }
-        if (changed) markDirty()
-        return added
+        if (fresh.isEmpty()) return@locked 0
+        val undoPoint = current()
+        byName[name] = group.copy(markers = group.markers + fresh)
+        remember(undoPoint)
+        fresh.size
     }
 
     fun rectArea(x1: Int, y1: Int, x2: Int, y2: Int): Long =
-        (abs(x1 - x2).toLong() + 1) * (abs(y1 - y2).toLong() + 1)
+        (abs(x1.toLong() - x2) + 1) * (abs(y1.toLong() - y2) + 1)
 
-    private inline fun mutate(block: () -> Boolean): Boolean {
-        ensureLoaded()
-        val changed = synchronized(lock) {
-            val before = groups.values.toList()
-            if (block()) { pushUndo(before); true } else false
-        }
-        if (changed) markDirty()
-        return changed
-    }
+    fun canUndo(): Boolean = locked { undoHistory.isNotEmpty() }
 
-    private inline fun mutateSilent(block: () -> Boolean): Boolean {
-        ensureLoaded()
-        val changed = synchronized(lock) { block() }
-        if (changed) markDirty()
-        return changed
-    }
+    fun canRedo(): Boolean = locked { redoHistory.isNotEmpty() }
 
-    /**
-     * Snapshot of the state prior to the most recent change; assumes the caller holds [lock].
-     * A fresh edit invalidates any redo history.
-     */
-    private fun pushUndo(before: List<MarkerGroup>) {
-        undoStack.addLast(before)
-        while (undoStack.size > MAX_UNDO) undoStack.removeFirst()
-        redoStack.clear()
-    }
+    fun undo(): Boolean = locked { travel(undoHistory, redoHistory) }
 
-    fun canUndo(): Boolean = synchronized(lock) { undoStack.isNotEmpty() }
-    fun canRedo(): Boolean = synchronized(lock) { redoStack.isNotEmpty() }
+    fun redo(): Boolean = locked { travel(redoHistory, undoHistory) }
 
-    /** Reverts the last change (delete, clear, rename, mark, bulk add, …). */
-    fun undo(): Boolean = step(from = undoStack, to = redoStack)
-
-    /** Re-applies the last undone change. */
-    fun redo(): Boolean = step(from = redoStack, to = undoStack)
-
-    private fun step(from: ArrayDeque<List<MarkerGroup>>, to: ArrayDeque<List<MarkerGroup>>): Boolean {
-        ensureLoaded()
-        val moved = synchronized(lock) {
-            if (from.isEmpty()) return@synchronized false
-            to.addLast(groups.values.toList())
-            while (to.size > MAX_UNDO) to.removeFirst()
-            val snapshot = from.removeLast()
-            groups.clear()
-            snapshot.forEach { groups[it.name] = it }
-            true
-        }
-        if (moved) markDirty()
-        return moved
-    }
-
-    private fun ensureLoaded() {
-        if (loaded) return
-        synchronized(lock) {
-            if (loaded) return
-            loaded = true
-            runCatching {
-                if (!file.isFile) return
-                val parsed: List<MarkerGroup> = gson.fromJson(file.readText(), listType) ?: return
-                parsed.forEach { groups[it.name] = it }
-            }.onFailure { println("[TileMarkerStore] load failed: ${it.message}") }
-        }
-    }
-
-    private fun markDirty() {
-        lastChangeNanos = System.nanoTime()
-        dirty.set(true)
-        flusher // start the daemon on first edit
-    }
-
-    /** Forces an immediate write if there are unsaved edits. Safe to call from any thread. */
-    fun flush() = writeToDisk()
-
-    /** Final flush + stop the flusher daemon (only if it was ever started). For engine teardown. */
-    fun stopFlusher() {
-        flush()
-        flusherThread?.interrupt()
-    }
-
-    private fun startFlusher(): Thread = Thread({
-        while (!Thread.currentThread().isInterrupted) {
+    fun flush() {
+        synchronized(writeLock) {
+            val pending = synchronized(stateLock) {
+                if (!unsaved) return
+                unsaved = false
+                byName.values.toList()
+            }
             try {
-                Thread.sleep(500)
-                if (dirty.get() && System.nanoTime() - lastChangeNanos >= IDLE_FLUSH_NANOS) writeToDisk()
-            } catch (_: InterruptedException) {
-                break
-            } catch (t: Throwable) {
-                println("[TileMarkerStore] flusher error: ${t.message}")
+                val target = storeFile
+                Files.createDirectories(target.toPath().parent)
+                target.writeText(MarkerFile.encode(pending), Charsets.UTF_8)
+            } catch (e: Exception) {
+                synchronized(stateLock) { unsaved = true }
+                println("[TileMarkerStore] save failed: ${e.message}")
             }
         }
-    }, "tile-marker-flush").apply { isDaemon = true; flusherThread = this; start() }
+    }
 
-    private fun writeToDisk() {
-        if (!dirty.compareAndSet(true, false)) return
-        runCatching {
-            file.parentFile?.mkdirs()
-            val snapshot = synchronized(lock) { groups.values.toList() }
-            file.writeText(gson.toJson(snapshot, listType))
-        }.onFailure {
-            dirty.set(true) // retry on the next idle tick
-            println("[TileMarkerStore] save failed: ${it.message}")
+    fun stopFlusher() {
+        val thread = synchronized(stateLock) { flusher.also { flusher = null } }
+        thread?.interrupt()
+        thread?.join(2_000)
+        flush()
+    }
+
+    private inline fun <R> locked(block: () -> R): R = synchronized(stateLock) {
+        loadIfNeeded()
+        block()
+    }
+
+    private inline fun step(block: () -> Boolean): Boolean = locked {
+        val undoPoint = current()
+        val changed = block()
+        if (changed) remember(undoPoint)
+        changed
+    }
+
+    private inline fun update(name: String, change: (MarkerGroup) -> MarkerGroup): Boolean {
+        val group = byName[name] ?: return false
+        byName[name] = change(group)
+        return true
+    }
+
+    private inline fun MarkerGroup.withMarker(key: String, change: (TileMarker) -> TileMarker): MarkerGroup? {
+        val index = markers.indexOfFirst { it.key == key }
+        if (index < 0) return null
+        return copy(markers = markers.toMutableList().also { it[index] = change(it[index]) })
+    }
+
+    private fun current(): List<MarkerGroup> = byName.values.toList()
+
+    private fun restore(state: List<MarkerGroup>) {
+        byName.clear()
+        state.forEach { byName[it.name] = it }
+    }
+
+    private fun remember(undoPoint: List<MarkerGroup>) {
+        undoHistory.pushCapped(undoPoint)
+        redoHistory.clear()
+        markUnsaved()
+    }
+
+    private fun travel(from: ArrayDeque<List<MarkerGroup>>, to: ArrayDeque<List<MarkerGroup>>): Boolean {
+        val target = from.removeLastOrNull() ?: return false
+        to.pushCapped(current())
+        restore(target)
+        markUnsaved()
+        return true
+    }
+
+    private fun ArrayDeque<List<MarkerGroup>>.pushCapped(state: List<MarkerGroup>) {
+        addLast(state)
+        while (size > HISTORY_DEPTH) removeFirst()
+    }
+
+    private fun markUnsaved() {
+        unsaved = true
+        lastEditAt = System.currentTimeMillis()
+        if (flusher?.isAlive != true) {
+            flusher = Thread(::flushWhenQuiet, "tile-marker-flush").apply {
+                isDaemon = true
+                start()
+            }
         }
     }
+
+    private fun flushWhenQuiet() {
+        while (pause()) {
+            val due = synchronized(stateLock) { unsaved && System.currentTimeMillis() - lastEditAt >= QUIET_BEFORE_SAVE_MS }
+            if (due) flush()
+        }
+    }
+
+    private fun pause(): Boolean = try {
+        Thread.sleep(FLUSHER_TICK_MS)
+        true
+    } catch (_: InterruptedException) {
+        false
+    }
+
+    private fun loadIfNeeded() {
+        if (diskRead) return
+        diskRead = true
+        val source = storeFile
+        if (!source.isFile) return
+        MarkerFile.read(source).forEach { byName[it.name] = it }
+    }
+}
+
+private object MarkerFile {
+    private val pretty = GsonBuilder().setPrettyPrinting().create()
+
+    fun read(source: File): List<MarkerGroup> = try {
+        decode(source.readText(Charsets.UTF_8))
+    } catch (e: Exception) {
+        println("[TileMarkerStore] load failed: ${e.message}; ${preserve(source)}")
+        emptyList()
+    }
+
+    private fun preserve(source: File): String = try {
+        val copy = File(source.parentFile, "${source.name}.broken-${System.currentTimeMillis()}")
+        Files.copy(source.toPath(), copy.toPath())
+        "kept a copy at ${copy.absolutePath}"
+    } catch (e: Exception) {
+        "could not keep a copy: ${e.message}"
+    }
+
+    private fun decode(text: String): List<MarkerGroup> {
+        if (text.isBlank()) return emptyList()
+        val root = JsonParser.parseString(text)
+        if (root.isJsonNull) return emptyList()
+        return root.asJsonArray.mapNotNull { it.present()?.asJsonObject?.let(::group) }
+    }
+
+    fun encode(groups: List<MarkerGroup>): String {
+        val root = JsonArray()
+        groups.forEach { group ->
+            val markers = JsonArray()
+            group.markers.forEach { marker ->
+                markers.add(JsonObject().apply {
+                    addProperty("x", marker.x)
+                    addProperty("y", marker.y)
+                    addProperty("plane", marker.plane)
+                    marker.color?.let { addProperty("color", it) }
+                    addProperty("label", marker.label)
+                })
+            }
+            root.add(JsonObject().apply {
+                addProperty("name", group.name)
+                addProperty("color", group.color)
+                addProperty("enabled", group.enabled)
+                add("markers", markers)
+            })
+        }
+        return pretty.toJson(root)
+    }
+
+    private fun group(json: JsonObject): MarkerGroup = MarkerGroup(
+        name = json["name"].present()?.asString ?: throw JsonParseException("a group has no name"),
+        color = json["color"].int() ?: 0,
+        enabled = json["enabled"].present()?.asBoolean ?: true,
+        markers = json["markers"].present()?.asJsonArray?.mapNotNull { it.present()?.asJsonObject?.let(::marker) }.orEmpty(),
+    )
+
+    private fun marker(json: JsonObject): TileMarker = TileMarker(
+        x = json["x"].int() ?: 0,
+        y = json["y"].int() ?: 0,
+        plane = json["plane"].int() ?: 0,
+        color = json["color"].int(),
+        label = json["label"].present()?.asString.orEmpty(),
+    )
+
+    private fun JsonElement?.present(): JsonElement? = this?.takeUnless { it.isJsonNull }
+
+    private fun JsonElement?.int(): Int? = present()?.asJsonPrimitive?.asBigDecimal?.intValueExact()
 }

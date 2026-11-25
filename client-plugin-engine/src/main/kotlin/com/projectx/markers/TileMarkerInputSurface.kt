@@ -4,11 +4,11 @@ import com.projectx.game.bootstrap.Bootstrap
 import com.projectx.game.hooks.Priority
 import com.projectx.game.nxt.MainState
 import com.projectx.quest.editor.TilePickResolver
-import com.projectx.ui.backend.dsl.ImGuiDsl.setNextWindowPos
-import com.projectx.ui.backend.dsl.ImGuiDsl.setNextWindowSize
-import com.projectx.ui.backend.dsl.ImGuiDsl.window
+import com.projectx.ui.backend.dsl.ImGuiDsl
 import com.projectx.ui.backend.dsl.scopes.button
-import com.projectx.ui.backend.dsl.scopes.styleColor
+import com.projectx.ui.backend.dsl.scopes.popStyleColor
+import com.projectx.ui.backend.dsl.scopes.pushStyleColor
+import com.projectx.ui.backend.dsl.scopes.setCursorPos
 import com.projectx.ui.backend.dsl.utils.ImGuiCol
 import com.projectx.ui.backend.dsl.utils.ImGuiColors
 import com.projectx.ui.backend.flags.ImGuiCond
@@ -16,57 +16,52 @@ import com.projectx.ui.backend.flags.WindowFlags
 import com.projectx.ui.backend.native.NativeBridge
 import com.projectx.ui.backend.rendering.ImGUIRender
 
-/**
- * The tile tool's input layer. While [TileMarkerState.toolActive] is on it draws a
- * fullscreen, invisible host window whose body is one transparent button — so ImGui owns
- * the mouse (the native SDL hook drops those clicks before the game sees them: no walking)
- * and routes clicks correctly (the button only fires over the world, not the tab). A
- * left-click toggles a marker on the hovered tile in the active group.
- */
 object TileMarkerInputSurface {
-    private val HOST_FLAGS =
-        WindowFlags.NoTitleBar + WindowFlags.NoResize + WindowFlags.NoMove +
-            WindowFlags.NoScrollbar + WindowFlags.NoCollapse + WindowFlags.NoBackground +
-            WindowFlags.NoSavedSettings + WindowFlags.NoBringToFrontOnFocus + WindowFlags.NoFocusOnAppearing
+    private const val FALLBACK_GROUP = "Default"
+
+    private val captureFlags = WindowFlags.NoTitleBar + WindowFlags.NoResize + WindowFlags.NoMove +
+        WindowFlags.NoScrollbar + WindowFlags.NoCollapse + WindowFlags.NoBackground + WindowFlags.NoSavedSettings +
+        WindowFlags.NoBringToFrontOnFocus + WindowFlags.NoFocusOnAppearing
 
     @JvmStatic
     @ImGUIRender(priority = Priority.LOW)
-    fun render() {
-        try {
-            if (!isLoggedIn() || !TileMarkerState.toolActive.value) return
+    fun render() = reportingErrors {
+        if (!inGame() || !TileMarkerState.toolActive.value) return@reportingErrors
+        val (width, height) = NativeBridge.getDisplaySize()
+        ImGuiDsl.setNextWindowPosUnsafe(0f, 0f, ImGuiCond.Always)
+        ImGuiDsl.setNextWindowSizeUnsafe(width, height, ImGuiCond.Always)
+        ImGuiDsl.window("##tilemarker-capture", captureFlags) {
+            setCursorPos(0f, 0f)
+            pushStyleColor(ImGuiCol.Button, ImGuiColors.TRANSPARENT)
+            pushStyleColor(ImGuiCol.ButtonHovered, ImGuiColors.TRANSPARENT)
+            pushStyleColor(ImGuiCol.ButtonActive, ImGuiColors.TRANSPARENT)
+            button("##tilemarker-hit", width, height) { reportingErrors(::toggleTileUnderMouse) }
+            popStyleColor(3)
+        }
+    }
 
-            val (dw, dh) = NativeBridge.getDisplaySize()
-            setNextWindowPos(0f, 0f, ImGuiCond.Always)
-            setNextWindowSize(dw, dh, ImGuiCond.Always)
-            window("##tilemarker-capture", HOST_FLAGS) {
-                styleColor(ImGuiCol.Button, ImGuiColors.TRANSPARENT) {
-                    styleColor(ImGuiCol.ButtonHovered, ImGuiColors.TRANSPARENT) {
-                        styleColor(ImGuiCol.ButtonActive, ImGuiColors.TRANSPARENT) {
-                            button("##tilemarker-hit", dw, dh) { toggleAtCursor() }
-                        }
-                    }
-                }
-            }
+    private inline fun reportingErrors(block: () -> Unit) {
+        try {
+            block()
         } catch (t: Throwable) {
             println("[TileMarkerInputSurface] render error: ${t.message}")
         }
     }
 
-    private fun toggleAtCursor() {
-        val (mx, my) = NativeBridge.getMousePos()
-        val hit = TilePickResolver.resolve(mx, my) ?: return
-        TileMarkerStore.toggleTile(activeGroup(), hit.tileX, hit.tileY, hit.plane, TileMarkerState.activeColor())
+    private fun toggleTileUnderMouse() {
+        val (mouseX, mouseY) = NativeBridge.getMousePos()
+        val hit = TilePickResolver.resolve(mouseX, mouseY) ?: return
+        val color = TileMarkerState.activeColor()
+        TileMarkerStore.toggleTile(targetGroup(color), hit.tileX, hit.tileY, hit.plane, color)
     }
 
-    private fun activeGroup(): String {
-        val current = TileMarkerState.activeGroup.value
-        if (current.isNotBlank() && TileMarkerStore.groups().any { it.name == current }) return current
-        TileMarkerStore.addGroup("Default", TileMarkerState.activeColor())
-        TileMarkerState.activeGroup.value = "Default"
-        return "Default"
+    private fun targetGroup(color: Int): String {
+        val chosen = TileMarkerState.activeGroup.value
+        if (chosen.isNotBlank() && TileMarkerStore.groups().any { it.name == chosen }) return chosen
+        TileMarkerStore.addGroup(FALLBACK_GROUP, color)
+        TileMarkerState.activeGroup.value = FALLBACK_GROUP
+        return FALLBACK_GROUP
     }
 
-    private fun isLoggedIn(): Boolean = try {
-        Bootstrap.client.mainState == MainState.LOGGED_IN
-    } catch (_: Throwable) { false }
+    private fun inGame(): Boolean = runCatching { Bootstrap.client.mainState }.getOrNull() == MainState.LOGGED_IN
 }
