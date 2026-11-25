@@ -491,6 +491,15 @@ sealed class Wait {
         @JvmOverloads
         fun reclaimFromDeath(onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.reclaimFromDeath() }
 
+        /**
+         * Reach Death, reclaim everything (confirming the fee) and leave the office, for up to [timeoutMillis];
+         * [onResult] gets how it ended. Kotlin: `recoverFromDeath`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun recoverFromDeath(timeoutMillis: Long = 90_000L, onResult: Consumer<Deaths.Result>? = null): Wait =
+            call(onResult) { this.recoverFromDeath(timeoutMillis) }
+
         /** Step one tile toward ([x], [y]) so the player faces it; [onResult] gets whether the step landed. Kotlin: `faceTile`. */
         @JvmStatic
         @JvmOverloads
@@ -523,6 +532,55 @@ sealed class Wait {
         @JvmOverloads
         fun loadLastPresetNearestBank(onResult: Consumer<Boolean>? = null): Wait =
             call(onResult) { this.loadLastPresetNearestBank() }
+
+        /** Switch the open bank to View all; [onResult] gets whether every item has a slot. Kotlin: `viewAllBankTabs`. */
+        @JvmStatic
+        @JvmOverloads
+        fun viewAllBankTabs(onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.viewAllBankTabs() }
+
+        /** Withdraw [amount] of [itemId] from any tab, through Withdraw-X when needed. Kotlin: `withdrawBankAmount`. */
+        @JvmStatic
+        @JvmOverloads
+        fun withdrawBankAmount(itemId: Int, amount: Int, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.withdrawBankAmount(itemId, amount) }
+
+        /** Withdraw [amount] of the item named [name] from any tab. Kotlin: `withdrawBankAmount`. */
+        @JvmStatic
+        @JvmOverloads
+        fun withdrawBankAmount(name: String, amount: Int, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.withdrawBankAmount(name, amount) }
+
+        /** Deposit [amount] of [itemId], through Deposit-X when needed. Kotlin: `depositBankAmount`. */
+        @JvmStatic
+        @JvmOverloads
+        fun depositBankAmount(itemId: Int, amount: Int, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.depositBankAmount(itemId, amount) }
+
+        /** Deposit [amount] of the item named [name]. Kotlin: `depositBankAmount`. */
+        @JvmStatic
+        @JvmOverloads
+        fun depositBankAmount(name: String, amount: Int, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.depositBankAmount(name, amount) }
+
+        /** Wear the bank item [itemId], from any tab. Kotlin: `equipBankItem`. */
+        @JvmStatic
+        @JvmOverloads
+        fun equipBankItem(itemId: Int, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.equipBankItem(itemId) }
+
+        /** Wear the bank item named [name], from any tab. Kotlin: `equipBankItem`. */
+        @JvmStatic
+        @JvmOverloads
+        fun equipBankItem(name: String, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.equipBankItem(name) }
+
+        /** Load game bank preset [num] (1-18), turning the Presets page as needed. Kotlin: `loadBankPresetPaged`. */
+        @JvmStatic
+        @JvmOverloads
+        fun loadBankPresetPaged(num: Int, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.loadBankPresetPaged(num) }
+
+        /** Save the backpack and worn gear over bank preset [num] (1-18). Kotlin: `saveBankPreset`. */
+        @JvmStatic
+        @JvmOverloads
+        fun saveBankPreset(num: Int, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.saveBankPreset(num) }
 
         /**
          * Drop every backpack item [which] picks, one at a time, waiting for each slot to empty; [onResult] gets how
@@ -685,6 +743,12 @@ sealed class Wait {
         @JvmOverloads
         fun familiarSummonFamiliar(pouch: Familiar, onResult: Consumer<Boolean>? = null): Wait =
             call(onResult) { this.familiarSummonFamiliar(pouch) }
+
+        /** Summon [pouch], waiting up to [timeoutMillis] for the familiar. Kotlin: `familiarSummonFamiliar`. */
+        @JvmStatic
+        @JvmOverloads
+        fun familiarSummonFamiliar(pouch: Familiar, timeoutMillis: Long, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.familiarSummonFamiliar(pouch, timeoutMillis) }
 
         /** Renew [pouch] from the summoning interface. Kotlin: `familiarRenewFromInterface`. */
         @JvmStatic

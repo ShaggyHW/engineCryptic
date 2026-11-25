@@ -76,6 +76,8 @@ private class OfficeIds(
     val confirmText: IFSlot,
     val confirmYes: IFSlot,
     val chatText: IFSlot,
+    val itemsHeldVarbit: Int,
+    val respawnInterface: Int,
 ) {
     val window get() = reclaimButton.interfaceId
 }
@@ -101,6 +103,8 @@ private val officeIds = FeatureIds("Deaths") {
         confirmText = componentSlot("death:confirm_text"),
         confirmYes = componentSlot("death:popup_yes"),
         chatText = componentSlot("chat_v2_left:chat_text"),
+        itemsHeldVarbit = Gameval.requireId(Gameval.VARBIT, "gravestone_timer_inv_slots"),
+        respawnInterface = Gameval.requireId(Gameval.INTERFACE, "modal_choice"),
     )
 }
 
@@ -111,8 +115,6 @@ private val officeIds = FeatureIds("Deaths") {
  * [recoverFromDeath] is the blocking form.
  */
 object Deaths {
-    /** Items Death holds; it survives logout, so it is safe to check on script start. */
-    const val VARBIT_DEATH_ITEMS = 52409
     const val DEATH_NPC_NAME = "Death"
     const val RECLAIM_OPTION = "Reclaim items"
 
@@ -120,7 +122,6 @@ object Deaths {
     private const val OFFICE_RANGE = 60
     private const val HOURGLASS_NAME = "Death's Hourglass"
     private const val HOURGLASS_OPTION = "Exit"
-    private const val RESPAWN_INTERFACE = 720
     private val TUTORIAL_OPTIONS = listOf("Great! How do I get back?", "Am I... dead?", "Goodbye!")
     private const val COIN_PROMPT_TEXT = "you need at least"
     private const val PORTAL_OPTION = "Exit to Death's office"
@@ -164,9 +165,10 @@ object Deaths {
     @Volatile private var inFlight = Fired.NONE
     @Volatile private var inFlightSince = 0L
 
+    /** Items Death holds; it survives logout, so it is safe to check on script start. */
     @JvmStatic
     val itemsHeld: Int
-        get() = varps.getVarBit(VARBIT_DEATH_ITEMS)
+        get() = officeIds.get()?.let { varps.getVarBit(it.itemsHeldVarbit) } ?: 0
 
     @JvmStatic
     val hasItemsToReclaim: Boolean
@@ -293,12 +295,13 @@ object Deaths {
         inFlight = Fired.NONE
         val options = dialogueOptions
         if (options.isNotEmpty()) {
-            val wanted = if (interfaces.isOpen(RESPAWN_INTERFACE)) null else TUTORIAL_OPTIONS.firstOrNull(::dialogueOptionVisible)
+            val respawning = officeIds.get()?.let { interfaces.isOpen(it.respawnInterface) } == true
+            val wanted = if (respawning) null else TUTORIAL_OPTIONS.firstOrNull(::dialogueOptionVisible)
             if (wanted != null) {
                 continueDialogueContaining(wanted)
             } else {
                 val (text, slot) = options.entries.first()
-                if (interfaces.isOpen(RESPAWN_INTERFACE)) println("[Deaths] respawning at $text")
+                if (respawning) println("[Deaths] respawning at $text")
                 slot.dialogueContinue()
             }
             return Pass(Result.IN_PROGRESS, Fired.DIALOGUE)

@@ -32,6 +32,7 @@ import com.projectx.traversal.local.LocalNav
 import com.projectx.game.collision.CollisionFlags
 import com.projectx.game.collision.CollisionMap
 import world.gregs.voidps.collision.CollisionFlag
+import world.gregs.voidps.gameval.Gameval
 import world.gregs.voidps.type.Direction
 import com.projectx.util.gaussian
 import com.projectx.webwalker.WalkGoal
@@ -645,6 +646,9 @@ fun hasWall(tile: Tile, side: Direction): Boolean {
     return flags != -1 && flags and bit != 0
 }
 
+/** [hasWall] for callers with coordinates rather than a [Tile], such as Java scripts. */
+fun hasWall(x: Int, y: Int, plane: Int, side: Direction): Boolean = hasWall(Tile.of(x, y, plane), side)
+
 fun diveToTile(x: Int, y: Int, plane: Int) = dive(Tile.of(x, y, plane))
 
 /**
@@ -1050,17 +1054,19 @@ private const val BANK_OP_X = 6
  * The fixed-quantity bank op for [amount] on either side of the bank, or -1 when it has to go through X. There is no
  * fixed op for 50: the op after Withdraw-10 is "-<last X>", whatever quantity was typed last.
  */
-internal fun bankQuantityOp(amount: Int): Int = when (amount) {
-    1 -> 2
-    5 -> 3
-    10 -> 4
-    0 -> 7
-    else -> -1
+internal object BankQuantity {
+    fun op(amount: Int): Int = when (amount) {
+        1 -> 2
+        5 -> 3
+        10 -> 4
+        0 -> 7
+        else -> -1
+    }
 }
 
 /** Fires the fixed op for [amount]; any other amount needs [withdrawBankAmount]/[depositBankAmount] and answers false. */
 private inline fun bankTransfer(verb: String, item: Any, amount: Int, fire: (op: Int) -> Boolean): Boolean {
-    val op = bankQuantityOp(amount)
+    val op = BankQuantity.op(amount)
     if (op < 0) {
         println("[Bank] $verb $amount x $item needs $verb-X: use the suspend ${verb}BankAmount")
         return false
@@ -1151,7 +1157,7 @@ suspend fun Script.equipBankItem(name: String): Boolean {
 const val MAX_BANK_PRESET = 18
 private const val PRESETS_PER_PAGE = 9
 private const val PRESET_NEXT_PAGE_SLOT = 100
-private const val PRESET_PAGE_VARBIT = 49662
+private val PRESET_PAGE_VARBIT by lazy { Gameval.requireId(Gameval.VARBIT, "share_preset_bank_button_page") }
 private const val PRESET_LOAD_OP = 1
 private const val PRESET_SAVE_OP = 2
 
@@ -1209,14 +1215,14 @@ private fun presetButtonsDrawn(): Boolean {
         root.dynamicCreatedChildren.size > 1
 }
 
-private const val AMOUNT_PROMPT_INTERFACE = 1469
+private val AMOUNT_PROMPT_INTERFACE by lazy { Gameval.requireId(Gameval.INTERFACE, "meslayer") }
 
 private suspend fun Script.transferAmount(verb: String, item: Any, amount: Int, fire: (op: Int) -> Boolean): Boolean {
     if (amount < 0) {
         println("[Bank] $verb $item: negative amount $amount")
         return false
     }
-    val op = bankQuantityOp(amount)
+    val op = BankQuantity.op(amount)
     if (op > 0) return fire(op)
     if (!fire(BANK_OP_X)) {
         println("[Bank] $verb-X $item: no such item")

@@ -173,8 +173,10 @@ suspend fun Script.familiarRenewFromBank(pouch: Familiar): Boolean {
     return inventory.getItem(pouch.pouchName)?.click("Summon") == true
 }
 
+suspend fun Script.familiarSummonFamiliar(pouch: Familiar): Boolean = familiarSummonFamiliar(pouch, SUMMON_TIMEOUT_MS)
+
 /** Clicks Summon on [pouch] and waits up to [timeoutMillis] for the familiar; true when the click went in. */
-suspend fun Script.familiarSummonFamiliar(pouch: Familiar, timeoutMillis: Long = 5_000L): Boolean {
+suspend fun Script.familiarSummonFamiliar(pouch: Familiar, timeoutMillis: Long): Boolean {
     return inventory.getItem(pouch.pouchName)?.click("Summon")?.also {
         if (it) delayUntil(timeoutMillis) { familiarSummoned }
     } == true
@@ -360,7 +362,8 @@ private suspend fun Script.castSpecialObj(obj: SceneObject?): Boolean {
     return false
 }
 
-private const val MEERKAT_SCROLL = 19621
+private val MEERKAT_SCROLL by lazy { Gameval.requireId(Gameval.OBJ, "lore_fetch_casket") }
+private const val SUMMON_TIMEOUT_MS = 5_000L
 
 /** Clicks the familiar's special; skipped when none are stored but the scrolls are still in the backpack. */
 fun Script.familiarCastSpecial(): Boolean {

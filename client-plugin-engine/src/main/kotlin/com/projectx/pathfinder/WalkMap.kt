@@ -22,6 +22,8 @@ class WalkField internal constructor(private val window: SearchWindow, val start
 
     fun reaches(tile: Tile): Boolean = distanceTo(tile) >= 0
 
+    fun reaches(x: Int, y: Int, plane: Int): Boolean = distanceTo(x, y, plane) >= 0
+
     /** Steps to the nearest tile a [sizeX] x [sizeY] footprint is used from: one of its own tiles or an orthogonal neighbour. */
     fun distanceToFootprint(southWestX: Int, southWestY: Int, plane: Int, sizeX: Int, sizeY: Int): Int {
         if (plane != window.plane) return WalkMap.UNKNOWN
@@ -105,6 +107,14 @@ open class WalkMap internal constructor(
         val d = GridSearch.distance(rule(), window, from, to, maxDepth)
         return if (d < 0) UNREACHABLE else d
     }
+
+    fun walkable(x: Int, y: Int, plane: Int): Boolean = walkable(Tile.of(x, y, plane))
+
+    @JvmOverloads
+    fun field(x: Int, y: Int, plane: Int, maxDepth: Int = DEFAULT_MAX_DEPTH): WalkField? = field(Tile.of(x, y, plane), maxDepth)
+
+    fun distance(fromX: Int, fromY: Int, toX: Int, toY: Int, plane: Int, maxDepth: Int): Int =
+        distance(Tile.of(fromX, fromY, plane), Tile.of(toX, toY, plane), maxDepth)
 
     /** The tiles the server walks for a walk click on [to] from [from], [from] first; null when unknown. */
     internal open fun serverPath(from: Tile, to: Tile): List<Tile>? {

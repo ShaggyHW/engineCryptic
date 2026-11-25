@@ -129,12 +129,18 @@ object LocalNav : WalkMap({ StepRule { _, _, _, _ -> false } }) {
     var lastTeleportTile: Tile? = null
         private set
 
+    val lastTeleportX: Int get() = lastTeleportTile?.x ?: -1
+
+    val lastTeleportY: Int get() = lastTeleportTile?.y ?: -1
+
+    val lastTeleportPlane: Int get() = lastTeleportTile?.plane ?: -1
+
     /**
      * Feed the player's tile in, every pass. A jump of more than [TELEPORT_JUMP_TILES] plus a running tick's two tiles
      * for every tick since the last observation (they can be seconds apart while a node waits out a leg) opens an
      * arrival.
      */
-    fun observe(player: Tile) {
+    internal fun observe(player: Tile) {
         CacheWalkMap.observe(player)
         val now = clock()
         val previous = lastObserved
