@@ -23,6 +23,9 @@ class PathNode(
     tiles: List<Tile>? = null,
     val abilities: ClientAbilities = ClientAbilities.NONE,
 ) : TraversalNode(), WalkEquivalent {
+    @Deprecated("The shipped signature, kept for scripts built against it.", level = DeprecationLevel.HIDDEN)
+    constructor(start: Tile, end: Tile, reached: (() -> Boolean)? = null) : this(start, end, reached, null, ClientAbilities.NONE)
+
     private val tiles: List<Tile>? = tiles?.takeIf { it.isNotEmpty() }?.toList()
     private var route: Route =
         if (this.tiles != null) Route(ArrayDeque(), alternative = false, success = true, distance = 0) else routeToTile(start, end)

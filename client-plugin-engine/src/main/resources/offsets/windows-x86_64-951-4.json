@@ -1721,6 +1721,12 @@
         "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: stable across paired functions (0x8:22164).",
         "verified_build": "951-1"
       },
+      "LAYER_KIND": {
+        "value": "0x14",
+        "confidence": "MEDIUM",
+        "note": "Same as 951-1-vulkan (OpenGL and Vulkan share every struct layout; this build's own 950 -> 951 evidence agrees on 513 of 513 fields). Unchanged from 950-1: majority across paired functions (0x14:1609 0x15:1).",
+        "verified_build": "951-1"
+      },
       "PAGED_LAYER_KIND": {
         "value": "0x17",
         "confidence": "HIGH",

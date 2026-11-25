@@ -25,6 +25,14 @@ class ChebychevNode(
     givenRouteTiles: List<Tile>? = null,
     val abilities: ClientAbilities = ClientAbilities.NONE,
 ) : TraversalNode(), WalkEquivalent {
+    @Deprecated("The shipped signature, kept for scripts built against it.", level = DeprecationLevel.HIDDEN)
+    constructor(
+        start: Tile,
+        end: List<Tile>,
+        fallBack: (() -> Boolean)? = null,
+        reached: (() -> Boolean)? = null,
+    ) : this(start, end, fallBack, reached, null, ClientAbilities.NONE)
+
     private val givenRouteTiles: List<Tile>? = givenRouteTiles?.takeIf { it.isNotEmpty() }?.toList()
     private var route: List<Tile>
     private var nextClick = 0L

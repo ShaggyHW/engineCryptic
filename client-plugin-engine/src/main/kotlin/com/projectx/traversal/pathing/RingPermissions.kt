@@ -32,12 +32,14 @@ internal class RingPermissions private constructor(
         /** Every ring allowed; for tests and for routing when game state is not available. */
         val UNRESTRICTED = RingPermissions(emptySet(), portableUsable = true)
 
-        fun snapshot(): RingPermissions = runCatching(::evaluate).getOrDefault(UNRESTRICTED)
+        fun snapshot(): RingPermissions = snapshotOf(WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING })
 
-        private fun evaluate(): RingPermissions {
+        /** The same judgement over any [links]; [snapshot] limits it to the rings. */
+        fun snapshotOf(links: List<WebLink>): RingPermissions = runCatching { evaluate(links) }.getOrDefault(UNRESTRICTED)
+
+        private fun evaluate(links: List<WebLink>): RingPermissions {
             val values = RequirementsBuilder.everyKey().mapKeys { it.key.lowercase() }
-            val rings = WebLinks.all.filter { it.kind == WebLinkKind.FAIRY_RING }
-            val blocked = rings.flatMap(WebLink::requirements).distinct().filterTo(HashSet()) { requirement ->
+            val blocked = links.flatMap(WebLink::requirements).distinct().filterTo(HashSet()) { requirement ->
                 val have = values[requirement.key.trim().lowercase()] ?: rawVar(requirement.key.trim()) ?: return@filterTo false
                 val want = requirement.value.trim().toIntOrNull() ?: return@filterTo false
                 !meets(have, requirement.comparison.trim(), want)

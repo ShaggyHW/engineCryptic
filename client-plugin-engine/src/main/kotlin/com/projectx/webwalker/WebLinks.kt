@@ -131,6 +131,45 @@ object WebLinks {
         return byTile[WebGrid.key(x, y, plane)] ?: emptyList()
     }
 
+    /**
+     * Adds a link a script worked out for itself to this set, so [all] and [from] list it. False when it is already
+     * known or its rectangles are inverted.
+     */
+    @Deprecated("Routes come only from navpath's map, so a registered link is listed but never routed through.")
+    fun register(link: WebLink): Boolean {
+        ensureLoaded()
+        return add(link)
+    }
+
+    /** Builds an object link between two tiles and [register]s it. */
+    @Deprecated("Routes come only from navpath's map, so a registered link is listed but never routed through.")
+    @Suppress("DEPRECATION")
+    @JvmStatic
+    @JvmOverloads
+    fun registerObjectLink(
+        fromX: Int,
+        fromY: Int,
+        fromPlane: Int,
+        toX: Int,
+        toY: Int,
+        toPlane: Int,
+        objectId: Int,
+        action: String,
+        costTiles: Int = 1,
+        searchRadius: Int = 16,
+    ): Boolean = register(
+        WebLink(
+            kind = WebLinkKind.OBJECT,
+            from = WebArea(fromX, fromX, fromY, fromY, fromPlane),
+            to = WebArea(toX, toX, toY, toY, toPlane),
+            cost = costTiles.coerceAtLeast(1) * WebGrid.STEP_COST,
+            action = action,
+            objectId = objectId,
+            searchRadius = searchRadius.coerceIn(1, 64),
+            requirements = emptyList(),
+        ),
+    )
+
     private fun index(link: WebLink) {
         val from = link.from
         for (x in from.minX..from.maxX) {

@@ -349,6 +349,8 @@ object OInterfaceComponent : OffsetObject {
     val OPS_STRIDE by offset()
     val ACTIVE_PROPS by offset()
     val KIND_GETTER by offset()
+    @Deprecated("One kind of several that own children; see OComponentKind.CHILD_VECTOR_KINDS.")
+    val LAYER_KIND by count(WINDOWS)
     val PAGED_LAYER_KIND by count(WINDOWS)
 }
 
