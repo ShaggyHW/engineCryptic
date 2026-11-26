@@ -1,6 +1,7 @@
 package com.projectx.webwalker
 
 import com.projectx.script.api.Lodestone
+import com.projectx.traversal.pathing.NavPathClient
 
 enum class WebWalkStatus {
     /** The player is within the arrival distance of the destination. */
@@ -39,6 +40,12 @@ class WebWalkResult internal constructor(
     val lodestone: Lodestone? = null,
 ) {
     val isSuccess: Boolean get() = status == WebWalkStatus.ARRIVED || status == WebWalkStatus.PATH_FOUND
+
+    /**
+     * True when no route could be planned because the route planner the Project X launcher runs is not running. Every
+     * walk fails until the player starts the game from the launcher, so a script should say so rather than retry.
+     */
+    val plannerUnavailable: Boolean get() = status == WebWalkStatus.NO_PATH && message.contains(NavPathClient.NOT_RUNNING)
 
     internal fun via(lodestone: Lodestone?): WebWalkResult =
         if (lodestone == null || this.lodestone != null) this else WebWalkResult(status, message, path, lodestone)
