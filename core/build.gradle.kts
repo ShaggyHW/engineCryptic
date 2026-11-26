@@ -39,8 +39,9 @@ val cacheParityTests = listOf(
 fun Test.cacheScratch() {
     // The cache, the gamevals and the solved CS2 opcode tables are all named relative to the root.
     workingDir = rootProject.projectDir
-    // Whole-cache round trips write tens of gigabytes; keep them off the NVMe and off the tmpfs.
-    val scratch = File(System.getenv("PROJECTX_TEST_TMP") ?: "/mnt/trent/ssd1tb1/projectx-tmp/tests")
+    // Whole-cache round trips write tens of gigabytes, so PROJECTX_TEST_TMP can move them to a roomier disk; the
+    // default is the build folder, which exists and is writable on every machine, Linux or Windows.
+    val scratch = System.getenv("PROJECTX_TEST_TMP")?.let(::File) ?: layout.buildDirectory.dir("tmp/tests").get().asFile
     doFirst { scratch.mkdirs() }
     systemProperty("java.io.tmpdir", scratch.absolutePath)
     maxHeapSize = System.getenv("PROJECTX_TEST_HEAP") ?: "8g"
