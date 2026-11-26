@@ -102,6 +102,63 @@ jobs:
           path: dist/
           retention-days: 3
 
+  # The engine's tests on both platforms players run, so a change made on one cannot break the other unnoticed.
+  # Nothing is released or published to the launcher unless both pass.
+  tests:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Fetch the RE resources and native submodules
+        env:
+          KEY: ${{ secrets.RECLASS_DATA_DEPLOY_KEY }}
+        run: |
+          set -eu
+          git submodule update --init --depth 1 client-plugin-engine/native-bootstrap/funchook client-plugin-engine/native-bootstrap/imgui
+          if [ -z "${KEY:-}" ]; then
+            echo "RECLASS_DATA_DEPLOY_KEY is not set; the gameval guard will fail the build" >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "$KEY" > ~/.ssh/reclass_data
+          chmod 600 ~/.ssh/reclass_data
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/reclass_data -o IdentitiesOnly=yes"
+          git config --global url."git@github.com:".insteadOf "https://github.com/"
+          git submodule update --init --depth 1 re-resources
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --stacktrace -PprojectxVersion=${{ needs.version.outputs.version }} \
+            :core:test :client-plugin-engine:test \
+            -x :client-plugin-engine:configureNativeBootstrap \
+            -x :client-plugin-engine:buildNativeBootstrap \
+            -x :client-plugin-engine:copyNativeLibToBuild
+      - name: Keep the reports of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: |
+            client-plugin-engine/build/reports/tests/
+            core/build/reports/tests/
+          retention-days: 7
+
   bootstrap-linux:
     needs: version
     runs-on: ubuntu-latest
@@ -501,7 +558,7 @@ jobs:
           retention-days: 3
 
   release:
-    needs: [version, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke, launcher, bundle, navpath, navpath-map, navpath-smoke]
+    needs: [version, engine-jar, tests, bootstrap-linux, bootstrap-windows, bootstrap-smoke, launcher, bundle, navpath, navpath-map, navpath-smoke]
     if: needs.version.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -557,7 +614,7 @@ jobs:
   # distribution repository that holds no source, giving users permanent
   # `releases/latest/download/...` links.
   publish-launcher:
-    needs: [version, bundle, engine-jar, bootstrap-linux, bootstrap-windows, bootstrap-smoke, navpath, navpath-map, navpath-smoke]
+    needs: [version, bundle, engine-jar, tests, bootstrap-linux, bootstrap-windows, bootstrap-smoke, navpath, navpath-map, navpath-smoke]
     if: needs.version.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30

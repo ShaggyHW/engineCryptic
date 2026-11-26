@@ -1,9 +1,10 @@
 package com.projectx.game.input.record
 
+import com.projectx.testsupport.RepositoryFiles
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * The engine writes recording databases and the Python legacy importer creates the same tables, so the DDL
@@ -28,7 +29,7 @@ class RecordingSchemaMirrorTest {
 
     @Test
     fun `the sql mirror matches the kotlin ddl`() {
-        val mirror = File(repositoryRoot(), "ai-input/spec/recording_schema_v$SCHEMA_FILE_VERSION.sql")
+        val mirror = File(RepositoryFiles.trainingSpecDir, "recording_schema_v$SCHEMA_FILE_VERSION.sql")
         val expected = expectedContent()
 
         if (System.getProperty("projectx.regenerateSchemaMirror") == "true") {
@@ -38,9 +39,10 @@ class RecordingSchemaMirrorTest {
             return
         }
 
-        assertTrue(
+        assumeTrue(
             mirror.isFile,
-            "${mirror.path} is missing — regenerate it with -Dprojectx.regenerateSchemaMirror=true"
+            "${mirror.name} is not on this machine; the training spec lives outside this repository. " +
+                "Regenerate it with -Dprojectx.regenerateSchemaMirror=true"
         )
         // Compared with newlines normalised: with core.autocrlf the mirror checks out CRLF on Windows and
         // LF elsewhere, and that is a property of the checkout rather than drift in the DDL.
@@ -59,15 +61,6 @@ class RecordingSchemaMirrorTest {
             SCHEMA_FILE_VERSION,
             "bump SCHEMA_FILE_VERSION and rename the mirror when the schema version changes"
         )
-    }
-
-    private fun repositoryRoot(): File {
-        var candidate: File? = File("").absoluteFile
-        while (candidate != null) {
-            if (File(candidate, "ai-input/spec").isDirectory) return candidate
-            candidate = candidate.parentFile
-        }
-        error("could not locate the repository root from ${File("").absolutePath}")
     }
 
     private companion object {

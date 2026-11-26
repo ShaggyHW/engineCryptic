@@ -2,12 +2,13 @@ package com.projectx.game.input.motor
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.projectx.testsupport.RepositoryFiles
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
@@ -83,7 +84,7 @@ class MotorParityTest {
     }
 
     private fun modelContract(): File {
-        val file = specFile("motor_contract_reference.json")
+        val file = File(RepositoryFiles.trainingSpecDir, "motor_contract_reference.json")
         if (file.isFile) return file
         // The exporter writes the contract beside the model rather than into the spec directory, so fall back
         // to a trained player's copy when one exists on this machine.
@@ -91,25 +92,9 @@ class MotorParityTest {
             .listFiles()?.asSequence()
             ?.map { File(it, MotorContract.FILENAME) }
             ?.firstOrNull { it.isFile }
-        assertTrue(
-            local != null,
-            "no motor contract available — export a model with ai-input/export_motor_onnx.py"
-        )
+        assumeTrue(local != null, "no motor contract on this machine; export a model with ai-input/export_motor_onnx.py")
         return local!!
     }
 
-    private fun specFile(name: String): File {
-        val file = File(repositoryRoot(), "ai-input/spec/$name")
-        assertTrue(file.isFile, "$name is missing — run ai-input/spec/generate_motor_fixture.py")
-        return file
-    }
-
-    private fun repositoryRoot(): File {
-        var candidate: File? = File("").absoluteFile
-        while (candidate != null) {
-            if (File(candidate, "ai-input/spec").isDirectory) return candidate
-            candidate = candidate.parentFile
-        }
-        error("could not locate the repository root from ${File("").absolutePath}")
-    }
+    private fun specFile(name: String): File = RepositoryFiles.trainingSpec(name)
 }

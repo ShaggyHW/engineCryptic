@@ -2,6 +2,7 @@ package com.projectx.game.input
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.projectx.testsupport.RepositoryFiles
 import java.io.File
 import kotlin.math.abs
 import kotlin.test.Test
@@ -136,21 +137,5 @@ class InputContractParityTest {
         }
     }
 
-    private fun specFile(name: String): File {
-        val file = File(repositoryRoot(), "ai-input/spec/$name")
-        assertTrue(
-            file.isFile,
-            "$name is missing — the ai-input submodule is not checked out (git submodule update --init --recursive)"
-        )
-        return file
-    }
-
-    private fun repositoryRoot(): File {
-        var candidate: File? = File("").absoluteFile
-        while (candidate != null) {
-            if (File(candidate, "ai-input/spec").isDirectory) return candidate
-            candidate = candidate.parentFile
-        }
-        error("could not locate the repository root from ${File("").absolutePath}")
-    }
+    private fun specFile(name: String): File = RepositoryFiles.trainingSpec(name)
 }

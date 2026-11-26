@@ -1,9 +1,8 @@
 package com.projectx.ui.backend.dsl.utils
 
-import java.io.File
+import com.projectx.testsupport.RepositoryFiles
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * [ImGuiCol] and [ImGuiStyleVar] are passed to ImGui by ordinal, so they are positional mirrors of the
@@ -31,8 +30,7 @@ class ImGuiEnumParityTest {
         assertMirrors("ImGuiStyleVar", ImGuiStyleVar.entries.map { it.name })
 
     private fun assertMirrors(enumName: String, kotlinNames: List<String>) {
-        val header = File(repositoryRoot(), "client-plugin-engine/native-bootstrap/imgui/imgui.h")
-        assertTrue(header.isFile, "${header.path} is missing")
+        val header = RepositoryFiles.submoduleFile("client-plugin-engine/native-bootstrap/imgui/imgui.h")
 
         val expected = headerEntries(header.readText(), enumName) + "COUNT"
         assertEquals(
@@ -60,14 +58,5 @@ class ImGuiEnumParityTest {
         }
         check(names.isNotEmpty()) { "parsed no entries from `enum ${enumName}_`" }
         return names
-    }
-
-    private fun repositoryRoot(): File {
-        var candidate: File? = File("").absoluteFile
-        while (candidate != null) {
-            if (File(candidate, "ai-input/spec").isDirectory) return candidate
-            candidate = candidate.parentFile
-        }
-        error("could not locate the repository root from ${File("").absolutePath}")
     }
 }
