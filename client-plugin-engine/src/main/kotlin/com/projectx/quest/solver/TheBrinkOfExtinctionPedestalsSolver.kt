@@ -9,7 +9,7 @@ import world.gregs.voidps.type.Tile
  * The Brink of Extinction's memory pedestals: the game flashes a growing sequence and the player repeats it.
  * Flashes close together form a burst; a quiet gap ends the burst and folds it into the remembered sequence.
  */
-object TheBrinkOfExtinctionPedestalsSolver : QuestStepSolver {
+internal object TheBrinkOfExtinctionPedestalsSolver : QuestStepSolver {
     override val id get() = "the-brink-of-extinction.memory-pedestals"
 
     private const val ROOM_REACH = 15

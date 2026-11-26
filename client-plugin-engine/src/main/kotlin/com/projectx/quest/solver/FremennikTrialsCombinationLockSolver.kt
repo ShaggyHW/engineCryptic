@@ -8,7 +8,7 @@ import com.projectx.quest.data.QuestStep
 import com.projectx.quest.runtime.RecentChat
 
 /** Peer the Seer's door: the riddle's keyword names the four-letter answer, which then drives the lock's dials. */
-object FremennikTrialsCombinationLockSolver : QuestStepSolver {
+internal object FremennikTrialsCombinationLockSolver : QuestStepSolver {
     override val id get() = "the-fremennik-trials.combination-lock"
 
     @Volatile private var answer: String? = null

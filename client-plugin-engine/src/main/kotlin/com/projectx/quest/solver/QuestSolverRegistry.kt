@@ -6,7 +6,7 @@ import com.projectx.quest.data.QuestStep
 import java.util.concurrent.ConcurrentHashMap
 
 /** Every known solver by id, and a one-entry memo so callers sharing a stamp share one evaluation. */
-object QuestSolverRegistry {
+internal object QuestSolverRegistry {
     private val byId = ConcurrentHashMap<String, QuestStepSolver>()
 
     private class Memo(val stamp: Long, val slug: String, val stepIndex: Int, val solverId: String, val result: QuestStepSolver.Result)

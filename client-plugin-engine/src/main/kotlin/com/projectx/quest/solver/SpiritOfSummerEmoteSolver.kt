@@ -8,7 +8,7 @@ import com.projectx.ui.backend.dsl.utils.ImGuiColors
  * Spirit of Summer's mimic: answer each of the man's emotes with a valid response, never the same one twice in a
  * row. Solved once the girl, seen inside her rings earlier, stands free of them.
  */
-object SpiritOfSummerEmoteSolver : QuestStepSolver {
+internal object SpiritOfSummerEmoteSolver : QuestStepSolver {
     override val id get() = "spirit-of-summer.emotes"
 
     private enum class Emote(val slot: Int, val seqName: String?) {

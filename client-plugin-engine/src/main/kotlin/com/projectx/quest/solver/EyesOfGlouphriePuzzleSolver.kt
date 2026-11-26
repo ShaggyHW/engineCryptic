@@ -7,7 +7,7 @@ import com.projectx.quest.data.QuestStep
  * The Eyes of Glouphrie's machine: each number shown must be matched by exactly so many discs whose values (colour
  * times shape) add up to it. Advises which carried discs to place, which to exchange, and what to fetch.
  */
-object EyesOfGlouphriePuzzleSolver : QuestStepSolver {
+internal object EyesOfGlouphriePuzzleSolver : QuestStepSolver {
     override val id get() = "eyes-of-glouphrie.oaknocks-puzzle"
 
     private class SlotVars(val target: String, val current: String, val discs: Int, val label: String) {

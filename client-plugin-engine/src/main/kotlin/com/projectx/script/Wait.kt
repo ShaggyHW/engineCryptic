@@ -75,6 +75,13 @@ sealed class Wait {
         internal val onResult: Consumer<in T>?,
     ) : Wait()
 
+    /** [wait], cut short once [condition] holds; see [interruptWhen]. */
+    class Guarded internal constructor(
+        val condition: BooleanSupplier,
+        val wait: Wait,
+        val onInterrupted: Runnable?,
+    ) : Wait()
+
     object Abort : Wait()
 
     companion object {
@@ -293,6 +300,16 @@ sealed class Wait {
          */
         @JvmStatic
         fun loop(step: Step): Wait = Loop(step)
+
+        /**
+         * Performs [wait], abandoning it once [condition] holds, checked about every 50 ms; [onInterrupted] runs when it
+         * was. Only this wait is cut short: the steps after it in a sequence still run. Guards one block where
+         * [JavaScript.shouldInterrupt] guards them all. Kotlin: `interruptWhen(condition) { ... }`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun interruptWhen(condition: BooleanSupplier, wait: Wait, onInterrupted: Runnable? = null): Wait =
+            Guarded(condition, wait, onInterrupted)
 
         /**
          * Returned from a step: skip every remaining step of the sequences and loops it belongs to, and

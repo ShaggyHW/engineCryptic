@@ -64,7 +64,7 @@ class JavaReachabilityTest {
 
     @Test
     fun `every named Java form exists`() {
-        val broken = JAVA_FORMS.values.distinct().filterNot { target ->
+        val broken = (JAVA_FORMS.values + ENGINE_ONLY.values).distinct().filterNot { target ->
             val (owner, member) = target.split('#')
             val type = runCatching { Class.forName(owner, false, javaClass.classLoader) }.getOrNull() ?: return@filterNot false
             generateSequence(type) { it.superclass }.any { owner ->
@@ -85,6 +85,7 @@ class JavaReachabilityTest {
 
     private fun mapped(method: Method): String? =
         JAVA_FORMS["${method.declaringClass.name}#${method.baseName()}"]
+            ?: ENGINE_ONLY["${method.declaringClass.name}#${method.baseName()}"]
 
     private fun surfaceMethods(): List<Method> = SURFACE.flatMap { type ->
         type.declaredMethods.filter { it.isPublicApi() }
@@ -118,21 +119,28 @@ class JavaReachabilityTest {
     companion object {
         private val COMPONENT = Regex("component\\d+")
 
-        // The areas of .github/scripts/api_changelog.py, less Compose: a @Composable needs the Kotlin compiler plugin,
-        // so Java scripts draw with Overlay instead.
+        // What scripts compile against: the areas of .github/scripts/api_changelog.py and the other packages scripts
+        // import, less Compose, whose @Composables need the Kotlin compiler plugin (Java scripts draw with Overlay).
         private val PACKAGES = listOf(
             "com.projectx.script",
             "com.projectx.webwalker",
             "com.projectx.game.interfaces",
             "com.projectx.game.nxt.entity",
             "com.projectx.game.cs2",
+            "com.projectx.game.items",
+            "com.projectx.game.chat",
             "com.projectx.ui.backend.dsl",
+            "com.projectx.util",
         )
         private val CLASSES = listOf(
             "com.projectx.traversal.local.LocalNav",
             "com.projectx.pathfinder.WalkMap",
             "com.projectx.pathfinder.WalkField",
+            "com.projectx.pathfinder.RouteFinderKt",
+            "com.projectx.pathfinder.WorldCollision",
             "com.projectx.traversal.MasterFarmerHat",
+            "com.projectx.traversal.TraversalBuilder",
+            "com.projectx.traversal.JavaTraversal",
         )
         private val EXCLUDED = listOf("com.projectx.script.ComposePanel", "com.projectx.script.Wait")
 
@@ -156,6 +164,14 @@ class JavaReachabilityTest {
 
         private val WAIT_FACTORIES: Set<String> =
             Wait::class.java.methods.filter { Modifier.isStatic(it.modifiers) }.map { it.name.lowercase() }.toSet()
+
+        // Public because they shipped that way, but only the engine calls them: scripts read collision, the engine writes
+        // it. Each maps to the member scripts read instead, which the "every named Java form exists" test checks.
+        private val ENGINE_ONLY: Map<String, String> = listOf(
+            "addBlockWalkAndProj", "addBlockedTile", "addClipNPC", "addClipPlayer", "addFlag", "addObject", "addWall",
+            "removeBlockWalkAndProj", "removeBlockedTile", "removeClipNPC", "removeClipPlayer", "removeFlag", "removeObject",
+            "removeWall", "setFlags", "setSceneBase",
+        ).associate { "com.projectx.pathfinder.WorldCollision#$it" to "com.projectx.pathfinder.WorldCollision#getFlags" }
 
         /** Kotlin members whose Java form has another name, keyed `class#member` and naming that form. */
         val JAVA_FORMS: Map<String, String> = mapOf(
@@ -186,6 +202,7 @@ class JavaReachabilityTest {
             "com.projectx.webwalker.WebWalker#walk" to "com.projectx.script.Wait#webWalk",
             "com.projectx.webwalker.WebWalker#findPath" to "com.projectx.webwalker.WebWalker#findPathAsync",
             "com.projectx.webwalker.WebPath#tile" to "com.projectx.webwalker.WebPath#getX",
+            "com.projectx.traversal.TraversalBuilder#pathTiles" to "com.projectx.traversal.TraversalBuilder#path",
             "com.projectx.traversal.local.LocalNav#getLastTeleportTile" to "com.projectx.traversal.local.LocalNav#getLastTeleportX",
             "com.projectx.game.nxt.entity.HintTrailPoint#tile" to "com.projectx.game.nxt.entity.HintTrailPoint#getTileX",
             "com.projectx.ui.backend.dsl.ImGuiDsl#window" to "com.projectx.ui.backend.dsl.Overlay#window",

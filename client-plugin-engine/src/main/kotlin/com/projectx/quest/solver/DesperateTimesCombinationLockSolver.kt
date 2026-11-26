@@ -14,7 +14,7 @@ import world.gregs.voidps.type.Tile
  * Desperate Times' chest locks. Each room's code comes from a clue interface (the recipe scroll or the
  * lodestone plaque), remembered for the room, or failing that from the items laid on the floor.
  */
-object DesperateTimesCombinationLockSolver : QuestStepSolver {
+internal object DesperateTimesCombinationLockSolver : QuestStepSolver {
     override val id get() = "desperate-times.combination-lock"
 
     private const val ROOM_REACH = 8

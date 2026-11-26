@@ -4,7 +4,7 @@ import com.projectx.quest.data.Quest
 import com.projectx.quest.data.QuestStep
 
 /** Elemental Workshop III's last five lever pulls, counted from the turn counter the game bumps on each one. */
-object ElementalWorkshopIIITowerSolver : QuestStepSolver {
+internal object ElementalWorkshopIIITowerSolver : QuestStepSolver {
     override val id get() = "elemental-workshop-iii.tower-final"
 
     private val pulls = listOf('2' to "the tower drops", '4' to "the tower spins", 'B' to null, 'C' to "the tower rises", '3' to null)

@@ -90,6 +90,50 @@ fun hasLineOfSight(src: Tile, srcSize: Int, dst: Tile, dstSize: Int): Boolean {
         .hasLineOfSight(src.x, src.y, src.plane, dst.x, dst.y, srcSize, dstSize, dstSize)
 }
 
+// Coordinate forms of the Tile-taking routes above: Tile is an inline value class, so those compile to mangled JVM names
+// Java cannot call. Each answers exactly as its Tile form does.
+
+@JvmOverloads
+fun routeToObject(
+    x: Int,
+    y: Int,
+    plane: Int,
+    obj: SceneObject,
+    maxTurns: Int = DEFAULT_MAX_TURNS,
+    collision: CollisionStrategy = CollisionStrategies.NORMAL,
+): Route = routeToObject(Tile.of(x, y, plane), obj, maxTurns, collision)
+
+/** The tile a walk from ([x], [y], [plane]) to [obj] ends on, or null when there is no route. */
+@JvmOverloads
+@JvmName("routedDestination")
+fun routedDestination(
+    x: Int,
+    y: Int,
+    plane: Int,
+    obj: SceneObject,
+    maxTurns: Int = DEFAULT_MAX_TURNS,
+    collision: CollisionStrategy = CollisionStrategies.NORMAL,
+): Tile? = routedDestination(Tile.of(x, y, plane), obj, maxTurns, collision)
+
+@JvmOverloads
+fun routeToTile(
+    fromX: Int,
+    fromY: Int,
+    plane: Int,
+    toX: Int,
+    toY: Int,
+    srcSize: Int = 1,
+    maxTurns: Int = DEFAULT_MAX_TURNS,
+    moveNear: Boolean = false,
+): Route = routeToTile(Tile.of(fromX, fromY, plane), Tile.of(toX, toY, plane), srcSize, maxTurns, moveNear)
+
+@JvmOverloads
+fun routeToNPC(x: Int, y: Int, plane: Int, npc: NPC, maxTurns: Int = DEFAULT_MAX_TURNS): Route =
+    routeToNPC(Tile.of(x, y, plane), npc, maxTurns)
+
+fun hasLineOfSight(srcX: Int, srcY: Int, plane: Int, srcSize: Int, dstX: Int, dstY: Int, dstSize: Int): Boolean =
+    hasLineOfSight(Tile.of(srcX, srcY, plane), srcSize, Tile.of(dstX, dstY, plane), dstSize)
+
 fun findClosestSafeTile(
     srcX: Int,
     srcY: Int,

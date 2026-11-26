@@ -5,7 +5,7 @@ import com.projectx.quest.data.Quest
 import com.projectx.quest.data.QuestStep
 
 /** Dead and Buried's 5x5 map table: piece n belongs in cell n-1, north row first, gap in the south-east corner. */
-object DeadAndBuriedMapPuzzleSolver : QuestStepSolver {
+internal object DeadAndBuriedMapPuzzleSolver : QuestStepSolver {
     override val id get() = "dead-and-buried.map-puzzle"
 
     private const val SIDE = 5

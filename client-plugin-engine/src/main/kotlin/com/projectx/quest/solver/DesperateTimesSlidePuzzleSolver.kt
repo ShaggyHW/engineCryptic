@@ -9,7 +9,7 @@ import com.projectx.quest.data.QuestStep
  * Desperate Times' 3x3 sliding blocks. The chest's word grid gives the target layout but shuts while the player
  * slides, so the last grid read is kept for the room; the blocks themselves are NPCs in the world.
  */
-object DesperateTimesSlidePuzzleSolver : QuestStepSolver {
+internal object DesperateTimesSlidePuzzleSolver : QuestStepSolver {
     override val id get() = "desperate-times.slide-puzzle"
 
     private const val SIDE = 3

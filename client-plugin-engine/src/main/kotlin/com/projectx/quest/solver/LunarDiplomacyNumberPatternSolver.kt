@@ -7,7 +7,7 @@ import com.projectx.quest.runtime.RecentChat
 import world.gregs.voidps.type.Tile
 
 /** Lunar Diplomacy's number sequences: the Ethereal Numerator shows the start of a known pattern in chat. */
-object LunarDiplomacyNumberPatternSolver : QuestStepSolver {
+internal object LunarDiplomacyNumberPatternSolver : QuestStepSolver {
     override val id get() = "lunar-diplomacy.number-pattern"
 
     private const val TILE_REACH = 15

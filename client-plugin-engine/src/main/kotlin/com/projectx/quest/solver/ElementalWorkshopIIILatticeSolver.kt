@@ -22,7 +22,7 @@ internal object ElementalLevers {
  * Elemental Workshop III's lattice: six fixed phases of lever presses. Progress inside a phase is counted from
  * the moves-left number; which pair of phases is current comes from how many moves the game has granted.
  */
-object ElementalWorkshopIIILatticeSolver : QuestStepSolver {
+internal object ElementalWorkshopIIILatticeSolver : QuestStepSolver {
     override val id get() = "elemental-workshop-iii.lattice"
 
     private const val COMPLETE_STAGE = 5

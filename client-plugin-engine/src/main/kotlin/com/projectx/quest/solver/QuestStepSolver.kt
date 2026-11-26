@@ -8,7 +8,7 @@ import com.projectx.quest.data.QuestStep
  * Live help for one guide step, found by the step's `solverId`. Evaluated on the game thread every few frames,
  * possibly more than once per frame, so an evaluation with nothing changed must be harmless.
  */
-interface QuestStepSolver {
+internal interface QuestStepSolver {
     val id: String
 
     fun evaluate(
@@ -21,6 +21,6 @@ interface QuestStepSolver {
 
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
-annotation class QuestSolver(
+internal annotation class QuestSolver(
     val id: String,
 )

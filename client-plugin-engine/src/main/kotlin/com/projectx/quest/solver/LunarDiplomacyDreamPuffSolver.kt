@@ -10,7 +10,7 @@ import world.gregs.voidps.type.Tile
  * Lunar Diplomacy's dream-puff chasm. Every puff is the same loc, so the safe route is learned from the player's
  * own jumps: a puff that led further from the start is safe, one that dropped them back is not.
  */
-object LunarDiplomacyDreamPuffSolver : QuestStepSolver {
+internal object LunarDiplomacyDreamPuffSolver : QuestStepSolver {
     override val id get() = "lunar-diplomacy.dream-puff"
 
     private const val PUFF_REACH = 12

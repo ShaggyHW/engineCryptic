@@ -153,6 +153,57 @@ class TraversalBuilder<T : StateMachineScript<T>> {
         reached: (() -> Boolean)? = null,
     ) = nodes.add(WebWalkNode(destination, arriveDistance, reached, useLodestones))
 
+    // Coordinate forms of the Tile-taking steps above, for Java (JavaTraversal.nodes builds with this class): Tile is an
+    // inline value class, so those compile to mangled JVM names Java cannot call. Each adds exactly its Tile form's step.
+
+    @JvmOverloads
+    fun interactObj(action: String, searchRadius: Int, requestX: Int, requestY: Int, requestPlane: Int, reached: (() -> Boolean)? = null) =
+        interactObj(action, searchRadius, Tile.of(requestX, requestY, requestPlane), reached)
+
+    @JvmOverloads
+    fun interactObj(id: Int, action: String, searchRadius: Int, requestX: Int, requestY: Int, requestPlane: Int, reached: (() -> Boolean)? = null) =
+        interactObj(id, action, searchRadius, Tile.of(requestX, requestY, requestPlane), reached)
+
+    @JvmOverloads
+    fun interactObj(name: String, action: String, searchRadius: Int, requestX: Int, requestY: Int, requestPlane: Int, reached: (() -> Boolean)? = null) =
+        interactObj(name, action, searchRadius, Tile.of(requestX, requestY, requestPlane), reached)
+
+    @JvmOverloads
+    fun path(startX: Int, startY: Int, endX: Int, endY: Int, plane: Int, reached: (() -> Boolean)? = null) =
+        path(Tile.of(startX, startY, plane), Tile.of(endX, endY, plane), reached)
+
+    /** [chebychevPath] through the keypoints ([xs] `[i]`, [ys] `[i]`) on [plane]. */
+    @JvmOverloads
+    fun chebychevPath(
+        startX: Int,
+        startY: Int,
+        plane: Int,
+        xs: IntArray,
+        ys: IntArray,
+        fallback: (() -> Boolean)? = null,
+        reached: (() -> Boolean)? = null,
+    ) = chebychevPath(Tile.of(startX, startY, plane), xs.indices.map { Tile.of(xs[it], ys[it], plane) }, fallback, reached)
+
+    @JvmOverloads
+    fun surge(x: Int, y: Int, plane: Int, enabled: Boolean, reached: (() -> Boolean)? = null) = surge(Tile.of(x, y, plane), enabled, reached)
+
+    @JvmOverloads
+    fun dive(x: Int, y: Int, plane: Int, enabled: Boolean, reached: (() -> Boolean)? = null) = dive(Tile.of(x, y, plane), enabled, reached)
+
+    @JvmOverloads
+    fun walkExact(x: Int, y: Int, plane: Int, minimap: Boolean = false, reached: (() -> Boolean)? = null) =
+        walkExact(Tile.of(x, y, plane), minimap, reached)
+
+    @JvmOverloads
+    fun webWalk(
+        x: Int,
+        y: Int,
+        plane: Int,
+        arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE,
+        useLodestones: Boolean = true,
+        reached: (() -> Boolean)? = null,
+    ) = webWalk(Tile.of(x, y, plane), arriveDistance, useLodestones, reached)
+
     fun door(doorInfo: DoorInfo, direction: DoorDirection, reached: (() -> Boolean)? = null) = nodes.add(DoorNode(doorInfo, direction, reached))
     fun doorIn(doorInfo: DoorInfo, reached: (() -> Boolean)? = null) = nodes.add(DoorNode(doorInfo, DoorDirection.IN, reached))
     fun doorOut(doorInfo: DoorInfo, reached: (() -> Boolean)? = null) = nodes.add(DoorNode(doorInfo, DoorDirection.OUT, reached))

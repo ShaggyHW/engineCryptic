@@ -15,7 +15,9 @@ data class Area(val minX: Short, val maxX: Short, val minY: Short, val maxY: Sho
 
     constructor(t1: Tile, t2: Tile) : this(t1.x, t1.y, t2.x, t2.y)
 
-    fun inside(tile: Tile): Boolean = tile.x in minX..maxX && tile.y in minY..maxY
+    fun inside(tile: Tile): Boolean = inside(tile.x, tile.y)
+
+    fun inside(x: Int, y: Int): Boolean = x in minX..maxX && y in minY..maxY
 
     fun toTiles(): Array<Tile> {
         val columns = maxX - minX + 1

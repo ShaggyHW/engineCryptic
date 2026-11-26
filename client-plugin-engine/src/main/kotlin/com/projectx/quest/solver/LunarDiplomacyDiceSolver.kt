@@ -7,7 +7,7 @@ import com.projectx.quest.runtime.RecentChat
 import world.gregs.voidps.type.Tile
 
 /** Lunar Diplomacy's dicing: rolling a die turns it to the opposite face; reach the Ethereal Fluke's sum. */
-object LunarDiplomacyDiceSolver : QuestStepSolver {
+internal object LunarDiplomacyDiceSolver : QuestStepSolver {
     override val id get() = "lunar-diplomacy.dice"
 
     private const val DICE_REACH = 15

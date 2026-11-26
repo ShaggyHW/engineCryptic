@@ -21,6 +21,10 @@ object WorldCollision {
     var inDynamic = false
     var sceneBase: Tile? = null
 
+    /** [sceneBase] for Java, which cannot call the property's getter. */
+    @JvmName("getSceneBase")
+    fun getSceneBase(): Tile? = sceneBase
+
     @JvmStatic
     fun checkLoad() {
         try {

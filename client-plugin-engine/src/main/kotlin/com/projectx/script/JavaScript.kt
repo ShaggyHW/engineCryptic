@@ -53,6 +53,16 @@ abstract class JavaScript : Script() {
         when (wait) {
             null -> Unit
             Wait.Abort -> return false
+            is Wait.Guarded -> {
+                val finished = interruptWhen({ runCatching { wait.condition.asBoolean }.getOrDefault(false) }, INTERRUPT_POLL_MILLIS) {
+                    perform(wait.wait)
+                }
+                if (finished == null) {
+                    wait.onInterrupted?.run()
+                    return !interrupted
+                }
+                return finished
+            }
             is Wait.Millis -> {
                 val millis = if (wait.variance == 0) wait.mean else gaussian(wait.mean, wait.variance)
                 val until = System.currentTimeMillis() + millis

@@ -4,7 +4,7 @@ import com.projectx.quest.data.Quest
 import com.projectx.quest.data.QuestStep
 
 /** The Elder Kiln's ancient scales: reads the TzHaar equation off the scale and says how much TokKul balances it. */
-object TheElderKilnScalesSolver : QuestStepSolver {
+internal object TheElderKilnScalesSolver : QuestStepSolver {
     override val id get() = "the-elder-kiln.ancient-scales"
 
     private const val SCALES = "tzhaar2_scales"

@@ -8,7 +8,7 @@ import com.projectx.quest.data.QuestStep
  * Elemental Workshop II's pipe junction box: three fixed pairs of holes, each joined by clicking both ends.
  * Never reports solved; the quest's own varbits for the box are unreliable, so the step's conditions decide.
  */
-object ElementalWorkshopIIJunctionBoxSolver : QuestStepSolver {
+internal object ElementalWorkshopIIJunctionBoxSolver : QuestStepSolver {
     override val id get() = "elemental-workshop-ii.junction-box"
 
     private const val BOX = "elem_magicpress_pipes"

@@ -9,7 +9,11 @@ import com.projectx.game.nxt.entity.GroundItem;
 import com.projectx.game.nxt.entity.HintIcon;
 import com.projectx.game.nxt.entity.location.SceneObject;
 import com.projectx.game.nxt.entity.player.Player;
+import com.projectx.pathfinder.RouteFinderKt;
 import com.projectx.pathfinder.WalkField;
+import com.projectx.pathfinder.WorldCollision;
+import world.gregs.voidps.path.Route;
+import world.gregs.voidps.path.RouteKt;
 import com.projectx.script.BooleanConfigItem;
 import com.projectx.script.ConfigurableScript;
 import com.projectx.script.IntConfigItem;
@@ -36,6 +40,7 @@ import com.projectx.script.event.impl.XPDrop;
 import com.projectx.traversal.local.LocalNav;
 import com.projectx.ui.backend.dsl.ImGuiState;
 import com.projectx.ui.backend.dsl.utils.ImGuiColors;
+import com.projectx.ui.backend.dsl.utils.ImGuiStyleVar;
 import com.projectx.webwalker.WebWalker;
 import org.projectx.core.game.combat.Ability;
 import org.projectx.core.game.combat.Effect;
@@ -44,6 +49,7 @@ import world.gregs.voidps.type.Tile;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.projectx.script.api.APIKt.*;
 import static com.projectx.script.api.LootKt.*;
@@ -122,6 +128,17 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
             );
         }
         if (attackable.size() + bones.size() + attackableNpcNamesNearby(15).size() > 0 && MAGIC_NOTEPAPER.isEmpty()) return Wait.ms(100);
+
+        // Routes and collision in coordinate form.
+        if (rock != null) {
+            Route toRock = RouteFinderKt.routeToObject(3200, 3200, 0, rock);
+            Tile end = RouteFinderKt.routedDestination(3200, 3200, 0, rock);
+            if (toRock.getSuccess() && end != null) local += RouteKt.toTiles(toRock, 0).size();
+        }
+        local += RouteFinderKt.routeToTile(3200, 3200, 0, 3210, 3210).getDistance();
+        boolean sight = RouteFinderKt.hasLineOfSight(3200, 3200, 0, 1, 3205, 3205, 1);
+        Tile base = WorldCollision.INSTANCE.getSceneBase();
+        if (sight && base != null) return Wait.interruptWhen(() -> me.isMoving(), Wait.xpDrop(), () -> castWorked = false);
 
         // Kotlin waits under their Kotlin names, as a Kotlin script is converted line by line.
         if (castWorked) {
@@ -232,6 +249,84 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
             popupModal(w, "modal", WINDOW_NO_RESIZE, modal -> text(modal, "Modal"));
         });
         window("Closable", 0, showMore, w -> text(w, "Close me"));
+        ImGuiState<Boolean> confirmOpen = persistentState("parity.confirm", () -> boolState(false));
+        ImGuiState<Float> red = persistentState("parity.red", () -> floatState(1f));
+        ImGuiState<Float> alpha = persistentState("parity.alpha", () -> floatState(1f));
+        ImGuiState<Integer> low = persistentState("parity.low", () -> intState(1));
+        ImGuiState<Integer> high = persistentState("parity.high", () -> intState(99));
+        var icon = graphicTexture(13198);
+        var fromFile = textureFromPath("icon.png");
+        ImGuiState<Set<Integer>> picked = persistentState("parity.picked", () -> indexSetState(Set.of(0)));
+        window("More controls", WINDOW_MENU_BAR, w -> {
+            menuBar(w, bar -> {
+                menu(bar, "File", file -> {
+                    menuItem(file, "Save", () -> {});
+                    menuItem(file, "Quit", "Ctrl+Q", () -> {});
+                    menuItem(file, "Pinned", "", true, () -> {});
+                    menu(file, "Recent", recent -> menuItem(recent, "One", () -> {}));
+                });
+            });
+            menu(w, "Disabled", false, disabled -> {});
+            menuItem(w, "Bare", () -> {});
+            button(w, "Item", () -> {});
+            contextMenuItem(w, ctx -> {
+                menuItem(ctx, "Copy", () -> {});
+                menu(ctx, "More", more -> menuItem(more, "Paste", "Ctrl+V", false, () -> {}));
+                whileShown(ctx, () -> {});
+                ctx.closeCurrentPopup();
+            });
+            contextMenuItem(w, "item-ctx", MOUSE_RIGHT, ctx -> {});
+            contextMenuWindow(w, ctx -> menuItem(ctx, "Reset", () -> {}));
+            contextMenuWindow(w, "win-ctx", MOUSE_RIGHT, false, ctx -> {});
+            contextMenuVoid(w, "void-ctx", ctx -> {});
+            confirmationDialog(w, "Sure?", "Really stop?", confirmOpen);
+            confirmationDialog(w, "Sure 2?", "Really stop?", confirmOpen, this::stop, () -> {});
+            inputDialog(w, "Rename", "Name", stringState(""), confirmOpen, name -> {});
+            choiceDialog(w, "Pick", "Which?", confirmOpen, List.of("A", "B"), (index, choice) -> {});
+            tooltip(w, "Tip");
+            setTooltip(w, "Tip");
+            colorEdit3(w, "Colour", red, red, red);
+            colorEdit4(w, "Colour A", red, red, red, alpha, COLOR_ALPHA_BAR | COLOR_NO_INPUTS);
+            colorPicker4(w, "Picker", red, red, red, alpha, COLOR_NO_SIDE_PREVIEW);
+            dragFloat(w, "Speed", red);
+            dragFloat(w, "Speed 2", red, 0.1f, 0f, 10f, "%.1f", SLIDER_ALWAYS_CLAMP);
+            dragInt(w, "Count", low, 1f, 0, 100);
+            rangeSliderFloat(w, "Range f", red, alpha, 0f, 1f);
+            rangeSliderInt(w, "Range i", low, high, 1, 99, "%d", SLIDER_NO_INPUT);
+            arrowButton(w, "##up", DIR_UP, "^", () -> {});
+            if (fromFile != null) image(w, fromFile, 16f, 16f);
+            if (icon != null) {
+                iconButton(w, "##icon", icon, 16f, () -> {});
+                iconButton(w, "##icon2", icon, 16f, 28f, ImGuiColors.INSTANCE.getWHITE(), () -> {});
+                imageButton(w, icon, 32f, 32f, () -> {});
+                imageButton(w, icon, 32f, 32f, 0f, 0f, 0.5f, 0.5f, () -> {});
+            }
+            checkboxGrid(w, "flags", List.of(Map.entry("Bank", showMore), Map.entry("Drop", confirmOpen)));
+            checkboxGrid(w, "flags3", List.of(Map.entry("Bank", showMore)), 3);
+            multiSelectListBox(w, "Targets", List.of("Guard", "Knight"), picked);
+            multiSelectListBox(w, "Targets 2", List.of("Guard", "Knight"), picked, 200f, 80f);
+            indent(w);
+            indent(w, 12f);
+            unindent(w, 12f);
+            unindent(w);
+            columns(w, 2, "cols", false);
+            text(w, "Left");
+            nextColumn(w);
+            setColumnWidth(w, 0, 120f);
+            columns(w);
+            table(w, "t", 2, t -> {
+                t.nextRow();
+                nextColumn(t);
+                text(t, "Cell");
+            });
+            pushItemWidth(w, 100f);
+            popItemWidth(w);
+            setNextItemWidth(w, -1f);
+            styleVar(w, ImGuiStyleVar.Alpha, 0.5f, faded -> text(faded, "Faded"));
+            styleVar(w, ImGuiStyleVar.ItemSpacing, 2f, 2f, tight -> text(tight, "Tight"));
+            alignTextToFramePadding(w);
+            if (isItemHovered(w) || isItemClicked(w) || isItemClicked(w, MOUSE_LEFT)) text(w, "Hit");
+        });
         setNextWindowPosUnsafe(10f, 10f, COND_ONCE, 0f, 0f);
         backgroundDrawList(draw -> {
             draw.tile(3200, 3200, 0, ImGuiColors.INSTANCE.getGREEN());

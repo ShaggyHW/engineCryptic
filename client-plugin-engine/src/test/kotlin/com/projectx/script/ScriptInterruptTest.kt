@@ -136,4 +136,43 @@ class ScriptInterruptTest {
 
         assertFalse(called)
     }
+
+    @Test
+    fun `a guarded Java wait ends early and the steps after it still run`() {
+        var trip = false
+        var interrupted = false
+        var stepAfter = false
+        var startedAt = 0L
+        var stepAfterAt = 0L
+        val script = object : JavaScript() {
+            override fun onLoop(): Wait = if (stepAfter) Wait.ms(1000) else Wait.sequence(
+                { startedAt = System.currentTimeMillis(); Wait.interruptWhen({ trip }, Wait.ms(10_000), { interrupted = true }) },
+                { stepAfter = true; stepAfterAt = System.currentTimeMillis(); null },
+            )
+        }
+
+        runUntil(script) { elapsed ->
+            if (elapsed > 80) trip = true
+            stepAfter
+        }
+
+        assertTrue(interrupted, "onInterrupted runs")
+        assertTrue(stepAfterAt - startedAt < 2_000, "the 10 s wait was cut short")
+    }
+
+    @Test
+    fun `a guarded Java wait that finishes first never calls onInterrupted`() {
+        var interrupted = false
+        var stepAfter = false
+        val script = object : JavaScript() {
+            override fun onLoop(): Wait = if (stepAfter) Wait.ms(1000) else Wait.sequence(
+                { Wait.interruptWhen({ false }, Wait.ms(60), { interrupted = true }) },
+                { stepAfter = true; null },
+            )
+        }
+
+        runUntil(script) { stepAfter }
+
+        assertFalse(interrupted)
+    }
 }
