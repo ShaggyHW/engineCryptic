@@ -133,3 +133,32 @@ object ImGuiChildFlags {
     const val NavFlattened = 1 shl 8
     const val Border = Borders
 }
+
+object ImGuiColorEditFlags {
+    const val None = 0
+    const val NoAlpha = 1 shl 1
+    const val NoPicker = 1 shl 2
+    const val NoOptions = 1 shl 3
+    const val NoInputs = 1 shl 5
+    const val NoTooltip = 1 shl 6
+    const val NoLabel = 1 shl 7
+    const val NoSidePreview = 1 shl 8
+    const val AlphaBar = 1 shl 18
+}
+
+object ImGuiSliderFlags {
+    const val None = 0
+    const val Logarithmic = 1 shl 5
+    const val NoRoundToFormat = 1 shl 6
+    const val NoInput = 1 shl 7
+    const val WrapAround = 1 shl 8
+    const val ClampOnInput = 1 shl 9
+    const val ClampZeroRange = 1 shl 10
+    const val AlwaysClamp = ClampOnInput or ClampZeroRange
+}
+
+object ImGuiMouseButton {
+    const val Left = 0
+    const val Right = 1
+    const val Middle = 2
+}

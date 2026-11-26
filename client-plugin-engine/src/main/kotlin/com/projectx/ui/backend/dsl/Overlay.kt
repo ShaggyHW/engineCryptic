@@ -1,13 +1,25 @@
 package com.projectx.ui.backend.dsl
 
 import com.projectx.ui.backend.dsl.scopes.*
+import com.projectx.ui.backend.dsl.boolState as newBoolState
+import com.projectx.ui.backend.dsl.floatState as newFloatState
+import com.projectx.ui.backend.dsl.intState as newIntState
+import com.projectx.ui.backend.dsl.stringState as newStringState
 import com.projectx.ui.backend.dsl.utils.ImGuiCol
+import com.projectx.ui.backend.dsl.utils.ImGuiColorEditFlags
+import com.projectx.ui.backend.dsl.utils.ImGuiColors
+import com.projectx.ui.backend.dsl.utils.ImGuiDir
+import com.projectx.ui.backend.dsl.utils.ImGuiMouseButton
+import com.projectx.ui.backend.dsl.utils.ImGuiSliderFlags
+import com.projectx.ui.backend.dsl.utils.ImGuiStyleVar
 import com.projectx.ui.backend.flags.ImGuiCond
 import com.projectx.ui.backend.flags.InputTextFlags
 import com.projectx.ui.backend.flags.PopupFlags
 import com.projectx.ui.backend.flags.WindowFlags
 import com.projectx.ui.backend.native.ImGuiTexture
+import com.projectx.ui.backend.native.graphicTexture as cacheGraphicTexture
 import org.projectx.core.game.skill.Skill
+import java.util.function.BiConsumer
 import java.util.function.Consumer
 import java.util.function.IntConsumer
 import java.util.function.Supplier
@@ -63,6 +75,30 @@ object Overlay {
     @JvmField val POPUP_MOUSE_BUTTON_RIGHT = PopupFlags.MouseButtonRight.value
     @JvmField val POPUP_NO_REOPEN = PopupFlags.NoReopen.value
     @JvmField val POPUP_NO_OPEN_OVER_EXISTING_POPUP = PopupFlags.NoOpenOverExistingPopup.value
+
+    @JvmField val COLOR_NO_ALPHA = ImGuiColorEditFlags.NoAlpha
+    @JvmField val COLOR_NO_PICKER = ImGuiColorEditFlags.NoPicker
+    @JvmField val COLOR_NO_OPTIONS = ImGuiColorEditFlags.NoOptions
+    @JvmField val COLOR_NO_INPUTS = ImGuiColorEditFlags.NoInputs
+    @JvmField val COLOR_NO_TOOLTIP = ImGuiColorEditFlags.NoTooltip
+    @JvmField val COLOR_NO_LABEL = ImGuiColorEditFlags.NoLabel
+    @JvmField val COLOR_NO_SIDE_PREVIEW = ImGuiColorEditFlags.NoSidePreview
+    @JvmField val COLOR_ALPHA_BAR = ImGuiColorEditFlags.AlphaBar
+
+    @JvmField val SLIDER_LOGARITHMIC = ImGuiSliderFlags.Logarithmic
+    @JvmField val SLIDER_NO_ROUND_TO_FORMAT = ImGuiSliderFlags.NoRoundToFormat
+    @JvmField val SLIDER_NO_INPUT = ImGuiSliderFlags.NoInput
+    @JvmField val SLIDER_WRAP_AROUND = ImGuiSliderFlags.WrapAround
+    @JvmField val SLIDER_ALWAYS_CLAMP = ImGuiSliderFlags.AlwaysClamp
+
+    @JvmField val DIR_LEFT = ImGuiDir.Left
+    @JvmField val DIR_RIGHT = ImGuiDir.Right
+    @JvmField val DIR_UP = ImGuiDir.Up
+    @JvmField val DIR_DOWN = ImGuiDir.Down
+
+    @JvmField val MOUSE_LEFT = ImGuiMouseButton.Left
+    @JvmField val MOUSE_RIGHT = ImGuiMouseButton.Right
+    @JvmField val MOUSE_MIDDLE = ImGuiMouseButton.Middle
 
     // ---- Windows ----
 
@@ -123,16 +159,20 @@ object Overlay {
         ImGuiDsl.persistentState(key) { factory.get() }
 
     @JvmStatic
-    fun boolState(initialValue: Boolean): ImGuiState<Boolean> = com.projectx.ui.backend.dsl.boolState(initialValue)
+    fun boolState(initialValue: Boolean): ImGuiState<Boolean> = newBoolState(initialValue)
 
     @JvmStatic
-    fun intState(initialValue: Int): ImGuiState<Int> = com.projectx.ui.backend.dsl.intState(initialValue)
+    fun intState(initialValue: Int): ImGuiState<Int> = newIntState(initialValue)
 
     @JvmStatic
-    fun floatState(initialValue: Float): ImGuiState<Float> = com.projectx.ui.backend.dsl.floatState(initialValue)
+    fun floatState(initialValue: Float): ImGuiState<Float> = newFloatState(initialValue)
 
     @JvmStatic
-    fun stringState(initialValue: String): ImGuiState<String> = com.projectx.ui.backend.dsl.stringState(initialValue)
+    fun stringState(initialValue: String): ImGuiState<String> = newStringState(initialValue)
+
+    /** A set of selected indices, for [multiSelectListBox]. */
+    @JvmStatic
+    fun indexSetState(initialValue: Set<Int>): ImGuiState<Set<Int>> = IndexSetState(initialValue)
 
     // ---- Text and layout ----
 
@@ -174,6 +214,14 @@ object Overlay {
 
     @JvmStatic
     fun image(scope: LayoutScope, texture: ImGuiTexture, width: Float, height: Float) = scope.image(texture, width, height)
+
+    /** The cache graphic [id] as a texture; Java cannot import the texture type, so hold it in a `var`. */
+    @JvmStatic
+    fun graphicTexture(id: Int): ImGuiTexture = cacheGraphicTexture(id)
+
+    /** An image file or classpath resource as a texture, or null if it cannot be loaded. */
+    @JvmStatic
+    fun textureFromPath(pathOrResource: String): ImGuiTexture? = ImGuiTexture.fromPath(pathOrResource)
 
     // ---- Controls ----
 
@@ -350,4 +398,316 @@ object Overlay {
     @JvmStatic
     fun popupModal(window: WindowScope, name: String, open: ImGuiState<Boolean>, flags: Int, content: Consumer<ModalScope>): Boolean =
         window.popupModal(name, open, WindowFlags(flags)) { content.accept(this) }
+
+    // ---- Dialogs ----
+
+    /** A modal asking [message] with OK and Cancel; shown while [open] is true. */
+    @JvmStatic
+    @JvmOverloads
+    fun confirmationDialog(
+        window: WindowScope,
+        title: String,
+        message: String,
+        open: ImGuiState<Boolean>,
+        onConfirm: Runnable = Runnable {},
+        onCancel: Runnable = Runnable {},
+    ): Boolean = window.confirmationDialog(title, message, open, { onConfirm.run() }, { onCancel.run() })
+
+    /** A modal with a text field bound to [text]; [onOk] gets the text when the user presses OK. */
+    @JvmStatic
+    @JvmOverloads
+    fun inputDialog(
+        window: WindowScope,
+        title: String,
+        label: String,
+        text: ImGuiState<String>,
+        open: ImGuiState<Boolean>,
+        onOk: Consumer<String> = Consumer {},
+        onCancel: Runnable = Runnable {},
+    ): Boolean = window.inputDialog(title, label, text, open, { onOk.accept(it) }, { onCancel.run() })
+
+    /** A modal with one button per entry of [choices]; [onChoice] gets the index and text picked. */
+    @JvmStatic
+    fun choiceDialog(
+        window: WindowScope,
+        title: String,
+        message: String,
+        open: ImGuiState<Boolean>,
+        choices: List<String>,
+        onChoice: BiConsumer<Int, String>,
+    ): Boolean = window.choiceDialog(title, message, open, choices) { index, choice -> onChoice.accept(index, choice) }
+
+    // ---- Menus ----
+
+    /** The menu bar of a window opened with WINDOW_MENU_BAR; add menus to its scope with [menu]. */
+    @JvmStatic
+    fun menuBar(window: WindowScope, content: Consumer<MenuScope>): Boolean = window.menuBar { content.accept(this) }
+
+    /** A menu whose entries [content] adds; true while it is open. */
+    @JvmStatic
+    @JvmOverloads
+    fun menu(window: WindowScope, label: String, enabled: Boolean = true, content: Consumer<MenuScope>): Boolean =
+        window.menu(label, enabled) { content.accept(this) }
+
+    /** A submenu of [menu]. */
+    @JvmStatic
+    fun menu(menu: MenuScope, label: String, content: Consumer<MenuScope>): Boolean = menu.menu(label) { content.accept(this) }
+
+    /** A submenu of a context menu. */
+    @JvmStatic
+    fun menu(menu: ContextMenuScope, label: String, content: Consumer<ContextMenuScope>): Boolean =
+        menu.menu(label) { content.accept(this) }
+
+    /** A menu entry showing [shortcut] beside it and a tick while [selected]. */
+    @JvmStatic
+    @JvmOverloads
+    fun menuItem(menu: MenuScope, label: String, shortcut: String = "", selected: Boolean = false, onClick: Runnable) =
+        menu.menuItem(label, shortcut, selected) { onClick.run() }
+
+    @JvmStatic
+    @JvmOverloads
+    fun menuItem(menu: ContextMenuScope, label: String, shortcut: String = "", selected: Boolean = false, onClick: Runnable) =
+        menu.menuItem(label, shortcut, selected) { onClick.run() }
+
+    @JvmStatic
+    @JvmOverloads
+    fun menuItem(window: WindowScope, label: String, shortcut: String = "", selected: Boolean = false, onClick: Runnable) =
+        window.menuItem(label, shortcut, selected) { onClick.run() }
+
+    /** A menu opened by clicking [mouseButton] on the item added just before this; true while open. */
+    @JvmStatic
+    @JvmOverloads
+    fun contextMenuItem(window: WindowScope, id: String? = null, mouseButton: Int = 1, content: Consumer<ContextMenuScope>): Boolean =
+        window.contextMenuItem(id, mouseButton) { content.accept(this) }
+
+    /** A menu opened by clicking [mouseButton] anywhere in the window; true while open. */
+    @JvmStatic
+    @JvmOverloads
+    fun contextMenuWindow(
+        window: WindowScope,
+        id: String? = null,
+        mouseButton: Int = 1,
+        alsoOverItems: Boolean = true,
+        content: Consumer<ContextMenuScope>,
+    ): Boolean = window.contextMenuWindow(id, mouseButton, alsoOverItems) { content.accept(this) }
+
+    /** A menu opened by clicking [mouseButton] where no window is; true while open. */
+    @JvmStatic
+    @JvmOverloads
+    fun contextMenuVoid(window: WindowScope, id: String? = null, mouseButton: Int = 1, content: Consumer<ContextMenuScope>): Boolean =
+        window.contextMenuVoid(id, mouseButton) { content.accept(this) }
+
+    /** Runs [action] each frame the context menu is actually open. */
+    @JvmStatic
+    fun whileShown(menu: ContextMenuScope, action: Runnable) = menu.whileShown { action.run() }
+
+    // ---- Tooltips ----
+
+    /** A tooltip at the mouse this frame, whatever is hovered. */
+    @JvmStatic
+    fun tooltip(window: WindowScope, text: String) = window.tooltip(text)
+
+    @JvmStatic
+    fun setTooltip(window: WindowScope, text: String) = window.setTooltip(text)
+
+    // ---- More controls ----
+
+    /** An RGB colour editor bound to [r], [g] and [b] (0..1), with COLOR_ [flags] ORed together. */
+    @JvmStatic
+    @JvmOverloads
+    fun colorEdit3(scope: LayoutScope, label: String, r: ImGuiState<Float>, g: ImGuiState<Float>, b: ImGuiState<Float>, flags: Int = 0) =
+        scope.colorEdit3(label, r, g, b, flags)
+
+    @JvmStatic
+    @JvmOverloads
+    fun colorEdit4(
+        scope: LayoutScope,
+        label: String,
+        r: ImGuiState<Float>,
+        g: ImGuiState<Float>,
+        b: ImGuiState<Float>,
+        a: ImGuiState<Float>,
+        flags: Int = 0,
+    ) = scope.colorEdit4(label, r, g, b, a, flags)
+
+    /** A full colour picker bound to [r], [g], [b] and [a] (0..1). */
+    @JvmStatic
+    @JvmOverloads
+    fun colorPicker4(
+        scope: LayoutScope,
+        label: String,
+        r: ImGuiState<Float>,
+        g: ImGuiState<Float>,
+        b: ImGuiState<Float>,
+        a: ImGuiState<Float>,
+        flags: Int = 0,
+    ) = scope.colorPicker4(label, r, g, b, a, flags)
+
+    /** A number the user drags; [min] equal to [max] leaves it unbounded. SLIDER_ [flags] ORed together. */
+    @JvmStatic
+    @JvmOverloads
+    fun dragFloat(
+        scope: LayoutScope,
+        label: String,
+        state: ImGuiState<Float>,
+        speed: Float = 1f,
+        min: Float = 0f,
+        max: Float = 0f,
+        format: String = "%.3f",
+        flags: Int = 0,
+    ) = scope.dragFloat(label, state, speed, min, max, format, flags)
+
+    @JvmStatic
+    @JvmOverloads
+    fun dragInt(
+        scope: LayoutScope,
+        label: String,
+        state: ImGuiState<Int>,
+        speed: Float = 1f,
+        min: Int = 0,
+        max: Int = 0,
+        format: String = "%d",
+        flags: Int = 0,
+    ) = scope.dragInt(label, state, speed, min, max, format, flags)
+
+    /** A slider with two handles, bound to [low] and [high], between [rangeMin] and [rangeMax]. */
+    @JvmStatic
+    @JvmOverloads
+    fun rangeSliderFloat(
+        window: WindowScope,
+        label: String,
+        low: ImGuiState<Float>,
+        high: ImGuiState<Float>,
+        rangeMin: Float,
+        rangeMax: Float,
+        format: String = "%.3f",
+        flags: Int = 0,
+    ): Boolean = window.rangeSliderFloat(label, low, high, rangeMin, rangeMax, format, flags)
+
+    @JvmStatic
+    @JvmOverloads
+    fun rangeSliderInt(
+        window: WindowScope,
+        label: String,
+        low: ImGuiState<Int>,
+        high: ImGuiState<Int>,
+        rangeMin: Int,
+        rangeMax: Int,
+        format: String = "%d",
+        flags: Int = 0,
+    ): Boolean = window.rangeSliderInt(label, low, high, rangeMin, rangeMax, format, flags)
+
+    /** A button drawn as an arrow pointing [dir] (DIR_), showing [fallbackLabel] if the arrow cannot be drawn. */
+    @JvmStatic
+    fun arrowButton(scope: LayoutScope, id: String, dir: Int, fallbackLabel: String, onClick: Runnable) =
+        scope.arrowButton(id, dir, fallbackLabel) { onClick.run() }
+
+    /** A framed button showing [texture] at [iconSize], one standard frame tall. */
+    @JvmStatic
+    @JvmOverloads
+    fun iconButton(
+        scope: LayoutScope,
+        id: String,
+        texture: ImGuiTexture,
+        iconSize: Float,
+        buttonWidth: Float = iconSize + 8f,
+        tintColor: Int = ImGuiColors.WHITE,
+        onClick: Runnable,
+    ) = scope.iconButton(id, texture, iconSize, buttonWidth, tintColor) { onClick.run() }
+
+    /** A button showing the part of [texture] between ([uv0X], [uv0Y]) and ([uv1X], [uv1Y]). */
+    @JvmStatic
+    @JvmOverloads
+    fun imageButton(
+        scope: LayoutScope,
+        texture: ImGuiTexture,
+        width: Float,
+        height: Float,
+        uv0X: Float = 0f,
+        uv0Y: Float = 0f,
+        uv1X: Float = 1f,
+        uv1Y: Float = 1f,
+        framePadding: Int = -1,
+        bgColor: Int = 0,
+        tintColor: Int = -1,
+        onClick: Runnable,
+    ) = scope.imageButton(texture, width, height, uv0X, uv0Y, uv1X, uv1Y, framePadding, bgColor, tintColor) { onClick.run() }
+
+    /** Checkboxes on a grid of [columns] columns, one per label and state of [items], in order. */
+    @JvmStatic
+    @JvmOverloads
+    fun checkboxGrid(scope: LayoutScope, id: String, items: List<Map.Entry<String, ImGuiState<Boolean>>>, columns: Int = 2) =
+        scope.checkboxGrid(id, items.map { it.key to it.value }, columns)
+
+    /** A list box of [items] where the user can pick several; the picked indices live in [selected]. */
+    @JvmStatic
+    @JvmOverloads
+    fun multiSelectListBox(
+        window: WindowScope,
+        label: String,
+        items: List<String>,
+        selected: ImGuiState<Set<Int>>,
+        width: Float = 0f,
+        height: Float = 0f,
+    ): Boolean = window.multiSelectListBox(label, items, selected, width, height)
+
+    // ---- More layout ----
+
+    /** Indents what follows by [width], or the style's indent when 0. */
+    @JvmStatic
+    @JvmOverloads
+    fun indent(scope: LayoutScope, width: Float = 0f) = scope.indent(width)
+
+    @JvmStatic
+    @JvmOverloads
+    fun unindent(scope: LayoutScope, width: Float = 0f) = scope.unindent(width)
+
+    /** Splits what follows into [count] legacy columns; move between them with [nextColumn]. */
+    @JvmStatic
+    @JvmOverloads
+    fun columns(scope: LayoutScope, count: Int = 1, id: String? = null, border: Boolean = true) = scope.columns(count, id, border)
+
+    @JvmStatic
+    fun nextColumn(scope: LayoutScope) = scope.nextColumn()
+
+    /** The next cell of a [table] row. */
+    @JvmStatic
+    fun nextColumn(table: TableScope) = table.nextColumn()
+
+    @JvmStatic
+    fun setColumnWidth(scope: LayoutScope, columnIndex: Int, width: Float) = scope.setColumnWidth(columnIndex, width)
+
+    /** Makes controls [width] pixels wide until [popItemWidth]. */
+    @JvmStatic
+    fun pushItemWidth(scope: LayoutScope, width: Float) = scope.pushItemWidth(width)
+
+    @JvmStatic
+    fun popItemWidth(scope: LayoutScope) = scope.popItemWidth()
+
+    /** Makes only the next control [width] pixels wide; negative leaves that much room on the right. */
+    @JvmStatic
+    fun setNextItemWidth(scope: LayoutScope, width: Float) = scope.setNextItemWidth(width)
+
+    /** [content] drawn with the single-value style variable [styleVar] set to [value]. */
+    @JvmStatic
+    fun styleVar(scope: LayoutScope, styleVar: ImGuiStyleVar, value: Float, content: Consumer<ChildScope>) =
+        scope.styleVar(styleVar, value) { content.accept(this) }
+
+    /** [content] drawn with the two-value style variable [styleVar] set to ([x], [y]). */
+    @JvmStatic
+    fun styleVar(scope: LayoutScope, styleVar: ImGuiStyleVar, x: Float, y: Float, content: Consumer<ChildScope>) =
+        scope.styleVar(styleVar, x, y) { content.accept(this) }
+
+    /** Lowers the next text to line up with the controls beside it. */
+    @JvmStatic
+    fun alignTextToFramePadding(scope: LayoutScope) = scope.alignTextToFramePadding()
+
+    /** Whether the mouse was over the item added just before this, as of the previous frame. */
+    @JvmStatic
+    fun isItemHovered(scope: LayoutScope): Boolean = scope.isItemHovered()
+
+    /** Whether the item added just before this was clicked with [mouseButton] (MOUSE_), as of the previous frame. */
+    @JvmStatic
+    @JvmOverloads
+    fun isItemClicked(scope: LayoutScope, mouseButton: Int = 0): Boolean = scope.isItemClicked(mouseButton)
 }

@@ -10,6 +10,7 @@ fun intState(initialValue: Int): ImGuiState<Int> = IntState(initialValue)
 fun floatState(initialValue: Float): ImGuiState<Float> = FloatState(initialValue)
 @JvmOverloads
 fun stringState(initialValue: String, maxLength: Int = 256): ImGuiState<String> = StringState(initialValue, maxLength)
+fun indexSetState(initialValue: Set<Int>): ImGuiState<Set<Int>> = IndexSetState(initialValue)
 
 data class FloatRange(val min: ImGuiState<Float>, val max: ImGuiState<Float>) : AutoCloseable {
     override fun close() {
@@ -121,6 +122,18 @@ class FloatState(initialValue: Float) : ImGuiState<Float>() {
         value = 0.0f
         super.close()
     }
+}
+
+class IndexSetState(initialValue: Set<Int>) : ImGuiState<Set<Int>>() {
+    override var value: Set<Int> = initialValue.toSet()
+        get() {
+            checkNotClosed()
+            return field
+        }
+        set(newValue) {
+            checkNotClosed()
+            field = newValue.toSet()
+        }
 }
 
 class StringState(initialValue: String, private val maxLength: Int) : ImGuiState<String>() {
