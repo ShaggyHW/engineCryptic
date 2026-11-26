@@ -61,9 +61,11 @@ object ServerTick {
 }
 
 /** Waits for the next server tick to end. Returns false if none arrived within [timeoutMillis]. */
+@JvmSynthetic
 suspend fun Script.awaitServerTick(timeoutMillis: Long = 1800): Boolean = awaitServerTicks(1, timeoutMillis)
 
 /** Waits for [ticks] more server ticks to end. Returns false if they did not all arrive within [timeoutMillis]. */
+@JvmSynthetic
 suspend fun Script.awaitServerTicks(ticks: Int, timeoutMillis: Long = ticks * 600L + 1200L): Boolean {
     val target = ServerTick.count + ticks
     delayUntil(timeoutMillis, pollingDelayMillis = 10) { ServerTick.count >= target }

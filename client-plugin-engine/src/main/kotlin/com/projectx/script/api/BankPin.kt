@@ -37,6 +37,7 @@ object BankPin {
  * Enters [pin] on the bank PIN screen, a digit at a time, waiting for each one to register before the next. Returns
  * true once the screen has closed, or straight away when it is not open. [pin] must be four digits.
  */
+@JvmSynthetic
 suspend fun Script.enterBankPin(pin: String): Boolean {
     if (!BankPin.isOpen) return true
     require(pin.length == 4 && pin.all { it.isDigit() }) { "A bank PIN is four digits" }

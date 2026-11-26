@@ -217,6 +217,7 @@ val getDivineCharges
 /**
  * Ground item utilities
  */
+@JvmSynthetic
 suspend fun Script.findAndPickupItems(vararg items: String): Boolean {
     while (true) {
         if (inventory.freeSlots <= 0)
@@ -656,6 +657,7 @@ fun diveToTile(x: Int, y: Int, plane: Int) = dive(Tile.of(x, y, plane))
  * destination on another floor is reachable, and teleporting to an unlocked lodestone first when that is quicker
  * and [useLodestones] allows it; see [WebWalker]. Java scripts use `Wait.webWalk`.
  */
+@JvmSynthetic
 suspend fun Script.webWalk(
     destination: Tile,
     arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE,
@@ -663,6 +665,7 @@ suspend fun Script.webWalk(
 ): WebWalkResult = WebWalker.walk(this, destination, arriveDistance, useLodestones)
 
 /** [webWalk] to ([x], [y]) on [plane], for callers that have coordinates rather than a [Tile]. */
+@JvmSynthetic
 suspend fun Script.webWalkTo(
     x: Int,
     y: Int,
@@ -675,12 +678,14 @@ suspend fun Script.webWalkTo(
  * Plans a route to [destination] without walking it, so a script can check a place is reachable, count the tiles
  * or read the staircases and shortcuts the route would take. Suspends while the search runs off the game thread.
  */
+@JvmSynthetic
 suspend fun Script.findWebPath(
     destination: Tile,
     arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE,
 ): WebWalkResult = WebWalker.findPath(this, localPlayer.tile, destination, arriveDistance)
 
 /** True when a route to [destination] exists from where the player is standing. */
+@JvmSynthetic
 suspend fun Script.canWebWalkTo(
     destination: Tile,
     arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE,
@@ -690,14 +695,17 @@ suspend fun Script.canWebWalkTo(
  * [webWalk] until the player stands on any tile of [area], taking whichever tile is cheapest to reach. Java scripts
  * use `Wait.webWalkToArea`.
  */
+@JvmSynthetic
 suspend fun Script.webWalkToArea(area: Area, useLodestones: Boolean = true): WebWalkResult =
     WebWalker.walk(this, WalkGoal.of(area), useLodestones)
 
 /** [webWalkToArea] for the rectangle from ([minX], [minY]) to ([maxX], [maxY]) on [plane], inclusive. */
+@JvmSynthetic
 suspend fun Script.webWalkToArea(minX: Int, minY: Int, maxX: Int, maxY: Int, plane: Int, useLodestones: Boolean = true): WebWalkResult =
     WebWalker.walk(this, WalkGoal.rectangle(minX, minY, maxX, maxY, plane), useLodestones)
 
 /** [webWalkToArea] for any of [tiles], which may lie on different planes. */
+@JvmSynthetic
 suspend fun Script.webWalkToTiles(tiles: Collection<Tile>, useLodestones: Boolean = true): WebWalkResult =
     WebWalker.walk(this, WalkGoal.tiles(tiles), useLodestones)
 
@@ -722,24 +730,29 @@ fun objectInteractTiles(obj: SceneObject): List<Tile> {
  * Web-walks to a tile [obj] can be used from ([objectInteractTiles]), opening doors on the way, so an interact that
  * follows reaches it even when it stands in a closed room or just behind a wall. Java: `Wait.webWalkToObject`.
  */
+@JvmSynthetic
 suspend fun Script.webWalkToObject(obj: SceneObject, useLodestones: Boolean = true): WebWalkResult {
     val tiles = objectInteractTiles(obj)
     return if (tiles.isEmpty()) webWalk(obj.tile, 1, useLodestones) else webWalkToTiles(tiles, useLodestones)
 }
 
 /** Plans the route [webWalkToArea] would walk, without walking it. */
+@JvmSynthetic
 suspend fun Script.findWebPathToArea(area: Area): WebWalkResult =
     WebWalker.findPath(this, localPlayer.tile, WalkGoal.of(area))
 
 /** [findWebPathToArea] for the rectangle from ([minX], [minY]) to ([maxX], [maxY]) on [plane], inclusive. */
+@JvmSynthetic
 suspend fun Script.findWebPathToArea(minX: Int, minY: Int, maxX: Int, maxY: Int, plane: Int): WebWalkResult =
     WebWalker.findPath(this, localPlayer.tile, WalkGoal.rectangle(minX, minY, maxX, maxY, plane))
 
 /** Plans the route [webWalkToTiles] would walk, without walking it. */
+@JvmSynthetic
 suspend fun Script.findWebPathToTiles(tiles: Collection<Tile>): WebWalkResult =
     WebWalker.findPath(this, localPlayer.tile, WalkGoal.tiles(tiles))
 
 /** True when a route to any tile of [area] exists from where the player is standing. */
+@JvmSynthetic
 suspend fun Script.canWebWalkToArea(area: Area): Boolean = findWebPathToArea(area).isSuccess
 
 /**
@@ -874,6 +887,7 @@ fun isPlayerBusy() = localPlayer.isMoving || localPlayer.isAnimating
 private val porters =
     intArrayOf(29275, 29276, 29277, 29278, 29279, 29280, 29281, 29282, 29283, 29284, 29285, 29286, 51490, 51491)
 
+@JvmSynthetic
 suspend fun Script.checkPorter() {
     val porter = inventory.firstOrNull { porters.contains(it.id) }
     if (!equipment.hasItem(*porters) && porter != null)
@@ -881,10 +895,12 @@ suspend fun Script.checkPorter() {
             delay(3500, 3000)
 }
 
+@JvmSynthetic
 suspend fun Script.waitUntilNotMoving(timeout: Long = 30000) {
     waitThenDelayUntil(1200, timeout) { !localPlayer.isMoving }
 }
 
+@JvmSynthetic
 suspend fun Script.waitUntilNotAniMoving(timeout: Long = 30000) {
     waitThenDelayUntil(1200, timeout) { !localPlayer.isAniMoving }
 }
@@ -966,6 +982,7 @@ fun isDialogOpen(): Boolean {
 }
 
 
+@JvmSynthetic
 suspend fun Script.clickKey(key: Int) {
     ActionInput.keyDown(key)
     delay(22, 15)
@@ -978,7 +995,9 @@ fun keyDown(key: Key) = ActionInput.keyDown(key.native)
 fun keyUp(key: Char) = Key.forChar(key)?.let { keyUp(it) }
 fun keyUp(key: Key) = ActionInput.keyUp(key.native)
 
+@JvmSynthetic
 suspend fun Script.clickKey(key: Char) = Key.forChar(key)?.let { clickKey(it) }
+@JvmSynthetic
 suspend fun Script.clickKey(key: Key) = clickKey(key.native)
 
 /**
@@ -1105,6 +1124,7 @@ val bankTabSelected: Boolean
  * Switches the open bank to "View all" when one tab is selected and waits for the slots to refill: with a tab selected
  * only that tab's items have a slot to click. True when every item has a slot (or the bank is closed).
  */
+@JvmSynthetic
 suspend fun Script.viewAllBankTabs(): Boolean {
     if (!bankTabSelected) return true
     println("[Bank] a bank tab is selected - switching to View all")
@@ -1118,37 +1138,45 @@ suspend fun Script.viewAllBankTabs(): Boolean {
  * other positive amount goes through Withdraw-X and the amount prompt. False when the item is absent or the prompt
  * never opened.
  */
+@JvmSynthetic
 suspend fun Script.withdrawBankAmount(itemId: Int, amount: Int): Boolean {
     viewAllBankTabs()
     return transferAmount("withdraw", itemId, amount) { doBankItemsAction(itemId, it) }
 }
 
+@JvmSynthetic
 suspend fun Script.withdrawBankAmount(name: String, amount: Int): Boolean {
     viewAllBankTabs()
     return transferAmount("withdraw", name, amount) { doBankItemsAction(name, it) }
 }
 
+@JvmSynthetic
 suspend fun Script.withdrawBankAmount(name: Regex, amount: Int): Boolean {
     viewAllBankTabs()
     return transferAmount("withdraw", name, amount) { doBankItemsAction(name, it) }
 }
 
 /** [withdrawBankAmount]'s deposit side, from the bank's backpack view. */
+@JvmSynthetic
 suspend fun Script.depositBankAmount(itemId: Int, amount: Int): Boolean =
     transferAmount("deposit", itemId, amount) { doBankInventoryAction(itemId, it) }
 
+@JvmSynthetic
 suspend fun Script.depositBankAmount(name: String, amount: Int): Boolean =
     transferAmount("deposit", name, amount) { doBankInventoryAction(name, it) }
 
+@JvmSynthetic
 suspend fun Script.depositBankAmount(name: Regex, amount: Int): Boolean =
     transferAmount("deposit", name, amount) { doBankInventoryAction(name, it) }
 
 /** [equipFromBank] after [viewAllBankTabs], so an item in another tab is found. */
+@JvmSynthetic
 suspend fun Script.equipBankItem(itemId: Int): Boolean {
     viewAllBankTabs()
     return equipFromBank(itemId)
 }
 
+@JvmSynthetic
 suspend fun Script.equipBankItem(name: String): Boolean {
     viewAllBankTabs()
     return equipFromBank(name)
@@ -1169,6 +1197,7 @@ val bankPresetPage: Int
  * Loads bank preset [num] (1-[MAX_BANK_PRESET]) at the open bank: the Presets tab, turned to the preset's page, then
  * its button's Load. True when the click went in; the bank may close with the load.
  */
+@JvmSynthetic
 suspend fun Script.loadBankPresetPaged(num: Int): Boolean {
     val button = presetButton(num)
     return button > 0 && doBankAction(Bank.SHARE_QUICK_COMPONENT_ID, button, PRESET_LOAD_OP)
@@ -1178,6 +1207,7 @@ suspend fun Script.loadBankPresetPaged(num: Int): Boolean {
  * Saves the backpack and worn gear over bank preset [num] as [loadBankPresetPaged] finds it; false for a locked slot.
  * The bank stays on its Presets tab: [selectBankTransferTab] before item clicks.
  */
+@JvmSynthetic
 suspend fun Script.saveBankPreset(num: Int): Boolean {
     val button = presetButton(num)
     return button > 0 && doBankAction(Bank.SHARE_QUICK_COMPONENT_ID, button, PRESET_SAVE_OP)
@@ -1295,6 +1325,7 @@ enum class Prayer(val varbit: Int, val button: IFSlot) {
     fun click() = button.click(1)
 }
 
+@JvmSynthetic
 suspend fun Script.togglePrayer(prayer: Prayer, shouldBeActive: Boolean) {
     if (prayer.active != shouldBeActive) {
         prayer.click()
@@ -1304,6 +1335,7 @@ suspend fun Script.togglePrayer(prayer: Prayer, shouldBeActive: Boolean) {
 
 val quickPrayersActive get() = varps.getVarBit(5941) == 1
 
+@JvmSynthetic
 suspend fun Script.toggleQuickPrayers(shouldBeActive: Boolean) {
     if (quickPrayersActive != shouldBeActive) {
         if (IFSlot(1430, 16).click())
@@ -1318,6 +1350,7 @@ val channelingAbility get() = varps.getVar(3533) > 0
 
 fun castAbility(ability: Ability): Boolean = actionbarAbilities[ability.type]?.click(1) == true
 
+@JvmSynthetic
 suspend fun Script.castAndWaitForCd(ability: Ability, timeout: Long = 6200): Boolean {
     return if (ability.offCdIgnoreGCD && castAbility(ability)) {
         delayUntil(timeout) { !ability.offCdIgnoreGCD }
@@ -1327,6 +1360,7 @@ suspend fun Script.castAndWaitForCd(ability: Ability, timeout: Long = 6200): Boo
     }
 }
 
+@JvmSynthetic
 suspend fun Script.castWithAdren(
     ability: Ability,
     required: Int,
@@ -1341,6 +1375,7 @@ suspend fun Script.castWithAdren(
     }
 }
 
+@JvmSynthetic
 suspend fun Script.castIf(
     condition: Boolean,
     ability: Ability,
@@ -1355,6 +1390,7 @@ suspend fun Script.castIf(
     }
 }
 
+@JvmSynthetic
 suspend fun Script.smartCast(
     ability: Ability,
     resourceRequired: Int = 0,
@@ -1374,6 +1410,7 @@ suspend fun Script.smartCast(
     }
 }
 
+@JvmSynthetic
 suspend fun Script.castWithEffectStacks(
     ability: Ability,
     effect: Effect,
@@ -1787,6 +1824,7 @@ fun isPlayerLoading() = !isLoggedIn()
 /**
  * Handles the world hopping logic for Project X Scripts.
  */
+@JvmSynthetic
 suspend fun Script.randomizedWorldHop(membersOnly: Boolean = true) {
     val currentWorld = getCurrentWorld()
     val pool = if (membersOnly) MEMBER_WORLDS_NON_PK_OR_REQUIREMENTS else FREE_WORLDS_NON_PK_OR_REQUIREMENTS
@@ -1798,6 +1836,7 @@ suspend fun Script.randomizedWorldHop(membersOnly: Boolean = true) {
  * number. False when the switcher never opened, so a caller can try again rather than assume it
  * moved. Takes several ticks: the wait ends when the client is logged in on the other side.
  */
+@JvmSynthetic
 suspend fun Script.hopToWorld(world: Int): Boolean {
     println("[WORLD HOPPER] Option menu opened (CURRENT WORLD IS ${getCurrentWorld()})")
     IFSlot(1477, 97, 1).click(1)
@@ -1828,6 +1867,7 @@ var worldToPopMap = mutableMapOf<Int, Int>()
 // from selection while within the configured cooldown window.
 private val worldUsageHistory = mutableMapOf<Int, Long>()
 
+@JvmSynthetic
 suspend fun Script.checkWorldPop(cooldownMinutes: Long = 10): Boolean {
 
     val nearbyNonWhitelistedPlayers = players.filter {
@@ -1845,6 +1885,7 @@ suspend fun Script.checkWorldPop(cooldownMinutes: Long = 10): Boolean {
     return false
 }
 
+@JvmSynthetic
 suspend fun Script.randomizedWorldHopQuick(
     membersOnly: Boolean = true,
     currentWorld: Int,
@@ -1922,6 +1963,7 @@ enum class GroupTeleports(val ifSlot: IFSlot, val groupName: String? = null) {
 
 }
 
+@JvmSynthetic
 suspend fun Script.teleportWithGroupSystem(boss: GroupTeleports) {
     val groupName_Text = interfaces[1519]?.get(3)?.slotChildren[0]?.text
     if (groupName_Text == null) {
@@ -2031,6 +2073,7 @@ fun openLodestoneMap(): Boolean = HOME_TELEPORT_BUTTONS.any { (interfaceId, comp
  * @example
  * useLodestone(Lodestone.CITY_OF_UM)
  */
+@JvmSynthetic
 suspend fun Script.useLodestone(lodestone: Lodestone) {
     if (isLodestoneUiOpen) {
         println("Clicking on lodestone: ${lodestone.name}")

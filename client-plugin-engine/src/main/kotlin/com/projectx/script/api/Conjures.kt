@@ -15,6 +15,7 @@ val conjuresUp: Boolean
  * Conjures the undead army and waits for all three to stand, so the caller can hold its state until they are
  * ready. Returns true once they are up, and false when the ability could not be used.
  */
+@JvmSynthetic
 suspend fun Script.summonConjures(): Boolean {
     if (conjuresUp) return true
     if (!abilityUsable(CONJURE_ARMY) || !castAbility(CONJURE_ARMY)) return false

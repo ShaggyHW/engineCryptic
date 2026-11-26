@@ -54,6 +54,10 @@ abstract class Entity(raw: MemorySegment) {
         get() = tile.x
     open val tileY: Int
         get() = tile.y
+    val localTileX: Int
+        get() = localTile.x
+    val localTileY: Int
+        get() = localTile.y
 
     /** Centre of the entity's footprint in tile coordinates; a size-3 NPC centres a tile in from its origin. */
     open val centerX: Double

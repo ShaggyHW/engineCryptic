@@ -23,6 +23,8 @@ private const val UNPLACED_HEIGHT = -1.0f
 class HintTrailPoint(val fineX: Float, val fineY: Float, val height: Float) {
     val placed get() = height != UNPLACED_HEIGHT
     fun tile(plane: Int) = Tile(fineX.toInt() / TILE_FINE, fineY.toInt() / TILE_FINE, plane)
+    val tileX: Int get() = fineX.toInt() / TILE_FINE
+    val tileY: Int get() = fineY.toInt() / TILE_FINE
 }
 
 /**
@@ -59,6 +61,10 @@ class HintTrail(raw: MemorySegment) : Entity(raw) {
             val last = points.lastOrNull() ?: return targetEntity?.let { runCatching { it.tile }.getOrNull() }
             return runCatching { last.tile(plane) }.getOrNull()
         }
+
+    /** [destination] for Java, which cannot call the property's getter. */
+    @JvmName("getDestination")
+    fun getDestination(): Tile? = destination
 
     val targetEntity: Entity?
         get() = runCatching {

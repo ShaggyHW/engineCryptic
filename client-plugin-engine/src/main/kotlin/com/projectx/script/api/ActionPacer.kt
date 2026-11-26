@@ -78,6 +78,7 @@ class ActionPacer(
     }
 
     /** Waits for this action's slot. */
+    @JvmSynthetic
     suspend fun await() {
         val wait = reserve(System.nanoTime())
         if (wait > 0) delay(TimeUnit.NANOSECONDS.toMillis(wait).coerceAtLeast(1))

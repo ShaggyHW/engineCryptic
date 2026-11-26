@@ -71,6 +71,7 @@ dependencies {
     runtimeOnly(libs.skiko.runtime.linux.x64)
 
     testImplementation(kotlin("test"))
+    testImplementation(kotlin("reflect"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

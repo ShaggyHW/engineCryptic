@@ -170,8 +170,37 @@ def signatures(jar: Path, classes: list[str]) -> dict[str, set[str]]:
                 continue
             line = line.rstrip(";").strip()
             if current and not NOISE.search(line):
-                found[current].add(line)
+                found[current].add(erased(line))
     return found
+
+
+def erased(sig: str) -> str:
+    """The signature without type arguments, which is what a compiled script links against.
+
+    Kotlin writes no generic signature for a @JvmSynthetic member, so hiding a helper from Java would otherwise read
+    as every one of its signatures changing.
+    """
+    while True:
+        stripped = re.sub(r"<[^<>]*>", "", sig)
+        if stripped == sig:
+            return re.sub(r"\s+", " ", sig)
+        sig = stripped
+
+
+def same_erasure(old_sig: str, new_sig: str) -> bool:
+    """Whether two signatures link the same, where the old names a type variable and the new its bound, as javap
+    prints a member that lost its generic signature."""
+    def parts(sig: str) -> list[str]:
+        head = sig.split("(")[0].split()
+        return [head[-2] if len(head) > 1 else ""] + [p.strip() for p in split_params(member_params(sig))]
+
+    def type_variable(t: str) -> bool:
+        return bool(re.fullmatch(r"[A-Z]\w*(\[\])*", t))
+
+    old_parts, new_parts = parts(old_sig), parts(new_sig)
+    return len(old_parts) == len(new_parts) and all(
+        o == n or (type_variable(o) and "." in n) for o, n in zip(old_parts, new_parts)
+    )
 
 
 def member_name(sig: str) -> str:
@@ -273,7 +302,8 @@ def describe(old: dict[str, set[str]], new: dict[str, set[str]]) -> dict[str, di
         for g in sorted(gone - matched_gone):
             for f in sorted(fresh - matched_fresh):
                 if member_name(g) == member_name(f):
-                    put(a, "changed", f"{display(cls, g, old[cls])} takes `({simple_params(f)})`")
+                    if not same_erasure(g, f):
+                        put(a, "changed", f"{display(cls, g, old[cls])} takes `({simple_params(f)})`")
                     matched_gone.add(g); matched_fresh.add(f)
                     break
 

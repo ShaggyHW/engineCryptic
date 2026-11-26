@@ -11,6 +11,10 @@ import kotlin.math.max
 /** Walking distances from one start tile, as the collision stood when it was searched. */
 class WalkField internal constructor(private val window: SearchWindow, val start: Tile, val maxDepth: Int, private val dist: IntArray) {
 
+    val startX: Int get() = start.x
+    val startY: Int get() = start.y
+    val startPlane: Int get() = start.plane
+
     /** Steps from the start; [WalkMap.UNREACHABLE] when no walk within [maxDepth] gets there, [WalkMap.UNKNOWN] off the window. */
     fun distanceTo(x: Int, y: Int, plane: Int): Int {
         if (plane != window.plane || !window.contains(x, y)) return WalkMap.UNKNOWN

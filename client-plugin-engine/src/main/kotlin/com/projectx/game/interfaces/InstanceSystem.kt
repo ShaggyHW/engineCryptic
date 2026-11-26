@@ -110,6 +110,7 @@ class InstanceSystem {
         fun rejoinInstance() = rejoinInstanceSlot.click(1)
 
 
+        @JvmSynthetic
         suspend fun Script.joinInstance() {
             joinInstanceSlot.click(1)
             delay(600, 100)
@@ -190,6 +191,7 @@ class InstanceSystem {
     }
 }
 
+@JvmSynthetic
 suspend fun Script.confirmInstanceDialogue(): Boolean {
     if (dialogueOptionVisible("Yes")) {
         continueDialogueContaining("Yes")
@@ -204,6 +206,7 @@ suspend fun Script.confirmInstanceDialogue(): Boolean {
     return false
 }
 
+@JvmSynthetic
 suspend fun Script.startOrRejoinInstance(): Boolean {
     if (confirmInstanceDialogue()) return true
     if (!InstanceSystem.isOpen()) return false

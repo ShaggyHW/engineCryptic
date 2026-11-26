@@ -14,6 +14,7 @@ const val COMBO_GAP_MAX_MS = 35L
 
 /** Dives to [tile] with [ability], waiting [minDelayMs]..[maxDelayMs] between selecting it and clicking the tile. */
 @JvmOverloads
+@JvmSynthetic
 suspend fun Script.dive(tile: Tile, ability: Ability, minDelayMs: Long = 50, maxDelayMs: Long = 300): Boolean {
     if (!ability.offCdIgnoreGCD) return false
     val slot = actionbarAbilities[ability.type] ?: return false
@@ -27,6 +28,7 @@ suspend fun Script.dive(tile: Tile, ability: Ability, minDelayMs: Long = 50, max
  * click and the surge follow at once. Sent in one tick, the server dives, then surges along the dive's line. Returns
  * the hops sent: 0 none, 1 the dive only, 2 both.
  */
+@JvmSynthetic
 suspend fun Script.diveThenSurge(tile: Tile, dive: Ability): Int {
     val diveSlot = actionbarAbilities[dive.type] ?: return 0
     if (!dive.offCdIgnoreGCD) return 0
@@ -44,6 +46,7 @@ suspend fun Script.diveThenSurge(tile: Tile, dive: Ability): Int {
  * and tile click follow at once. Sent in one tick, the server surges, then dives from the surge's landing. Returns
  * the hops sent: 0 none, 1 the surge only, 2 both.
  */
+@JvmSynthetic
 suspend fun Script.surgeThenDive(tile: Tile, dive: Ability): Int {
     val surgeSlot = actionbarAbilities[Ability.SURGE.type] ?: return 0
     if (!Ability.SURGE.offCdIgnoreGCD) return 0

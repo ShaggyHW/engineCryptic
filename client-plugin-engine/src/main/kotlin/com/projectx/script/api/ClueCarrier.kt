@@ -24,6 +24,7 @@ val clueCarrier: Inventory
  * Takes one [itemName] (such as "Sealed clue scroll (hard)") out of the Charos' clue carrier in the backpack, opening
  * and closing its window as needed. Returns true once one more is in the backpack. Java: `Wait.takeFromClueCarrier`.
  */
+@JvmSynthetic
 suspend fun Script.takeFromClueCarrier(itemName: String): Boolean {
     val before = inventory.count(itemName)
     if (!interfaces.isOpen(carrierWindow)) {

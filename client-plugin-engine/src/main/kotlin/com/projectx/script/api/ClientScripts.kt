@@ -36,6 +36,7 @@ fun runClientScript(scriptId: Int, vararg args: Any) = CS2Executor.executeScript
  * `long` or `string`. Null when clientscripts can't run yet or the run doesn't finish within
  * [CLIENT_SCRIPT_TIMEOUT_MS]. Suspends rather than blocking, so it is safe to call from any script.
  */
+@JvmSynthetic
 suspend fun runClientScriptForResult(scriptId: Int, vararg args: Any): Cs2Result? {
     if (GameThread.isCurrent()) return CS2Executor.executeScriptForResultSync(scriptId, args.toList())
     val future = CS2Executor.queueForResult(scriptId, args.toList()) ?: return null

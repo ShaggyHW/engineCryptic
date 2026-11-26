@@ -28,9 +28,11 @@ class HintIcon(
     val fineX: Float,
     val fineY: Float,
     val height: Float,
-    plane: Int,
+    val plane: Int,
 ) {
     val tile: Tile = Tile(fineX.toInt() / TILE_FINE, fineY.toInt() / TILE_FINE, plane)
+    val tileX: Int get() = tile.x
+    val tileY: Int get() = tile.y
 
     val isCoordinate get() = kind == COORDINATE_HINT
     val hasTarget get() = targetIndex != NO_TARGET

@@ -149,6 +149,7 @@ abstract class Script {
      * undone. Java scripts get the same through `shouldInterrupt`.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
+    @JvmSynthetic
     suspend fun <T> interruptWhen(
         condition: () -> Boolean,
         pollMillis: Int = INTERRUPT_POLL_MILLIS,
@@ -240,20 +241,25 @@ abstract class Script {
         }
     }
 
+    @JvmSynthetic
     suspend fun delayWhile(timeoutMillis: Long? = null, predicate: () -> Boolean) = waitForCondition(predicate, timeoutMillis, shouldWaitWhile = true)
 
+    @JvmSynthetic
     suspend fun waitThenDelayWhile(waitFor: Long, timeoutMillis: Long? = null, predicate: () -> Boolean) {
         delay(waitFor.toInt(), 1000)
         waitForCondition(predicate, timeoutMillis, shouldWaitWhile = true)
     }
 
+    @JvmSynthetic
     suspend fun delayUntil(timeoutMillis: Long? = null, pollingDelayMillis: Int = 100, predicate: () -> Boolean) = waitForCondition(predicate, timeoutMillis, pollingDelayMillis = pollingDelayMillis, shouldWaitWhile = false)
 
+    @JvmSynthetic
     suspend fun waitThenDelayUntil(waitFor: Long, timeoutMillis: Long? = null, pollingDelayMillis: Int = 100, predicate: () -> Boolean) {
         delay(waitFor.toInt(), 1000)
         waitForCondition(predicate, timeoutMillis, shouldWaitWhile = false, pollingDelayMillis = pollingDelayMillis)
     }
 
+    @JvmSynthetic
     suspend fun waitForEvent(timeoutMillis: Long = 15000, predicate: Predicate<Event>) {
         pendingEventPredicate = predicate
         pendingEventWaitCompleted = false
@@ -261,37 +267,44 @@ abstract class Script {
         pendingEventPredicate = null
     }
 
+    @JvmSynthetic
     suspend fun waitForXPDrop(skill: Skill? = null, timeoutMillis: Long = 15000) {
         waitForEvent(timeoutMillis) { event ->
             event is XPDrop && (skill == null || event.skill == skill)
         }
     }
 
+    @JvmSynthetic
     suspend fun waitForChatContaining(type: MessageType, text: String, timeoutMillis: Long = 15000) {
         waitForEvent(timeoutMillis) { event ->
             event is Chat && event.messageType == type && event.message.contains(text, ignoreCase = true)
         }
     }
 
+    @JvmSynthetic
     suspend fun delay(time: Int) {
         kotlinx.coroutines.delay(time.toLong())
     }
 
+    @JvmSynthetic
     suspend fun delay(mean: Int, variance: Int) {
         delay(gaussian(mean, variance))
     }
 
     /** A pause picked uniformly between [minMillis] and [maxMillis], inclusive. Java: `Wait.between`. */
+    @JvmSynthetic
     suspend fun delayBetween(minMillis: Int, maxMillis: Int) {
         delay(ThreadLocalRandom.current().nextInt(minMillis, maxMillis + 1))
     }
 
     /** [ticks] game ticks of 600 ms (fractions allowed), plus 0..[jitterMillis] ms picked uniformly. Java: `Wait.ticks`. */
+    @JvmSynthetic
     suspend fun delayTicks(ticks: Double, jitterMillis: Int = 0) {
         delayTicks(ticks, 0, jitterMillis)
     }
 
     /** [ticks] game ticks of 600 ms, plus [minJitterMillis]..[maxJitterMillis] ms picked uniformly. */
+    @JvmSynthetic
     suspend fun delayTicks(ticks: Double, minJitterMillis: Int, maxJitterMillis: Int) {
         delay((ticks * TICK_MILLIS).roundToInt() + ThreadLocalRandom.current().nextInt(minJitterMillis, maxJitterMillis + 1))
     }
@@ -300,6 +313,7 @@ abstract class Script {
      * Waits for the player to stop moving and animating: checked once a tick, finished once [idleChecks] checks in a
      * row see nothing going on (true), or after [maxTicks] ticks (false). Java: `Wait.untilIdle`.
      */
+    @JvmSynthetic
     suspend fun waitUntilIdle(maxTicks: Int, idleChecks: Int): Boolean = waitForStillness(maxTicks, idleChecks, true)
 
     /**
@@ -308,6 +322,7 @@ abstract class Script {
      * and then keep working at, such as a rock, where [waitUntilIdle] would wait out the whole activity. Java:
      * `Wait.untilStoppedMoving`.
      */
+    @JvmSynthetic
     suspend fun waitUntilStoppedMoving(maxTicks: Int, stillChecks: Int): Boolean = waitForStillness(maxTicks, stillChecks, false)
 
     private suspend fun waitForStillness(maxTicks: Int, checks: Int, countAnimation: Boolean): Boolean {
@@ -325,6 +340,7 @@ abstract class Script {
     fun resumeOthers(): Boolean = ScriptExecutor.resumeOthers(this)
     fun isPaused(): Boolean = ScriptExecutor.isPaused()
 
+    @JvmSynthetic
     suspend fun pauseOthersFor(durationMs: Long) {
         if (pauseOthers()) {
             try {

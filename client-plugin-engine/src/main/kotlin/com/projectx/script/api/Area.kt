@@ -75,6 +75,8 @@ sealed class Area {
         return getCoordinates().filter { it.plane == coordinate.plane }
     }
 
+    fun getCoordinatesInArea(plane: Int): List<Tile> = getCoordinates().filter { it.plane == plane }
+
     fun getCentroid(): Tile? {
         val coords = getCoordinates()
         if (coords.isEmpty()) return null
@@ -331,6 +333,12 @@ sealed class Area {
         fun getTopLeft(): Tile = Tile.of(bottomLeft.x, topRight.y, topRight.plane)
         fun getBottomLeft(): Tile = bottomLeft
         fun getTopRight(): Tile = topRight
+
+        val minX: Int get() = bottomLeft.x
+        val minY: Int get() = bottomLeft.y
+        val maxX: Int get() = topRight.x
+        val maxY: Int get() = topRight.y
+        val plane: Int get() = bottomLeft.plane
 
         override fun toString(): String {
             return "Bottom-Left: $bottomLeft | Top-Right: $topRight"

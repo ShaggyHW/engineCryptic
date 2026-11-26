@@ -3,6 +3,8 @@ package com.projectx.ui.backend.dsl
 import com.projectx.ui.backend.dsl.scopes.*
 import com.projectx.ui.backend.dsl.utils.ImGuiCol
 import com.projectx.ui.backend.flags.ImGuiCond
+import com.projectx.ui.backend.flags.InputTextFlags
+import com.projectx.ui.backend.flags.PopupFlags
 import com.projectx.ui.backend.flags.WindowFlags
 import com.projectx.ui.backend.native.ImGuiTexture
 import org.projectx.core.game.skill.Skill
@@ -49,6 +51,19 @@ object Overlay {
     @JvmField val COND_FIRST_USE_EVER = ImGuiCond.FirstUseEver.value
     @JvmField val COND_APPEARING = ImGuiCond.Appearing.value
 
+    @JvmField val INPUT_CHARS_DECIMAL = InputTextFlags.CharsDecimal.value
+    @JvmField val INPUT_CHARS_HEXADECIMAL = InputTextFlags.CharsHexadecimal.value
+    @JvmField val INPUT_CHARS_UPPERCASE = InputTextFlags.CharsUppercase.value
+    @JvmField val INPUT_CHARS_NO_BLANK = InputTextFlags.CharsNoBlank.value
+    @JvmField val INPUT_ENTER_RETURNS_TRUE = InputTextFlags.EnterReturnsTrue.value
+    @JvmField val INPUT_AUTO_SELECT_ALL = InputTextFlags.AutoSelectAll.value
+    @JvmField val INPUT_READ_ONLY = InputTextFlags.ReadOnly.value
+    @JvmField val INPUT_PASSWORD = InputTextFlags.Password.value
+
+    @JvmField val POPUP_MOUSE_BUTTON_RIGHT = PopupFlags.MouseButtonRight.value
+    @JvmField val POPUP_NO_REOPEN = PopupFlags.NoReopen.value
+    @JvmField val POPUP_NO_OPEN_OVER_EXISTING_POPUP = PopupFlags.NoOpenOverExistingPopup.value
+
     // ---- Windows ----
 
     /** A window titled [title] whose content [content] adds. */
@@ -59,6 +74,26 @@ object Overlay {
     @JvmStatic
     fun window(title: String, flags: Int, content: Consumer<WindowScope>) =
         ImGuiDsl.window(title, WindowFlags(flags)) { content.accept(this) }
+
+    /** A window with a close button, which sets [open] false; nothing is drawn while it is false. */
+    @JvmStatic
+    fun window(title: String, flags: Int, open: ImGuiState<Boolean>, content: Consumer<WindowScope>) =
+        ImGuiDsl.window(title, WindowFlags(flags), open) { content.accept(this) }
+
+    /** Positions the next window so the point ([pivotX], [pivotY]) of it, 0..1 across, sits at ([x], [y]). */
+    @JvmStatic
+    fun setNextWindowPos(x: Float, y: Float, cond: Int, pivotX: Float, pivotY: Float) =
+        ImGuiDsl.setNextWindowPos(x, y, ImGuiCond(cond), pivotX, pivotY)
+
+    /** [setNextWindowPos] without keeping the window on screen. */
+    @JvmStatic
+    fun setNextWindowPosUnsafe(x: Float, y: Float, cond: Int, pivotX: Float, pivotY: Float) =
+        ImGuiDsl.setNextWindowPosUnsafe(x, y, ImGuiCond(cond), pivotX, pivotY)
+
+    /** [setNextWindowSize] without clamping the window to the screen. */
+    @JvmStatic
+    fun setNextWindowSizeUnsafe(width: Float, height: Float, cond: Int) =
+        ImGuiDsl.setNextWindowSizeUnsafe(width, height, ImGuiCond(cond))
 
     /** Positions the next window at ([x], [y]) on screen, every frame. */
     @JvmStatic
@@ -166,6 +201,46 @@ object Overlay {
     fun inputText(scope: LayoutScope, label: String, value: String, onChange: Consumer<String>) =
         scope.inputText(label, value) { onChange.accept(it) }
 
+    /** A text field of up to [maxLength] characters with INPUT_ [flags] ORed together. */
+    @JvmStatic
+    fun inputText(scope: LayoutScope, label: String, value: String, maxLength: Int, flags: Int, onChange: Consumer<String>) =
+        scope.inputText(label, value, maxLength, InputTextFlags(flags)) { onChange.accept(it) }
+
+    /** A text field bound to [state], with INPUT_ [flags] ORed together. */
+    @JvmStatic
+    fun inputText(scope: LayoutScope, label: String, state: ImGuiState<String>, flags: Int) =
+        scope.inputText(label, state, InputTextFlags(flags))
+
+    /** A text box [width] by [height] (0 to fit) showing [value]; [onChange] gets the new text. */
+    @JvmStatic
+    fun inputTextMultiline(scope: LayoutScope, label: String, value: String, width: Float, height: Float, onChange: Consumer<String>) =
+        scope.inputTextMultiline(label, value, sizeX = width, sizeY = height) { onChange.accept(it) }
+
+    /** A text box bound to [state], [width] by [height] (0 to fit), with INPUT_ [flags] ORed together. */
+    @JvmStatic
+    fun inputTextMultiline(scope: LayoutScope, label: String, state: ImGuiState<String>, width: Float, height: Float, flags: Int) =
+        scope.inputTextMultiline(label, state, width, height, InputTextFlags(flags))
+
+    /** Two number fields on one line, bound to [x] and [y]. */
+    @JvmStatic
+    fun inputFloat2(scope: LayoutScope, label: String, x: ImGuiState<Float>, y: ImGuiState<Float>, format: String) =
+        scope.inputFloat2(label, x, y, format)
+
+    @JvmStatic
+    fun inputFloat3(scope: LayoutScope, label: String, x: ImGuiState<Float>, y: ImGuiState<Float>, z: ImGuiState<Float>, format: String) =
+        scope.inputFloat3(label, x, y, z, format)
+
+    @JvmStatic
+    fun inputFloat4(
+        scope: LayoutScope,
+        label: String,
+        x: ImGuiState<Float>,
+        y: ImGuiState<Float>,
+        z: ImGuiState<Float>,
+        w: ImGuiState<Float>,
+        format: String,
+    ) = scope.inputFloat4(label, x, y, z, w, format)
+
     /** A number field showing [value]; [onChange] gets the new number. */
     @JvmStatic
     fun inputInt(scope: LayoutScope, label: String, value: Int, onChange: IntConsumer) =
@@ -251,4 +326,28 @@ object Overlay {
     /** [content] with controls [width] pixels wide. */
     @JvmStatic
     fun itemWidth(scope: LayoutScope, width: Float, content: Consumer<ChildScope>) = scope.itemWidth(width) { content.accept(this) }
+
+    // ---- Popups ----
+
+    /** Opens the popup [id] on the next frame, with POPUP_ [flags] ORed together. */
+    @JvmStatic
+    @JvmOverloads
+    fun openPopup(window: WindowScope, id: String, flags: Int = 0) = window.openPopup(id, PopupFlags(flags))
+
+    /** The popup [id], drawn by [content] while it is open; true while open. */
+    @JvmStatic
+    @JvmOverloads
+    fun popup(window: WindowScope, id: String, flags: Int = 0, content: Consumer<PopupScope>): Boolean =
+        window.popup(id, flags) { content.accept(this) }
+
+    /** A modal popup [name] that blocks the rest of the overlay while open; true while open. */
+    @JvmStatic
+    @JvmOverloads
+    fun popupModal(window: WindowScope, name: String, flags: Int = 0, content: Consumer<ModalScope>): Boolean =
+        window.popupModal(name, null, WindowFlags(flags)) { content.accept(this) }
+
+    /** [popupModal] with a close button, which sets [open] false. */
+    @JvmStatic
+    fun popupModal(window: WindowScope, name: String, open: ImGuiState<Boolean>, flags: Int, content: Consumer<ModalScope>): Boolean =
+        window.popupModal(name, open, WindowFlags(flags)) { content.accept(this) }
 }

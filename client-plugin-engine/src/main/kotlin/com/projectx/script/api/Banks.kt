@@ -10,6 +10,10 @@ import kotlin.math.max
 
 /** A bank a script can walk to: [tile] stands beside its booths, chest or bankers. */
 class BankSite(val name: String, val tile: Tile) {
+    val tileX: Int get() = tile.x
+    val tileY: Int get() = tile.y
+    val plane: Int get() = tile.plane
+
     override fun toString() = name
 }
 
@@ -42,6 +46,9 @@ object Banks {
     @JvmStatic
     fun byDistanceFrom(from: Tile): List<BankSite> = entries.sortedBy { flatDistance(from, it.tile) }
 
+    @JvmStatic
+    fun byDistanceFrom(x: Int, y: Int, plane: Int): List<BankSite> = byDistanceFrom(Tile.of(x, y, plane))
+
     private fun flatDistance(a: Tile, b: Tile) = max(abs(a.x - b.x), abs(a.y - b.y))
 }
 
@@ -58,6 +65,7 @@ private val BANK_SIDE_OPTION_PARAMS = intArrayOf(1264, 1265)
  * The bank in [Banks] the shortest walk away, comparing routes to the few nearest as the crow flies, or null when
  * none of them can be reached.
  */
+@JvmSynthetic
 suspend fun Script.findNearestBank(): BankSite? = Banks.byDistanceFrom(localPlayer.tile)
     .take(ROUTES_COMPARED)
     .mapNotNull { site -> findWebPath(site.tile, BANK_ARRIVE_DISTANCE).path?.let { site to it.size } }
@@ -69,6 +77,7 @@ suspend fun Script.findNearestBank(): BankSite? = Banks.byDistanceFrom(localPlay
  * [bankPin] when the bank asks for it; without one it waits for you to type it. Returns true once the bank is open.
  * Java: `Wait.openNearestBank`.
  */
+@JvmSynthetic
 suspend fun Script.openNearestBank(bankPin: String? = null): Boolean {
     if (bankOpen) return true
     if (openBankInReach(bankPin)) return true
@@ -88,6 +97,7 @@ suspend fun Script.openNearestBank(bankPin: String? = null): Boolean {
  * there. Returns true once the preset was clicked; the backpack changing is what says it loaded.
  * Java: `Wait.loadLastPresetNearestBank`.
  */
+@JvmSynthetic
 suspend fun Script.loadLastPresetNearestBank(): Boolean {
     if (loadLastPresetInReach()) return true
     val site = findNearestBank() ?: return false

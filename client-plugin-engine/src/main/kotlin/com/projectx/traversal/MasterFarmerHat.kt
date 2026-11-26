@@ -102,6 +102,7 @@ object MasterFarmerHat {
      * server round trip, nothing spent. Skipped unless the hat is worn, the player is out of combat and no dialogue or
      * bank is up. Script thread only.
      */
+    @JvmSynthetic
     suspend fun refreshIfUnknown(script: Script): Int {
         if (habitatCount() != UNKNOWN) return habitatCount()
         runCatching {

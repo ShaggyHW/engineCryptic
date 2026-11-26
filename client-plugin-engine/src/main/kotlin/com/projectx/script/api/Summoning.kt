@@ -158,6 +158,7 @@ val familiarScrolls: Int
 val familiarSpecialPoints: Int
     get() = varps.getVar(1787)
 
+@JvmSynthetic
 suspend fun Script.familiarRenewFromBank(pouch: Familiar): Boolean {
     if (!bankOpen && openClosestBank(false)) {
         delayUntil(1800, 600) { bankOpen }
@@ -173,15 +174,18 @@ suspend fun Script.familiarRenewFromBank(pouch: Familiar): Boolean {
     return inventory.getItem(pouch.pouchName)?.click("Summon") == true
 }
 
+@JvmSynthetic
 suspend fun Script.familiarSummonFamiliar(pouch: Familiar): Boolean = familiarSummonFamiliar(pouch, SUMMON_TIMEOUT_MS)
 
 /** Clicks Summon on [pouch] and waits up to [timeoutMillis] for the familiar; true when the click went in. */
+@JvmSynthetic
 suspend fun Script.familiarSummonFamiliar(pouch: Familiar, timeoutMillis: Long): Boolean {
     return inventory.getItem(pouch.pouchName)?.click("Summon")?.also {
         if (it) delayUntil(timeoutMillis) { familiarSummoned }
     } == true
 }
 
+@JvmSynthetic
 suspend fun Script.familiarRenewFromInterface(pouch: Familiar): Boolean {
     if (!inventory.hasItem(pouch.pouchId)) return false
     val pouchCount = inventory.count(pouch.pouchId)
@@ -191,9 +195,11 @@ suspend fun Script.familiarRenewFromInterface(pouch: Familiar): Boolean {
     }
 }
 
+@JvmSynthetic
 suspend fun Script.familiarRecall(): Boolean =
     interfaces.isOpen(662) && IFSlot(662, 54, -1).click(1).also { delay(1000) }
 
+@JvmSynthetic
 suspend fun Script.familiarDismiss(): Boolean {
     if (!interfaces.isOpen(662)) return false
     if (!IFSlot(662, 56, -1).click(1)) return false
@@ -205,6 +211,7 @@ suspend fun Script.familiarDismiss(): Boolean {
     }
 }
 
+@JvmSynthetic
 suspend fun Script.bobGiveAllItems(): Boolean {
     if (!interfaces.isOpen(662)) return false
 
@@ -216,6 +223,7 @@ suspend fun Script.bobGiveAllItems(): Boolean {
     }
 }
 
+@JvmSynthetic
 suspend fun Script.bobTakeAllItems(): Boolean {
     if (!interfaces.isOpen(662)) return false
 
@@ -233,9 +241,11 @@ private suspend fun Script.bobGiveItem(item: Item?): Boolean {
     return item?.useOn(familiar)?.also { delay(1200) } == true
 }
 
+@JvmSynthetic
 suspend fun Script.bobGiveItem(name: String): Boolean =
     bobGiveItem(inventory.getItem(name))
 
+@JvmSynthetic
 suspend fun Script.bobGiveItem(id: Int): Boolean =
     bobGiveItem(inventory.getItem(id))
 
@@ -248,8 +258,10 @@ private fun bobTake(item: Item?): Boolean {
     return false
 }
 
+@JvmSynthetic
 suspend fun Script.bobTake(name: String): Boolean = bobTake(beastOfBurden.getItem(name))
 
+@JvmSynthetic
 suspend fun Script.bobTake(id: Int): Boolean = bobTake(beastOfBurden.getItem(id))
 
 private suspend fun Script.bobStorage(items: List<Item?>, amounts: List<Any>, withdraw: Boolean = false): Boolean? {
@@ -277,6 +289,7 @@ private suspend fun Script.bobStorage(items: List<Item?>, amounts: List<Any>, wi
 }
 
 @JvmName("bobStoreByID")
+@JvmSynthetic
 suspend fun Script.bobStore(vararg idsAndAmounts: Pair<Int, Int>): Boolean? {
     val items = idsAndAmounts.map { inventory.getItem(it.first)}
     val amounts = idsAndAmounts.map { it.second }
@@ -284,6 +297,7 @@ suspend fun Script.bobStore(vararg idsAndAmounts: Pair<Int, Int>): Boolean? {
 }
 
 @JvmName("bobStoreByName")
+@JvmSynthetic
 suspend fun Script.bobStore(vararg namesAndAmounts: Pair<String, Int>): Boolean? {
     val items = namesAndAmounts.map { inventory.getItem(it.first) }
     val amounts = namesAndAmounts.map { it.second }
@@ -291,6 +305,7 @@ suspend fun Script.bobStore(vararg namesAndAmounts: Pair<String, Int>): Boolean?
 }
 
 @JvmName("bobWithdrawById")
+@JvmSynthetic
 suspend fun Script.bobWithdraw(vararg namesAndAmounts: Pair<String, Int>): Boolean? {
     val items = namesAndAmounts.map { beastOfBurden.getItem(it.first) }
     val amounts = namesAndAmounts.map { it.second }
@@ -298,6 +313,7 @@ suspend fun Script.bobWithdraw(vararg namesAndAmounts: Pair<String, Int>): Boole
 }
 
 @JvmName("bobWithdrawByName")
+@JvmSynthetic
 suspend fun Script.bobWithdraw(vararg idsAndAmount: Pair<Int, Int>): Boolean? {
     val items = idsAndAmount.map { beastOfBurden.getItem(it.first) }
     val amounts = idsAndAmount.map { it.second }
@@ -307,6 +323,7 @@ suspend fun Script.bobWithdraw(vararg idsAndAmount: Pair<Int, Int>): Boolean? {
 fun Script.familiarStoreScrolls(): Boolean =
     interfaces.isOpen(662) && IFSlot(662, 78, -1).click(1)
 
+@JvmSynthetic
 suspend fun Script.familiarTakeScrolls(): Boolean =
     interfaces.isOpen(662) && IFSlot(662, 78, -1).click(2).also {
         if (it) delayUntil(3000) { familiarScrolls == 0 }
@@ -372,6 +389,7 @@ fun Script.familiarCastSpecial(): Boolean {
     return IFSlot(662, 117, -1).click(1)
 }
 
+@JvmSynthetic
 suspend fun Script.familiarCastSpecial(id: Int): Boolean {
     return when (Familiar.getType(familiarId)){
         SpecialType.ATTACK -> castSpecialNpc(findClosestNPC(id))
@@ -382,6 +400,7 @@ suspend fun Script.familiarCastSpecial(id: Int): Boolean {
     }
 }
 
+@JvmSynthetic
 suspend fun Script.familiarCastSpecial(name: String): Boolean {
     return when (Familiar.getType(familiarId)) {
         SpecialType.ATTACK -> castSpecialNpc(findClosestNPC(name))

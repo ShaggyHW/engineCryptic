@@ -216,6 +216,7 @@ object GrandExchange {
 }
 
 /** Opens the exchange through the nearest clerk or banker offering "Exchange". */
+@JvmSynthetic
 suspend fun Script.geOpen(timeoutMillis: Long = 8000): Boolean {
     if (GrandExchange.isOpen) return true
     val clerk = findClosestNPCWithOption(EXCHANGE_OPTION) ?: return false
@@ -228,6 +229,7 @@ suspend fun Script.geOpen(timeoutMillis: Long = 8000): Boolean {
  * Places a buy offer for [quantity] of [itemId] at [price] coins each in [slot] (default: the first empty one).
  * Returns true once the server has accepted the offer. The exchange window must be open.
  */
+@JvmSynthetic
 suspend fun Script.geBuy(itemId: Int, quantity: Int, price: Long, slot: Int = GrandExchange.firstEmptySlot()): Boolean =
     placeBuy(itemId, quantity, slot, price) { price }
 
@@ -236,6 +238,7 @@ suspend fun Script.geBuy(itemId: Int, quantity: Int, price: Long, slot: Int = Gr
  * in [slot] (default: the first empty one). The guide price is read off the offer screen once the item is chosen.
  * Returns true once the server has accepted the offer. The exchange window must be open.
  */
+@JvmSynthetic
 suspend fun Script.geBuyAtGuidePrice(
     itemId: Int,
     quantity: Int,
@@ -272,6 +275,7 @@ private suspend fun Script.placeBuy(
  * (default: the first empty one). Returns true once the server has accepted the offer. The exchange window must be
  * open.
  */
+@JvmSynthetic
 suspend fun Script.geSell(itemId: Int, quantity: Int, price: Long, slot: Int = GrandExchange.firstEmptySlot()): Boolean {
     if (!canPlaceOffer(slot, quantity, price)) return false
     val forms = GrandExchange.itemForms(itemId)
@@ -286,6 +290,7 @@ suspend fun Script.geSell(itemId: Int, quantity: Int, price: Long, slot: Int = G
 }
 
 /** Aborts the offer in [slot]. Returns true once the server has settled it; collect the refund with [geCollectAll]. */
+@JvmSynthetic
 suspend fun Script.geAbort(slot: Int): Boolean {
     if (!GrandExchange.isOpen || GrandExchange.isSettingUpOffer) return false
     if (!GrandExchange.offer(slot).isActive) return false
@@ -296,6 +301,7 @@ suspend fun Script.geAbort(slot: Int): Boolean {
 }
 
 /** Collects everything waiting in every slot into the backpack (coins go to the money pouch). */
+@JvmSynthetic
 suspend fun Script.geCollectAll(): Boolean {
     if (!GrandExchange.isOpen || !GrandExchange.hasCollectable()) return false
     geReaction()
@@ -305,6 +311,7 @@ suspend fun Script.geCollectAll(): Boolean {
 }
 
 /** The pause a player takes before each exchange click. Always applied, so dependent clicks never fire back-to-back. */
+@JvmSynthetic
 suspend fun Script.geReaction(mean: Int = 760, variance: Int = 480) = delay(mean, variance)
 
 private const val EXCHANGE_OPTION = "Exchange"

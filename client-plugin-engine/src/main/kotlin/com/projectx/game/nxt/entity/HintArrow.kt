@@ -48,6 +48,10 @@ class HintArrow(raw: MemorySegment) : Entity(raw) {
         get() = runCatching { targetTileFromTargetPos() }.getOrNull()
             ?: runCatching { targetEntity?.tile }.getOrNull()
 
+    /** [targetTile] for Java, which cannot call the property's getter. */
+    @JvmName("getTargetTile")
+    fun getTargetTile(): Tile? = targetTile
+
     fun isValid(): Boolean {
         return runCatching {
             val type = EntityType.fromType(ptr.readByte(OEntity.ENTITY_TYPE).toInt())

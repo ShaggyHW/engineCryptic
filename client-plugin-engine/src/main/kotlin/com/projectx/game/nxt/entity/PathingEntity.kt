@@ -68,6 +68,10 @@ abstract class PathingEntity(raw: MemorySegment) : Entity(raw) {
             Tile.of(queued.first, queued.second, drawn.plane)
         }.getOrNull()
 
+    /** [serverTile] for Java, which cannot call the property's getter. */
+    @JvmName("getServerTile")
+    fun getServerTile(): Tile? = serverTile
+
     private fun queuedWaypoints(): FloatArray? {
         val manager = routeWaypointManager.getOrNull ?: return null
         if (manager.readInt(OPathingEntity.WAYPOINT_COUNT) <= 0) return null
@@ -105,6 +109,12 @@ abstract class PathingEntity(raw: MemorySegment) : Entity(raw) {
         val off = facingOffset(target)
         return off >= 0 && off >= 180 - toleranceDegrees
     }
+
+    fun isFacing(targetX: Int, targetY: Int, toleranceDegrees: Double): Boolean =
+        isFacing(Tile.of(targetX, targetY, plane), toleranceDegrees)
+
+    fun isFacingAway(targetX: Int, targetY: Int, toleranceDegrees: Double): Boolean =
+        isFacingAway(Tile.of(targetX, targetY, plane), toleranceDegrees)
 
     private fun facingOffset(target: Tile): Int {
         val facing = facingAngle

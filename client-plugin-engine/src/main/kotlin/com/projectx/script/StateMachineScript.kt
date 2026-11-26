@@ -48,7 +48,9 @@ abstract class State<T : StateMachineScript<T>>() {
     /** Called once per server tick while this is the current state, even while its pass waits. Never wait in it. */
     open fun T.stateTickLoop() { }
 
+    @JvmSynthetic
     suspend fun checkNextState(script: T): State<T>? = script.checkNext()
+    @JvmSynthetic
     suspend fun loop(script: T) = script.stateLoop()
     fun onEvent(script: T, event: Event) = script.onStateEvent(event)
     fun tickLoop(script: T) = script.stateTickLoop()

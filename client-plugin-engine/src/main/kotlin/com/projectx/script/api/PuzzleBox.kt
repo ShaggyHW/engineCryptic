@@ -30,6 +30,7 @@ val puzzleBoxOpen: Boolean get() = interfaces.isOpen(puzzleWindow)
  * solved. Returns true when the picture is complete, false when no box is open or it couldn't be solved.
  * Java: `Wait.solvePuzzleBox`.
  */
+@JvmSynthetic
 suspend fun Script.solvePuzzleBox(): Boolean {
     repeat(MAX_REPLANS) {
         if (!puzzleBoxOpen) return false

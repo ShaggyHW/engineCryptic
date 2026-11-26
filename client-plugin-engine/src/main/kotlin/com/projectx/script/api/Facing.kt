@@ -16,6 +16,7 @@ private const val SURGE_LEFT_TILES = 2
  * waits for the step to land. Surge and Escape fly the way the player faces, so this aims them. Returns whether
  * the player stands on that tile; false when ([x], [y]) is where the player already is.
  */
+@JvmSynthetic
 suspend fun Script.faceTile(x: Int, y: Int): Boolean {
     val fromX = localPlayer.tileX
     val fromY = localPlayer.tileY
@@ -29,6 +30,7 @@ suspend fun Script.faceTile(x: Int, y: Int): Boolean {
 }
 
 /** [faceTile] for a [Tile]. */
+@JvmSynthetic
 suspend fun Script.faceTile(tile: Tile): Boolean = faceTile(tile.x, tile.y)
 
 /**
@@ -36,6 +38,7 @@ suspend fun Script.faceTile(tile: Tile): Boolean = faceTile(tile.x, tile.y)
  * anything can turn the player back. Surge goes along the nearest of the 8 directions, up to 10 tiles. Returns
  * whether the player surged; false, without moving, when Surge is not on an action bar or is cooling down.
  */
+@JvmSynthetic
 suspend fun Script.surgeToward(x: Int, y: Int): Boolean {
     if (actionbarAbilities[Ability.SURGE.type] == null || !Ability.SURGE.offCdIgnoreGCD) return false
     if (!faceTile(x, y)) return false
@@ -48,4 +51,5 @@ suspend fun Script.surgeToward(x: Int, y: Int): Boolean {
 }
 
 /** [surgeToward] for a [Tile]. */
+@JvmSynthetic
 suspend fun Script.surgeToward(tile: Tile): Boolean = surgeToward(tile.x, tile.y)

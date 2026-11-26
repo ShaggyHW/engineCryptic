@@ -59,6 +59,7 @@ fun oreBoxCount(oreId: Int): Int = ORE_BOX_VARBITS[oreId]?.let { varps.getVarBit
  * Fills the ore box from the backpack and waits for the ore to leave it. False when there is no box, or nothing
  * moved because the box is full or doesn't take that ore. Java: `Wait.fillOreBox`.
  */
+@JvmSynthetic
 suspend fun Script.fillOreBox(): Boolean {
     if (!hasOreBox()) return false
     val free = inventory.freeSlots

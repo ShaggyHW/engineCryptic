@@ -38,6 +38,7 @@ val inDeathsOffice: Boolean
  * Returns true once the reclaim window has closed after paying; false when not in the office or a step did not land,
  * so call it again on the next pass.
  */
+@JvmSynthetic
 suspend fun Script.reclaimFromDeath(): Boolean {
     val ids = deathIds.get() ?: return false
     val death = deathNpc(ids)
@@ -375,6 +376,7 @@ private const val WALK_START_TIMEOUT_MS = 1_800L
  * Collects everything Death holds and leaves the office (also when nothing is owed but we stand in it), pacing
  * [Deaths.step] until done or [timeoutMillis] runs out. Never answers [Deaths.Result.IN_PROGRESS].
  */
+@JvmSynthetic
 suspend fun Script.recoverFromDeath(timeoutMillis: Long = 90_000L): Deaths.Result {
     if (!Deaths.needsRecovery) return Deaths.Result.NOTHING_TO_RECLAIM
     println("[Deaths] recovering ${Deaths.itemsHeld} item(s) from Death's Office")

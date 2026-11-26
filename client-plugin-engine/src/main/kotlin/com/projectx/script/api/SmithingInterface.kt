@@ -43,6 +43,7 @@ object Smithing {
  * Retries because selecting a tier rebuilds and resets the slider. Returns the committed quantity
  * (>=1 once it lands).
  */
+@JvmSynthetic
 suspend fun Script.smithSetQuantity(target: Int): Int {
     if (!Smithing.isOpen) return 0
     val clamped = target.coerceAtLeast(Smithing.QUANTITY_MIN)
@@ -62,6 +63,7 @@ suspend fun Script.smithSetQuantity(target: Int): Int {
 
 const val UNFINISHED_SMITHING_ITEM = 47068
 
+@JvmSynthetic
 suspend fun Script.smithSelectTier(target: Int): Boolean {
     if (!Smithing.isOpen) return false
     if (Smithing.tier == target) return true
@@ -73,6 +75,7 @@ suspend fun Script.smithSelectTier(target: Int): Boolean {
     return Smithing.tier == target
 }
 
+@JvmSynthetic
 suspend fun Script.smithSelectItem(match: (String) -> Boolean): Boolean {
     if (!Smithing.isOpen) return false
     if (match(Smithing.selectedName)) return true
@@ -84,6 +87,7 @@ suspend fun Script.smithSelectItem(match: (String) -> Boolean): Boolean {
     return match(Smithing.selectedName)
 }
 
+@JvmSynthetic
 suspend fun Script.smithMake(): Boolean {
     if (!Smithing.isOpen) return false
     val before = inventory.count(UNFINISHED_SMITHING_ITEM)

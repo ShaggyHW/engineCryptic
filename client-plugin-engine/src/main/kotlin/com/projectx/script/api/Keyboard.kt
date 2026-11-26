@@ -11,6 +11,7 @@ import kotlin.math.exp
  * Presses [key] the way a physical keyboard reaches the client: key-down, the character the OS translates it
  * to, a human-length hold, key-up.
  */
+@JvmSynthetic
 suspend fun Script.pressKey(key: Key) {
     val stroke = Keystroke.of(key)
     strike(stroke)
@@ -23,6 +24,7 @@ fun canTypeText(text: String): Boolean = text.all { Keystroke.of(it) != null }
  * Types [text] one physical keystroke at a time, holding shift for capitals, with typing-speed gaps between
  * keys. Returns false without pressing anything when a character cannot be typed ([canTypeText]).
  */
+@JvmSynthetic
 suspend fun Script.typeText(text: String): Boolean {
     val strokes = text.map { Keystroke.of(it) ?: return false }
     for ((index, stroke) in strokes.withIndex()) {

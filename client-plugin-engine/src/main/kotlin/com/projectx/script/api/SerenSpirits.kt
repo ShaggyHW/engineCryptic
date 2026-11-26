@@ -30,6 +30,7 @@ fun findSerenSpirit(range: Int = DEFAULT_RANGE): NPC? {
  * Captures the nearest Seren spirit and waits for it to vanish. Returns true when one was captured, false when there
  * was none or it stayed; a spirit that stays is skipped for a minute. Java: `Wait.captureSerenSpirit`.
  */
+@JvmSynthetic
 suspend fun Script.captureSerenSpirit(range: Int = DEFAULT_RANGE): Boolean {
     val spirit = findSerenSpirit(range) ?: return false
     if (spirit.interact("Capture")) delayUntil(gaussian(9000L, 1500L)) { !spirit.exists() }

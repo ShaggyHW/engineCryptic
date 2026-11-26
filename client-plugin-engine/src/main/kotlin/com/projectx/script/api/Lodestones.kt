@@ -51,6 +51,7 @@ private var bookLodestonesBlockedUntil = 0L
  * and for the arrival animation to finish. Gives up early when the cast animation has stopped without the player
  * moving for two ticks, or when [stop] holds.
  */
+@JvmSynthetic
 suspend fun Script.lodestoneTeleport(lodestone: Lodestone, stop: () -> Boolean = { stopped }): LodestoneResult {
     if (stop()) return LodestoneResult.STOPPED
     var from = localPlayer.tile

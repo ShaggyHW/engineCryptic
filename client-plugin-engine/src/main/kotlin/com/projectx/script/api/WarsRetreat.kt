@@ -82,6 +82,7 @@ class WarsRetreatTrip @JvmOverloads constructor(
  * the moment it lands. Returns true once the player has gone through the portal, or has finished the stops when the
  * trip has no portal.
  */
+@JvmSynthetic
 suspend fun Script.runWarsRetreatTrip(trip: WarsRetreatTrip): Boolean {
     if (!WarsRetreat.isHere) {
         trip.reset()

@@ -8,6 +8,7 @@ import com.projectx.util.gaussian
  * Drops every backpack item [which] picks, one at a time, waiting for each slot to empty before the next, and returns
  * how many were dropped. Java: `Wait.dropItems`.
  */
+@JvmSynthetic
 suspend fun Script.dropItems(which: (Item) -> Boolean): Int {
     var dropped = 0
     for (item in inventory.filter { it.amount > 0 && which(it) }) {

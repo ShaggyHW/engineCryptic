@@ -3,7 +3,11 @@ package com.projectx.javaapi;
 import com.projectx.game.chat.MessageType;
 import com.projectx.game.input.Key;
 import com.projectx.game.interfaces.Bank;
+import com.projectx.game.nxt.entity.Bearings;
+import com.projectx.game.nxt.entity.HintIcon;
 import com.projectx.game.nxt.entity.location.SceneObject;
+import com.projectx.game.nxt.entity.player.Player;
+import com.projectx.pathfinder.WalkField;
 import com.projectx.script.BooleanConfigItem;
 import com.projectx.script.ConfigurableScript;
 import com.projectx.script.IntConfigItem;
@@ -12,7 +16,10 @@ import com.projectx.script.JavaState;
 import com.projectx.script.JavaStateMachineScript;
 import com.projectx.script.ScriptDescription;
 import com.projectx.script.Wait;
+import com.projectx.script.api.ActionPacer;
 import com.projectx.script.api.Area;
+import com.projectx.script.api.BankSite;
+import com.projectx.script.api.Banks;
 import com.projectx.script.api.DangerZone;
 import com.projectx.script.api.Equipment;
 import com.projectx.script.api.Familiar;
@@ -20,8 +27,10 @@ import com.projectx.script.api.GroupTeleports;
 import com.projectx.script.api.Lodestone;
 import com.projectx.script.api.MakeX;
 import com.projectx.script.api.Prayer;
+import com.projectx.script.api.TeleportSpell;
 import com.projectx.script.api.TileArea;
 import com.projectx.script.event.impl.XPDrop;
+import com.projectx.traversal.local.LocalNav;
 import com.projectx.ui.backend.dsl.ImGuiState;
 import com.projectx.ui.backend.dsl.utils.ImGuiColors;
 import com.projectx.webwalker.WebWalker;
@@ -76,6 +85,55 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
         int white = ImGuiColors.INSTANCE.getWHITE();
         WebWalker.findPathAsync(3200, 3200, 3210, 3210, 0);
         if (makeXOpen && white != 0) return Wait.abort();
+
+        // Members built on Tile, in forms Java can call.
+        Player me = getLocalPlayer();
+        Tile serverTile = me.getServerTile();
+        boolean facing = me.isFacing(3205, 3205, 45.0) || me.isFacingAway(3205, 3205, 45.0);
+        int local = me.getLocalTileX() + me.getLocalTileY();
+        int bearing = Bearings.between(3200, 3200, 3205, 3205);
+        for (HintIcon hint : HintIcon.all()) local += hint.getTileX() + hint.getTileY() + hint.getPlane();
+        List<BankSite> banks = Banks.byDistanceFrom(3200, 3200, 0);
+        if (!banks.isEmpty()) local += banks.get(0).getTileX() + banks.get(0).getTileY() + banks.get(0).getPlane();
+        Tile varrock = TeleportSpell.VARROCK.getDestination();
+        Area.Rectangular box = new Area.Rectangular(3190, 3190, 3210, 3210, 0);
+        local += box.getMinX() + box.getMaxY() + box.getPlane() + box.getCoordinatesInArea(0).size();
+        WalkField field = LocalNav.INSTANCE.field(3200, 3200, 0);
+        if (field != null) local += field.getStartX() + field.getStartY() + field.getStartPlane();
+        if (serverTile != null && varrock != null && facing && bearing + local > 0) return Wait.ms(100);
+
+        // Kotlin waits under their Kotlin names, as a Kotlin script is converted line by line.
+        if (castWorked) {
+            return Wait.sequence(
+                () -> Wait.delay(600, 150),
+                () -> Wait.delayTicks(2.0, 120),
+                () -> Wait.delayBetween(200, 400),
+                () -> Wait.delayUntil(3000, () -> getInventory().isFull()),
+                () -> Wait.delayWhile(3000, () -> me.isMoving()),
+                () -> Wait.waitThenDelayUntil(600, 3000, () -> !me.isAniMoving()),
+                () -> Wait.waitThenDelayWhile(600, 3000, me::isMoving),
+                () -> Wait.waitForXPDrop(Skill.MINING),
+                () -> Wait.waitForEvent(5000, event -> event instanceof XPDrop),
+                () -> Wait.waitForChatContaining(MessageType.PUBLIC_CHAT, "hello"),
+                () -> Wait.waitUntilIdle(10, 2),
+                () -> Wait.waitUntilStoppedMoving(10, 2),
+                () -> Wait.waitUntilNotMoving(),
+                () -> Wait.waitUntilNotAniMoving(5000),
+                () -> Wait.geReaction(),
+                () -> Wait.await(ActionPacer.ACTIONS),
+                () -> Wait.webWalkTo(3210, 3210, 0),
+                () -> Wait.findWebPath(3210, 3210, 0, result -> System.out.println(result.isSuccess())),
+                () -> Wait.canWebWalkTo(3210, 3210, 0, reachable -> {}),
+                () -> Wait.findWebPathToTiles(new int[]{3210}, new int[]{3210}, 0, result -> {}),
+                () -> Wait.canWebWalkToArea(box, reachable -> {}),
+                () -> Wait.findNearestBank(site -> System.out.println(site == null ? "none" : site.getName())),
+                () -> Wait.lodestoneTeleport(Lodestone.VARROCK, result -> {}),
+                () -> Wait.dive(3205, 3205, 0, Ability.BLADED_DIVE),
+                () -> Wait.diveThenSurge(3205, 3205, 0, Ability.BLADED_DIVE, hops -> {}),
+                () -> Wait.surgeThenDive(3205, 3205, 0, Ability.BLADED_DIVE),
+                () -> Wait.refreshMasterFarmerHat(count -> {})
+            );
+        }
 
         // Every Kotlin helper that waits, as a Wait.
         return Wait.sequence(
@@ -142,7 +200,18 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
             });
             tabBar(w, "tabs", tabs -> tabItem(tabs, "Main", tab -> text(tab, "Main tab")));
             collapsingHeader(w, "Details", details -> text(details, "More"));
+            inputText(w, "Name", "", 32, INPUT_CHARS_NO_BLANK, value -> {});
+            inputTextMultiline(w, "Notes", "", 0f, 80f, value -> {});
+            inputFloat2(w, "Offset", floatState(0f), floatState(0f), "%.1f");
+            if (w.getClass() != null) openPopup(w, "confirm");
+            popup(w, "confirm", popupScope -> {
+                text(popupScope, "Sure?");
+                popupScope.closeCurrentPopup();
+            });
+            popupModal(w, "modal", WINDOW_NO_RESIZE, modal -> text(modal, "Modal"));
         });
+        window("Closable", 0, showMore, w -> text(w, "Close me"));
+        setNextWindowPosUnsafe(10f, 10f, COND_ONCE, 0f, 0f);
         backgroundDrawList(draw -> {
             draw.tile(3200, 3200, 0, ImGuiColors.INSTANCE.getGREEN());
             draw.textOnTile(3200, 3200, 0, ImGuiColors.INSTANCE.getWHITE(), "Here");

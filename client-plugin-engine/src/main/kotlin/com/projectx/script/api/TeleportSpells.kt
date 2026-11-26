@@ -70,6 +70,10 @@ enum class TeleportSpell(val abilityId: Int) {
     /** Where the game's own data says the spell lands, or null when it does not say. */
     val destination: Tile? get() = SpellCatalogue.destination(abilityId)
 
+    /** [destination] for Java, which cannot call the property's getter. */
+    @JvmName("getDestination")
+    fun getDestination(): Tile? = destination
+
     companion object {
         @JvmStatic
         fun byAbilityId(abilityId: Int): TeleportSpell? = entries.firstOrNull { it.abilityId == abilityId }
@@ -110,6 +114,7 @@ fun teleportSpellProblem(spell: TeleportSpell): String? = SpellTeleports.check(s
  * Casts [spell], swapping spellbook first when it is on another book, and waits for the landing and its animation.
  * False when it cannot be cast, the cast never started, or the player did not land.
  */
+@JvmSynthetic
 suspend fun Script.castTeleportSpell(spell: TeleportSpell): Boolean {
     val from = localPlayer.tile
     if (SpellTeleports.cast(this, spell) { stopped } != CastResult.STARTED) return false
@@ -120,6 +125,7 @@ suspend fun Script.castTeleportSpell(spell: TeleportSpell): Boolean {
  * [castTeleportSpell] to the destination the Magic book slot's op [action] names, e.g. Varrock Teleport's
  * "Grand Exchange"; "Cast" or blank is the default destination. The spell must be listed in the open Magic book.
  */
+@JvmSynthetic
 suspend fun Script.castTeleportSpell(spell: TeleportSpell, action: String): Boolean {
     val from = localPlayer.tile
     if (SpellTeleports.cast(this, spell, action) { stopped } != CastResult.STARTED) return false

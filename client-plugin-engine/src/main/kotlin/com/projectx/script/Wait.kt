@@ -11,11 +11,13 @@ import com.projectx.game.nxt.entity.location.SceneObject
 import com.projectx.script.api.*
 import com.projectx.script.event.Event
 import com.projectx.traversal.JavaTraversal
+import com.projectx.traversal.MasterFarmerHat
 import com.projectx.traversal.TraversalNodeList
 import com.projectx.traversal.TraversalOutcome
 import com.projectx.webwalker.WalkGoal
 import com.projectx.webwalker.WebWalkResult
 import com.projectx.webwalker.WebWalker
+import world.gregs.voidps.type.Tile
 import org.projectx.core.game.combat.Ability
 import org.projectx.core.game.combat.Effect
 import org.projectx.core.game.skill.Skill
@@ -137,6 +139,99 @@ sealed class Wait {
         @JvmStatic
         fun whileTrue(predicate: BooleanSupplier, timeoutMillis: Long): Wait =
             While(predicate, timeoutMillis)
+
+        // ---- The Kotlin waits under their Kotlin names, arguments in the same order ----
+
+        /** A fixed pause. Kotlin: `delay`. */
+        @JvmStatic
+        fun delay(millis: Int): Wait = ms(millis)
+
+        /** A randomised pause around [mean], spread by [variance]. Kotlin: `delay`. */
+        @JvmStatic
+        fun delay(mean: Int, variance: Int): Wait = ms(mean, variance)
+
+        /** A pause picked uniformly between [minMillis] and [maxMillis]. Kotlin: `delayBetween`. */
+        @JvmStatic
+        fun delayBetween(minMillis: Int, maxMillis: Int): Wait = between(minMillis, maxMillis)
+
+        /** [ticks] game ticks plus 0..[jitterMillis] ms. Kotlin: `delayTicks`. */
+        @JvmStatic
+        @JvmOverloads
+        fun delayTicks(ticks: Double, jitterMillis: Int = 0): Wait = ticks(ticks, jitterMillis)
+
+        /** [ticks] game ticks plus [minJitterMillis]..[maxJitterMillis] ms. Kotlin: `delayTicks`. */
+        @JvmStatic
+        fun delayTicks(ticks: Double, minJitterMillis: Int, maxJitterMillis: Int): Wait = ticks(ticks, minJitterMillis, maxJitterMillis)
+
+        /** Until [predicate] holds, giving up after [timeoutMillis]. Kotlin: `delayUntil`. */
+        @JvmStatic
+        fun delayUntil(timeoutMillis: Long, predicate: BooleanSupplier): Wait = until(predicate, timeoutMillis)
+
+        /** Until [predicate] holds, checked every [pollingDelayMillis], giving up after [timeoutMillis]. Kotlin: `delayUntil`. */
+        @JvmStatic
+        fun delayUntil(timeoutMillis: Long, pollingDelayMillis: Int, predicate: BooleanSupplier): Wait =
+            until(predicate, timeoutMillis, pollingDelayMillis)
+
+        /** While [predicate] holds, giving up after [timeoutMillis]. Kotlin: `delayWhile`. */
+        @JvmStatic
+        fun delayWhile(timeoutMillis: Long, predicate: BooleanSupplier): Wait = whileTrue(predicate, timeoutMillis)
+
+        /**
+         * [waitForMillis] first, then until [predicate] holds, giving up [timeoutMillis] later: the floor stops a check
+         * that is already true before the click lands from ending the wait at once. Kotlin: `waitThenDelayUntil`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun waitThenDelayUntil(waitForMillis: Long, timeoutMillis: Long, predicate: BooleanSupplier, pollingDelayMillis: Int = 100): Wait =
+            call(null) { waitThenDelayUntil(waitForMillis, timeoutMillis, pollingDelayMillis) { predicate.asBoolean } }
+
+        /** [waitForMillis] first, then while [predicate] holds, giving up [timeoutMillis] later. Kotlin: `waitThenDelayWhile`. */
+        @JvmStatic
+        fun waitThenDelayWhile(waitForMillis: Long, timeoutMillis: Long, predicate: BooleanSupplier): Wait =
+            call(null) { waitThenDelayWhile(waitForMillis, timeoutMillis) { predicate.asBoolean } }
+
+        /** Until an event [predicate] accepts arrives, giving up after [timeoutMillis]. Kotlin: `waitForEvent`. */
+        @JvmStatic
+        @JvmOverloads
+        fun waitForEvent(timeoutMillis: Long = 15000, predicate: Predicate<Event>): Wait = event(predicate, timeoutMillis)
+
+        /** Until the next experience drop, optionally in one [skill]. Kotlin: `waitForXPDrop`. */
+        @JvmStatic
+        @JvmOverloads
+        fun waitForXPDrop(skill: Skill? = null, timeoutMillis: Long = 15000): Wait = xpDrop(skill, timeoutMillis)
+
+        /** Until a chat message of [type] containing [text]. Kotlin: `waitForChatContaining`. */
+        @JvmStatic
+        @JvmOverloads
+        fun waitForChatContaining(type: MessageType, text: String, timeoutMillis: Long = 15000): Wait =
+            chatContaining(type, text, timeoutMillis)
+
+        /** Until the player has stopped moving and animating for [idleChecks] ticks in a row. Kotlin: `waitUntilIdle`. */
+        @JvmStatic
+        fun waitUntilIdle(maxTicks: Int, idleChecks: Int): Wait = untilIdle(maxTicks, idleChecks)
+
+        /** Until the player has stopped moving for [stillChecks] ticks in a row. Kotlin: `waitUntilStoppedMoving`. */
+        @JvmStatic
+        fun waitUntilStoppedMoving(maxTicks: Int, stillChecks: Int): Wait = untilStoppedMoving(maxTicks, stillChecks)
+
+        /** 1.2 s, then until the player stops moving. Kotlin: `waitUntilNotMoving`. */
+        @JvmStatic
+        @JvmOverloads
+        fun waitUntilNotMoving(timeoutMillis: Long = 30000): Wait = untilNotMoving(timeoutMillis)
+
+        /** 1.2 s, then until the player stops moving and animating. Kotlin: `waitUntilNotAniMoving`. */
+        @JvmStatic
+        @JvmOverloads
+        fun waitUntilNotAniMoving(timeoutMillis: Long = 30000): Wait = untilNotAniMoving(timeoutMillis)
+
+        /** The pause a player takes between Grand Exchange clicks. Kotlin: `geReaction`. */
+        @JvmStatic
+        @JvmOverloads
+        fun geReaction(mean: Int = 760, variance: Int = 480): Wait = ms(mean, variance)
+
+        /** Until [pacer] has a slot for the next action, such as `ActionPacer.ACTIONS`. Kotlin: `pacer.await()`. */
+        @JvmStatic
+        fun await(pacer: ActionPacer): Wait = call(null) { pacer.await() }
 
         /** Wait for the next experience drop, optionally in one [skill]. */
         @JvmStatic
@@ -272,6 +367,60 @@ sealed class Wait {
         @JvmStatic
         fun findWebPathToArea(minX: Int, minY: Int, maxX: Int, maxY: Int, plane: Int, onResult: Consumer<WebWalkResult>): Wait =
             call(onResult) { this.findWebPathToArea(minX, minY, maxX, maxY, plane) }
+
+        /** [webWalk] under its coordinate name. Kotlin: `webWalkTo`. */
+        @JvmStatic
+        @JvmOverloads
+        fun webWalkTo(
+            x: Int,
+            y: Int,
+            plane: Int,
+            arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE,
+            onResult: Consumer<WebWalkResult>? = null,
+            useLodestones: Boolean = true,
+        ): Wait = webWalk(x, y, plane, arriveDistance, onResult, useLodestones)
+
+        /** Plan a route to ([x], [y]) on [plane] without walking it; [onResult] gets it. Kotlin: `findWebPath`. */
+        @JvmStatic
+        @JvmOverloads
+        fun findWebPath(x: Int, y: Int, plane: Int, onResult: Consumer<WebWalkResult>, arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE): Wait =
+            call(onResult) { this.findWebPath(Tile.of(x, y, plane), arriveDistance) }
+
+        /** Whether a route to ([x], [y]) on [plane] exists from where the player stands; [onResult] gets it. Kotlin: `canWebWalkTo`. */
+        @JvmStatic
+        @JvmOverloads
+        fun canWebWalkTo(x: Int, y: Int, plane: Int, onResult: Consumer<Boolean>, arriveDistance: Int = WebWalker.DEFAULT_ARRIVE_DISTANCE): Wait =
+            call(onResult) { this.canWebWalkTo(Tile.of(x, y, plane), arriveDistance) }
+
+        /** Plan the route [webWalkToTiles] would walk, without walking it. Kotlin: `findWebPathToTiles`. */
+        @JvmStatic
+        fun findWebPathToTiles(xs: IntArray, ys: IntArray, plane: Int, onResult: Consumer<WebWalkResult>): Wait =
+            call(onResult) { WebWalker.findPath(this, localPlayer.tile, WalkGoal.tiles(xs, ys, plane)) }
+
+        /** Whether a route to any tile of [area] exists; [onResult] gets it. Kotlin: `canWebWalkToArea`. */
+        @JvmStatic
+        fun canWebWalkToArea(area: Area, onResult: Consumer<Boolean>): Wait =
+            call(onResult) { this.canWebWalkToArea(area) }
+
+        /**
+         * Read the master farmer hat's Habitat teleport count off its chooser when it is not known yet; [onResult] gets the
+         * count. Kotlin: `MasterFarmerHat.refreshIfUnknown`.
+         */
+        @JvmStatic
+        fun refreshMasterFarmerHat(onResult: Consumer<Int>): Wait = call(onResult) { MasterFarmerHat.refreshIfUnknown(this) }
+
+        /** The listed bank with the shortest walk, or null; [onResult] gets it. Kotlin: `findNearestBank`. */
+        @JvmStatic
+        fun findNearestBank(onResult: Consumer<BankSite?>): Wait = call(onResult) { this.findNearestBank() }
+
+        /**
+         * Teleport to [lodestone] and wait for the landing; [onResult] gets how it ended. Gives up early once [stop]
+         * holds, or once the script stops when it is null. Kotlin: `lodestoneTeleport`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun lodestoneTeleport(lodestone: Lodestone, onResult: Consumer<LodestoneResult>? = null, stop: BooleanSupplier? = null): Wait =
+            call(onResult) { if (stop == null) this.lodestoneTeleport(lodestone) else this.lodestoneTeleport(lodestone) { stop.asBoolean } }
 
         /** Open the lodestone map if it is shut, otherwise teleport to [lodestone]. Kotlin: `useLodestone`. */
         @JvmStatic
@@ -509,6 +658,34 @@ sealed class Wait {
         @JvmStatic
         @JvmOverloads
         fun surgeToward(x: Int, y: Int, onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.surgeToward(x, y) }
+
+        /**
+         * Dive to ([x], [y]) on [plane] with [ability], [minDelayMs]..[maxDelayMs] between selecting it and clicking the
+         * tile; [onResult] gets whether the tile was clicked. Kotlin: `dive`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun dive(
+            x: Int,
+            y: Int,
+            plane: Int,
+            ability: Ability,
+            onResult: Consumer<Boolean>? = null,
+            minDelayMs: Long = 50,
+            maxDelayMs: Long = 300,
+        ): Wait = call(onResult) { this.dive(Tile.of(x, y, plane), ability, minDelayMs, maxDelayMs) }
+
+        /** Dive to ([x], [y]) with [dive], then Surge, as one motion; [onResult] gets the hops sent, 0 to 2. Kotlin: `diveThenSurge`. */
+        @JvmStatic
+        @JvmOverloads
+        fun diveThenSurge(x: Int, y: Int, plane: Int, dive: Ability, onResult: Consumer<Int>? = null): Wait =
+            call(onResult) { this.diveThenSurge(Tile.of(x, y, plane), dive) }
+
+        /** Surge, then Dive to ([x], [y]) with [dive], as one motion; [onResult] gets the hops sent, 0 to 2. Kotlin: `surgeThenDive`. */
+        @JvmStatic
+        @JvmOverloads
+        fun surgeThenDive(x: Int, y: Int, plane: Int, dive: Ability, onResult: Consumer<Int>? = null): Wait =
+            call(onResult) { this.surgeThenDive(Tile.of(x, y, plane), dive) }
 
         /** Enter [pin] on the bank PIN screen; [onResult] gets whether the screen closed. Kotlin: `enterBankPin`. */
         @JvmStatic

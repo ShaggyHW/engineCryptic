@@ -27,6 +27,7 @@ object Emotes {
  * Performs the named emote from the emote tab and waits for the player to start it. Returns false when the emote is
  * unknown, the tab is not open, or no animation started. Java: `Wait.performEmote`.
  */
+@JvmSynthetic
 suspend fun Script.performEmote(name: String): Boolean {
     val slot = Emotes.slot(name)
     if (slot < 0) return false

@@ -123,6 +123,7 @@ object WebWalker {
         findPathAsync(startX, startY, destX, destY, plane, arriveDistance).join()
 
     /** Plans a route from [from] to [destination], suspending the script rather than blocking the game thread. */
+    @JvmSynthetic
     suspend fun findPath(script: Script, from: Tile, destination: Tile, arriveDistance: Int = 0): WebWalkResult =
         findPath(script, from, WalkGoal.Near(destination, arriveDistance.coerceAtLeast(0)))
 
@@ -159,6 +160,7 @@ object WebWalker {
      * [useLodestones], a route may begin with a teleport when that gets there sooner: a lodestone, a spell, or - with
      * [useItemTeleports] - a carried teleport item or the Passage of the Abyss.
      */
+    @JvmSynthetic
     suspend fun walk(
         script: Script,
         destination: Tile,
@@ -183,6 +185,7 @@ object WebWalker {
         private var ringNode: TraversalNode? = null
         private var ringTakeoff: Tile? = null
 
+        @JvmSynthetic
         suspend fun run(): WebWalkResult {
             if (script.stopped) return result(WebWalkStatus.STOPPED, "The script stopped while walking")
             if (stop()) return result(WebWalkStatus.STOPPED, "Stopped before arriving")

@@ -68,8 +68,10 @@ data class Craftable(val itemId: Int, val name: String, val selectSlot: Int)
 data class CatList(val iface: Int, val selectComp: Int)
 
 /** Always applied (even when antiban is off) so dependent clicks are never fired back-to-back. */
+@JvmSynthetic
 suspend fun Script.makeXReaction(mean: Int = 820, variance: Int = 520) = delay(mean, variance)
 
+@JvmSynthetic
 suspend fun Script.makeXConfirm(): Boolean {
     if (!MakeX.isOpen) return false
     makeXReaction(720, 460)
@@ -86,6 +88,7 @@ suspend fun Script.makeXConfirm(): Boolean {
  * server the open request without ever rendering the rows — leaving nothing safe to click. We send
  * the open request (server context) and drive the render ourselves, then fire the row's server op.
  */
+@JvmSynthetic
 suspend fun Script.selectMakeCategory(match: (String) -> Boolean): Boolean {
     val namesEnumId = varps.getVar(MakeX.CATEGORY_NAMES_ENUM_VARP)
     val names = Cache.enum(namesEnumId)?.map ?: return false
@@ -127,6 +130,7 @@ private const val MAKE_DROPDOWN_RENDER_SUBID = 3
 fun componentSlotExists(iface: Int, comp: Int, slot: Int): Boolean =
     interfaces.getComponent(iface, comp)?.slotChildren?.any { it.slotId == slot } == true
 
+@JvmSynthetic
 suspend fun Script.makeXSelect(itemMatch: (String) -> Boolean, categoryMatch: ((String) -> Boolean)? = null): Boolean {
     if (!MakeX.isOpen) return false
     if (selectCraftable(itemMatch)) return true
@@ -137,6 +141,7 @@ suspend fun Script.makeXSelect(itemMatch: (String) -> Boolean, categoryMatch: ((
     return false
 }
 
+@JvmSynthetic
 suspend fun Script.makeX(itemMatch: (String) -> Boolean, categoryMatch: ((String) -> Boolean)? = null): Boolean {
     if (!makeXSelect(itemMatch, categoryMatch)) return false
     return makeXConfirm()

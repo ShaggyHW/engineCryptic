@@ -185,6 +185,7 @@ object GrandExchangePrices {
 }
 
 /** Refreshes [GrandExchangePrices] and waits for it, up to [timeoutMillis]. Returns whether prices are loaded. */
+@JvmSynthetic
 suspend fun Script.awaitGrandExchangePrices(timeoutMillis: Long = 20_000): Boolean {
     val refresh = GrandExchangePrices.refresh()
     delayUntil(timeoutMillis) { refresh.isDone }

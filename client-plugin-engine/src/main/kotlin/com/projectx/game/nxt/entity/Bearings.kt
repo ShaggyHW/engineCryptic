@@ -34,6 +34,10 @@ object Bearings {
         return Math.floorMod(Math.toDegrees(atan2(dx.toDouble(), dy.toDouble())).roundToInt(), 360)
     }
 
+    /** The bearing from ([fromX], [fromY]) to ([toX], [toY]), or -1 when they are the same tile. */
+    @JvmStatic
+    fun between(fromX: Int, fromY: Int, toX: Int, toY: Int): Int = between(Tile.of(fromX, fromY, 0), Tile.of(toX, toY, 0))
+
     /** The smaller angle between two bearings, 0..180. */
     @JvmStatic
     fun difference(a: Int, b: Int): Int {
