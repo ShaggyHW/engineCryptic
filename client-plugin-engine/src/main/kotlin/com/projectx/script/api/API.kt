@@ -46,8 +46,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 private val PLAYER_LIST = mutableListOf<Player>()
-private val NPC_LIST = ConcurrentHashMap<Int, NPC>()
-private val SPOTANIM_LIST = CopyOnWriteArrayList<SpotAnim>()
+// Rebuilt whole each tick and swapped in, never emptied and refilled in place: settings buttons and other overlay code
+// read these off the game thread, and a reader mid-refill saw only the entries added so far.
+@Volatile
+private var NPC_LIST = ConcurrentHashMap<Int, NPC>()
+
+@Volatile
+private var SPOTANIM_LIST = CopyOnWriteArrayList<SpotAnim>()
 private var ACTIONBAR_ABILITIES = mapOf<AbilityType, IFSlot>()
 
 var playerIndex = 0L
@@ -92,9 +97,7 @@ fun readPlayerIntoStructures(clear: Boolean): Boolean {
 }
 
 fun readNpcIntoStructures() {
-    NPC_LIST.clear()
-
-    NPC_LIST.putAll(
+    NPC_LIST = ConcurrentHashMap(
         Bootstrap.client.npcManager.indices
             .mapNotNull {
                 if (it <= 0) return@mapNotNull null
@@ -107,9 +110,7 @@ fun readNpcIntoStructures() {
 }
 
 fun readSpotanimIntoStructures() {
-    SPOTANIM_LIST.clear()
-
-    SPOTANIM_LIST.addAll(
+    SPOTANIM_LIST = CopyOnWriteArrayList(
         Bootstrap.client.spotAnimManager.mapNotNull {
             if (it.address() != 0L) SpotAnim(it) else null
         }
@@ -217,19 +218,12 @@ val getDivineCharges
 /**
  * Ground item utilities
  */
+/**
+ * Picks up the ground items named [items] (ignoring case) within 20 tiles, nearest first, one at a time, waiting for each
+ * to leave the ground; stops at the first that does not, or when nothing left fits. True when any was picked up.
+ */
 @JvmSynthetic
-suspend fun Script.findAndPickupItems(vararg items: String): Boolean {
-    while (true) {
-        if (inventory.freeSlots <= 0)
-            break
-//        val item = findClosestReachableGroundItem(items)
-//        if (item?.take() == false)
-//            break
-        delayWhile(5000) { localPlayer.isMoving }
-        return true
-    }
-    return false
-}
+suspend fun Script.findAndPickupItems(vararg items: String): Boolean = with(GroundPickup) { pickUpNamed(items) }
 
 /**
  * Spotanim utilities
@@ -1312,7 +1306,7 @@ enum class Prayer(val varbit: Int, val button: IFSlot) {
     TURMOIL(16780, IFSlot(1458, 40, 37)),
     ANGUISH(16783, IFSlot(1458, 40, 38)),
     TORMENT(16784, IFSlot(1458, 40, 39)),
-    SORROW(53278, IFSlot(1458, 40, 40)),
+    SORROW(53279, IFSlot(1458, 40, 40)),
     MALEVOLENCE(34866, IFSlot(1458, 40, 41)),
     DESOLATION(34867, IFSlot(1458, 40, 42)),
     AFFLICTION(34868, IFSlot(1458, 40, 43)),
@@ -1333,12 +1327,20 @@ suspend fun Script.togglePrayer(prayer: Prayer, shouldBeActive: Boolean) {
     }
 }
 
-val quickPrayersActive get() = varps.getVarBit(5941) == 1
+private val QUICK_PRAYERS_ON by lazy { Gameval.requireId(Gameval.VARBIT, "topstat_prayer_button") }
+
+// The globe itself; the prayer bar drawn beside it (player_prayer_bar) takes the same click and does nothing.
+private val QUICK_PRAYER_GLOBE by lazy {
+    val hash = requireNotNull(Gameval.componentHash("toplevel_v2_combat_bar:prayer_globe_layer")) { "Gameval: no prayer_globe_layer" }
+    IFSlot(hash ushr 16, hash and 0xFFFF)
+}
+
+val quickPrayersActive get() = varps.getVarBit(QUICK_PRAYERS_ON) == 1
 
 @JvmSynthetic
 suspend fun Script.toggleQuickPrayers(shouldBeActive: Boolean) {
     if (quickPrayersActive != shouldBeActive) {
-        if (IFSlot(1430, 16).click())
+        if (QUICK_PRAYER_GLOBE.click())
             delayUntil(gaussian(2000L, 1592L)) { quickPrayersActive == shouldBeActive }
     }
 }

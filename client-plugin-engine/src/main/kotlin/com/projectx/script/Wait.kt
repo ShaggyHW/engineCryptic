@@ -514,6 +514,28 @@ sealed class Wait {
         fun findAndPickupItems(onResult: Consumer<Boolean>?, vararg items: String): Wait =
             call(onResult) { this.findAndPickupItems(*items) }
 
+        /**
+         * One take of the loot [wanted] names within [radius] of ([x], [y], [plane]), through Area Loot or off the
+         * ground; [onResult] gets whether the loot shrank. Kotlin: `takeLootOnce`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun takeLootOnce(
+            x: Int,
+            y: Int,
+            plane: Int,
+            radius: Int,
+            everything: Boolean,
+            wanted: Predicate<String>,
+            onResult: Consumer<Boolean>? = null,
+        ): Wait = call(onResult) { this.takeLootOnce(x, y, plane, radius, everything) { wanted.test(it) } }
+
+        /** Use magic notepaper on [item]; [onResult] gets whether fewer unnoted copies are left. Kotlin: `noteWithMagicNotepaper`. */
+        @JvmStatic
+        @JvmOverloads
+        fun noteWithMagicNotepaper(item: Item, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.noteWithMagicNotepaper(item) }
+
         /** Wear a Sign of the porter from the inventory when none is worn. Kotlin: `checkPorter`. */
         @JvmStatic
         fun checkPorter(): Wait = call(null) { this.checkPorter() }
@@ -546,6 +568,18 @@ sealed class Wait {
         /** Turn [prayer] on or off, then wait for the change. Kotlin: `togglePrayer`. */
         @JvmStatic
         fun togglePrayer(prayer: Prayer, shouldBeActive: Boolean): Wait = call(null) { this.togglePrayer(prayer, shouldBeActive) }
+
+        /** Turn [prayer] on or off; [onResult] gets whether the game agreed. Kotlin: `togglePrayer`. */
+        @JvmStatic
+        @JvmOverloads
+        fun togglePrayer(prayer: PrayerInfo, shouldBeActive: Boolean, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.togglePrayer(prayer, shouldBeActive) }
+
+        /** Turn the prayer called [name] ("Piety", "Soul Split") on or off; [onResult] gets whether it worked. Kotlin: `togglePrayer`. */
+        @JvmStatic
+        @JvmOverloads
+        fun togglePrayer(name: String, shouldBeActive: Boolean, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.togglePrayer(name, shouldBeActive) }
 
         /** Turn quick prayers on or off, then wait for the change. Kotlin: `toggleQuickPrayers`. */
         @JvmStatic

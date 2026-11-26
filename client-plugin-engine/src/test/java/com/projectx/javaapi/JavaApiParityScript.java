@@ -3,7 +3,9 @@ package com.projectx.javaapi;
 import com.projectx.game.chat.MessageType;
 import com.projectx.game.input.Key;
 import com.projectx.game.interfaces.Bank;
+import com.projectx.game.items.Item;
 import com.projectx.game.nxt.entity.Bearings;
+import com.projectx.game.nxt.entity.GroundItem;
 import com.projectx.game.nxt.entity.HintIcon;
 import com.projectx.game.nxt.entity.location.SceneObject;
 import com.projectx.game.nxt.entity.player.Player;
@@ -14,6 +16,7 @@ import com.projectx.script.IntConfigItem;
 import com.projectx.script.JavaScript;
 import com.projectx.script.JavaState;
 import com.projectx.script.JavaStateMachineScript;
+import com.projectx.script.MultiSelectConfigItem;
 import com.projectx.script.ScriptDescription;
 import com.projectx.script.Wait;
 import com.projectx.script.api.ActionPacer;
@@ -43,6 +46,9 @@ import java.util.List;
 import java.util.Map;
 
 import static com.projectx.script.api.APIKt.*;
+import static com.projectx.script.api.LootKt.*;
+import static com.projectx.script.api.MagicNotepaperKt.*;
+import static com.projectx.script.api.NpcScanKt.*;
 import static com.projectx.ui.backend.dsl.Overlay.*;
 
 /**
@@ -54,6 +60,8 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
 
     private final BooleanConfigItem bank = new BooleanConfigItem("Bank", "Bank instead of dropping");
     private final IntConfigItem range = new IntConfigItem("Range", "Search range", 20);
+    private final MultiSelectConfigItem targets = new MultiSelectConfigItem("Targets", "What to attack")
+        .withScan("Scan nearby", () -> List.of("Guard", "White knight"));
     private boolean castWorked;
 
     @Override
@@ -76,7 +84,7 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
         Tile somewhere = new Area.Rectangular(3190, 3190, 3210, 3210, 0).randomWalkableTile();
         if (somewhere != null) walkToTile(somewhere.getX(), somewhere.getY(), somewhere.getLevel());
         int lodestoneX = Lodestone.VARROCK.getTileX() + Lodestone.VARROCK.getPlane();
-        if (clear && inside && lodestoneX > 0 && bank.getValue()) return Wait.ms(100);
+        if (clear && inside && lodestoneX > 0 && bank.getValue() && targets.isSelected("Guard")) return Wait.ms(100);
 
         // Companion members are static; named objects keep INSTANCE, which compiled scripts already link against.
         boolean makeXOpen = MakeX.INSTANCE.isOpen();
@@ -101,6 +109,19 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
         WalkField field = LocalNav.INSTANCE.field(3200, 3200, 0);
         if (field != null) local += field.getStartX() + field.getStartY() + field.getStartPlane();
         if (serverTile != null && varrock != null && facing && bearing + local > 0) return Wait.ms(100);
+
+        // Scanning, looting and noting.
+        List<String> attackable = attackableNpcNamesNearby();
+        List<GroundItem> bones = wantedGroundItems(3200, 3200, 0, 10, name -> name.equals("Bones"));
+        Item hide = getInventory().getItem("Cowhide");
+        if (hide != null && getCanBeNoted(hide) && hasRoomFor(hide.getId(), false)) {
+            return Wait.sequence(
+                () -> Wait.noteWithMagicNotepaper(hide, noted -> {}),
+                () -> Wait.takeLootOnce(3200, 3200, 0, 10, false, name -> name.equals("Bones"), took -> {}),
+                () -> Wait.takeLootOnce(3200, 3200, 0, 10, true, name -> true)
+            );
+        }
+        if (attackable.size() + bones.size() + attackableNpcNamesNearby(15).size() > 0 && MAGIC_NOTEPAPER.isEmpty()) return Wait.ms(100);
 
         // Kotlin waits under their Kotlin names, as a Kotlin script is converted line by line.
         if (castWorked) {
