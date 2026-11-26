@@ -60,6 +60,16 @@ class NavpathMergedMapTest {
     }
 
     @Test
+    fun `an item teleport and its chained click map back onto ours`() {
+        val link = onlyLink("merged-map-item-chain.json", Tile.of(3222, 3218, 0))
+        assertEquals(WebLinkKind.ITEM, link.kind)
+        assertEquals(22332, link.target?.id)
+        assertEquals("Activate", link.action)
+        assertEquals(listOf(WebInterfaceStep(1153, 23, -1, 3)), link.chain)
+        ours(link, Tile.of(3128, 3407, 0))
+    }
+
+    @Test
     fun `an object step our measured link answers by its prompt maps onto ours, choice and all`() {
         val ours = assertNotNull(WebLinks.all.firstOrNull { it.kind == WebLinkKind.OBJECT && it.choice != null })
         val landing = Tile.of(ours.to.centreX, ours.to.centreY, ours.to.plane)

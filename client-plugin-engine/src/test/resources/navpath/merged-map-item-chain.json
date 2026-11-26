@@ -1,0 +1,117 @@
+{
+ "found": true,
+ "cost": 4200.0,
+ "length_tiles": 2,
+ "duration_ms": 0,
+ "actions": [
+  {
+   "type": "item",
+   "from": {
+    "min": [
+     3222,
+     3218,
+     0
+    ],
+    "max": [
+     3222,
+     3218,
+     0
+    ]
+   },
+   "to": {
+    "min": [
+     3128,
+     3407,
+     0
+    ],
+    "max": [
+     3128,
+     3407,
+     0
+    ]
+   },
+   "cost_ms": 4200.0,
+   "metadata": {
+    "cost_ms": 4200.0,
+    "db_row": {
+     "action": "Activate",
+     "cost": 4200.0,
+     "dest_max_x": 3128,
+     "dest_max_y": 3407,
+     "dest_min_x": 3128,
+     "dest_min_y": 3407,
+     "dest_plane": 0,
+     "item_id": 22332,
+     "match_type": "id",
+     "name": null,
+     "next_node_id": 186,
+     "next_node_type": "ifslot",
+     "requirements": "60;391;624"
+    },
+    "dst": 658059,
+    "requirements": [
+     60,
+     391,
+     624
+    ],
+    "steps": [
+     {
+      "cost_ms": 4200.0,
+      "db_row": {
+       "action": "Activate",
+       "cost": 4200.0,
+       "dest_max_x": 3128,
+       "dest_max_y": 3407,
+       "dest_min_x": 3128,
+       "dest_min_y": 3407,
+       "dest_plane": 0,
+       "item_id": 22332,
+       "match_type": "id",
+       "name": null,
+       "next_db_row": {
+        "click_id": 3,
+        "component_id": 23,
+        "cost": 0.0,
+        "dest_max_x": null,
+        "dest_max_y": null,
+        "dest_min_x": null,
+        "dest_min_y": null,
+        "dest_plane": null,
+        "interface_id": 1153,
+        "next_node_id": null,
+        "next_node_type": null,
+        "requirements": null,
+        "slot_id": -1
+       },
+       "next_node_id": 186,
+       "next_node_type": "ifslot",
+       "requirements": "60;391;624"
+      },
+      "id": 410,
+      "kind": "item"
+     },
+     {
+      "cost_ms": 0.0,
+      "db_row": {
+       "click_id": 3,
+       "component_id": 23,
+       "cost": 0.0,
+       "dest_max_x": null,
+       "dest_max_y": null,
+       "dest_min_x": null,
+       "dest_min_y": null,
+       "dest_plane": null,
+       "interface_id": 1153,
+       "next_node_id": null,
+       "next_node_type": null,
+       "requirements": null,
+       "slot_id": -1
+      },
+      "id": 186,
+      "kind": "ifslot"
+     }
+    ]
+   }
+  }
+ ]
+}
