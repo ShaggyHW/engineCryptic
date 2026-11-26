@@ -130,6 +130,7 @@ object RequirementsBuilder {
         "dungLevel" to Skill.DUNGEONEERING,
         "rangeLevel" to Skill.RANGED,
         "fishingLevel" to Skill.FISHING,
+        "craftingLevel" to Skill.CRAFTING,
     )
 
     // Skill keys only links.json's rows use.
@@ -312,6 +313,7 @@ object RequirementsBuilder {
         varbit("thigui_quest")
         varbit("fris_quest")
         varp("viking")
+        varp("troll_quest")
         varbit("atfrem_hard_reward")
         varbit("atfrem_elite_reward")
         varp("fever_quest")
@@ -326,6 +328,7 @@ object RequirementsBuilder {
         varbit("swansong")
         skill("rangeLevel")
         skill("fishingLevel")
+        skill("craftingLevel")
         varbit("mdaughter_quest_var")
         varp("elemental_workshop_bits")
         // The old Trollheim row clicks the Standard book itself: no swap, not the action bar.
