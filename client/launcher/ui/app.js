@@ -26,6 +26,7 @@
     busyPids: {},
     renderedClients: null,
     launcherStatus: null,
+    launcherUpdateProgress: null,
     store: null,
     storeScripts: null,
     storeError: null,
@@ -86,6 +87,7 @@
   const launcherUpdate = $("#launcher-update");
   const launcherUpdateDetail = $("#launcher-update-detail");
   const btnLauncherUpdate = $("#btn-launcher-update");
+  const btnLauncherUpdateLabel = $("#btn-launcher-update-label");
 
   const userName = $("#user-name");
   const userSub = $("#user-sub");
@@ -204,6 +206,12 @@
       case "launcher_status":
         state.launcherStatus = event.status;
         renderVersion();
+        renderLauncherUpdate();
+        break;
+
+      case "launcher_update_progress":
+        state.launcherUpdateProgress = event;
+        if (event.stage === "failed") logStatus(event.message, "error");
         renderLauncherUpdate();
         break;
 
@@ -1104,15 +1112,21 @@
     send({ type: type, pid: pid });
   }
 
-  // The launcher cannot replace itself while running, so this is a prompt and a link, not an install.
+  // The launcher installs its own update and restarts into it; a failure falls back to the release page.
   function renderLauncherUpdate() {
     const status = state.launcherStatus;
     const update = status && status.launcher_update;
     launcherUpdate.hidden = !update;
     if (!update) return;
+    const progress = state.launcherUpdateProgress;
+    const busy = !!progress && progress.stage !== "failed";
+    const failed = !!progress && progress.stage === "failed";
     const size = formatSize(update.size);
-    launcherUpdateDetail.textContent =
-      "You have " + status.launcher_version + " · " + (status.release_tag || "latest") + (size ? " · " + size : "");
+    launcherUpdateDetail.textContent = progress
+      ? progress.message
+      : "You have " + status.launcher_version + " · " + (status.release_tag || "latest") + (size ? " · " + size : "");
+    btnLauncherUpdate.disabled = busy;
+    btnLauncherUpdateLabel.textContent = failed ? "Open download page" : busy ? "Updating..." : "Update";
   }
 
   // ---- Store ----
@@ -1374,7 +1388,15 @@
 
   btnLauncherUpdate.addEventListener("click", () => {
     const update = state.launcherStatus && state.launcherStatus.launcher_update;
-    if (update) send({ type: "open_url", url: update.url });
+    if (!update) return;
+    const progress = state.launcherUpdateProgress;
+    if (progress && progress.stage === "failed") {
+      send({ type: "open_url", url: update.page || update.url });
+      return;
+    }
+    state.launcherUpdateProgress = { stage: "downloading", message: "Starting the update..." };
+    renderLauncherUpdate();
+    send({ type: "launcher_update_install" });
   });
 
   btnClearLogs.addEventListener("click", () => {

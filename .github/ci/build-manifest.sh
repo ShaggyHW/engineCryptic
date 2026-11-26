@@ -26,6 +26,12 @@ package_url() {
     echo "https://github.com/${ASSET_REPO}/releases/download/${RELEASE_TAG}/$1"
 }
 
+# A launcher before 1.29.0 opens a launcher build's `url` in the browser, and a browser handed an .exe link from
+# another program may cancel it unasked, so `url` is the release page and the file is under `download`.
+release_page() {
+    echo "https://github.com/${ASSET_REPO}/releases/tag/${RELEASE_TAG}"
+}
+
 # Scripts ship through the store, so this release offers no plugins and the list stays empty.
 plugins='[]'
 launchers='[]'
@@ -109,9 +115,9 @@ for path in "$DIST"/*; do
             platform="${platform%-"$PROJECTX_VERSION"}"
             launchers="$(printf '%s' "$launchers" | jq \
                 --arg platform "$platform" --arg file "$file" --arg version "$PROJECTX_VERSION" \
-                --arg sha256 "$sha" --argjson size "$size" --arg url "$url" \
+                --arg sha256 "$sha" --argjson size "$size" --arg url "$(release_page)" --arg download "$url" \
                 '. + [{platform: $platform, file: $file, version: $version,
-                       sha256: $sha256, size: $size, url: $url}]')"
+                       sha256: $sha256, size: $size, url: $url, download: $download}]')"
             ;;
     esac
 done

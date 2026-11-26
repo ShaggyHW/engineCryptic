@@ -12,6 +12,7 @@ mod java;
 mod navpath;
 mod plugins;
 mod scheduler;
+mod self_update;
 mod store;
 mod ui;
 
@@ -188,12 +189,19 @@ fn main() -> Result<()> {
     }
 
     let lock_file = File::create(&paths.lock_file).context("Failed to create lockfile")?;
-    if lock_file.try_lock_exclusive().is_err() {
+    let replacing = std::env::args().any(|a| a == self_update::REPLACED_FLAG);
+    let locked = if replacing {
+        self_update::retry_lock(self_update::REPLACED_LOCK_WAIT, || lock_file.try_lock_exclusive().is_ok())
+    } else {
+        lock_file.try_lock_exclusive().is_ok()
+    };
+    if !locked {
         log::error!("Another instance is already running");
         #[cfg(windows)]
         already_running_notice();
         std::process::exit(1);
     }
+    self_update::sweep_previous();
 
     let cfg = load_config(&paths.config_file);
     apply_log_level(cfg.debug_logging);

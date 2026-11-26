@@ -18,6 +18,7 @@ use crate::game::renderer::{note_vulkan_launch_crash, Renderer, RendererPref};
 use crate::game::rs3::{with_host_binary_type, JS5_RSA_PARAM, LOGIN_RSA_PARAM};
 use crate::plugins::{self, Catalog, LauncherStatus};
 use crate::scheduler::{self as plans, PlanState, ScriptPlan};
+use crate::self_update;
 use crate::store;
 use url::Url;
 
@@ -102,6 +103,9 @@ pub enum IpcMessage {
     /// Download one bought script into the folder the engine scans.
     #[serde(rename = "store_install")]
     StoreInstall { internal_name: String },
+    /// Download the newer launcher, put it in place of this one and restart into it.
+    #[serde(rename = "launcher_update_install")]
+    LauncherUpdateInstall,
 }
 
 /// Events from Rust to JS
@@ -177,6 +181,9 @@ pub enum IpcEvent {
     },
     #[serde(rename = "launcher_status")]
     LauncherStatus { status: LauncherStatus },
+    /// How a launcher update is going: `downloading`, `restarting` or `failed`, with a line to show.
+    #[serde(rename = "launcher_update_progress")]
+    LauncherUpdateProgress { stage: String, message: String },
     /// The store's paid catalogue for this account.
     #[serde(rename = "store_scripts")]
     StoreScripts {
@@ -751,6 +758,8 @@ pub struct IpcState {
     scheduler_running: Arc<AtomicBool>,
     /// Set while a pairing awaits approval, so a second press cannot invalidate the code on screen.
     store_pairing: Arc<AtomicBool>,
+    /// Set while a launcher update downloads, so a second press cannot start another over it.
+    launcher_updating: AtomicBool,
 }
 
 /// A client as the Clients panel shows it: its engine state and the plan it runs, if any.
@@ -800,6 +809,7 @@ impl IpcState {
             plugin_busy: Mutex::new(Vec::new()),
             scheduler_running: Arc::new(AtomicBool::new(false)),
             store_pairing: Arc::new(AtomicBool::new(false)),
+            launcher_updating: AtomicBool::new(false),
         }
     }
 
@@ -945,6 +955,9 @@ impl IpcState {
             }
             IpcMessage::StoreInstall { internal_name } => {
                 self.handle_store_install(internal_name);
+            }
+            IpcMessage::LauncherUpdateInstall => {
+                self.handle_launcher_update_install();
             }
         }
 
@@ -1644,6 +1657,42 @@ impl IpcState {
                 log::warn!("Launcher update check failed: {}", e);
             }
             state.emit_launcher_status();
+        });
+    }
+
+    fn handle_launcher_update_install(self: &Arc<Self>) {
+        let update = self.release_catalog.lock().unwrap().as_ref().and_then(plugins::launcher_update).cloned();
+        let Some(update) = update else {
+            return;
+        };
+        if !self_update::supported(&update) {
+            if let Err(e) = plugins::open_url(&update.page) {
+                log::warn!("Could not open the launcher download page: {}", e);
+            }
+            return;
+        }
+        if self.launcher_updating.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            let report = |stage: &str, message: String| {
+                state.send_event(&IpcEvent::LauncherUpdateProgress { stage: stage.to_string(), message });
+            };
+            report("downloading", format!("Downloading launcher {}...", update.version_label()));
+            let progress = |message: String| report("downloading", message);
+            let installed = self_update::install(&crate::http_client(), &update, &progress).await;
+            match installed.and_then(|exe| self_update::relaunch(&exe)) {
+                Ok(()) => {
+                    report("restarting", "Restarting into the new launcher...".to_string());
+                    let _ = state.cmd_tx.send(AppCommand::CloseWindow);
+                }
+                Err(e) => {
+                    log::warn!("Launcher update failed: {:#}", e);
+                    report("failed", format!("The update could not be installed: {}", e));
+                    state.launcher_updating.store(false, Ordering::SeqCst);
+                }
+            }
         });
     }
 

@@ -40,6 +40,37 @@ pub struct LauncherDownload {
     pub size: u64,
     #[serde(default)]
     pub label: String,
+    #[serde(default)]
+    pub version: String,
+    /// The file itself. Manifests before 1.29.0 have none and name the file in `url`, which now names the
+    /// release page, because that is what launchers before 1.29.0 open in the browser.
+    #[serde(default)]
+    pub download: String,
+    /// The release's page, where the build can be downloaded by hand when installing it here fails.
+    #[serde(default)]
+    pub page: String,
+}
+
+impl LauncherDownload {
+    pub fn version_label(&self) -> &str {
+        if self.version.is_empty() { &self.file } else { &self.version }
+    }
+
+    pub fn download_url(&self) -> &str {
+        if self.download.is_empty() { &self.url } else { &self.download }
+    }
+}
+
+/// The release page a GitHub asset link belongs to: `.../releases/download/v1.2.0/file` is on
+/// `.../releases/tag/v1.2.0`. A browser handed the page shows it; handed the file, some cancel the download.
+fn release_page(asset_url: &str) -> String {
+    match asset_url.split_once("/releases/download/") {
+        Some((repo, rest)) => match rest.split('/').next().filter(|tag| !tag.is_empty()) {
+            Some(tag) => format!("{}/releases/tag/{}", repo, tag),
+            None => format!("{}/releases", repo),
+        },
+        None => asset_url.to_string(),
+    }
 }
 
 /// The engine shadow jar, the supervisor jar, or a platform's native bootstrap. They ride one manifest so
@@ -253,6 +284,7 @@ fn catalog_from_manifest(release_tag: String, mut manifest: ReleaseManifest) -> 
     );
     for download in &mut manifest.launcher {
         download.label = platform_label(&download.platform);
+        download.page = release_page(&download.url);
     }
     Catalog {
         release_tag,
@@ -320,6 +352,9 @@ fn launcher_from_links(release: &Release) -> Vec<LauncherDownload> {
                 sha256: String::new(),
                 size: 0,
                 label: String::new(),
+                version: release.tag_name.trim_start_matches('v').to_string(),
+                download: String::new(),
+                page: String::new(),
             })
         })
         .collect()
@@ -549,6 +584,35 @@ pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn a_manifest_names_the_file_apart_from_the_page_older_launchers_open() {
+        let manifest: ReleaseManifest = serde_json::from_str(
+            r#"{"version": "1.29.0", "launcher": [{"platform": "windows-x86_64", "file": "l.exe", "sha256": "ab",
+                "url": "https://github.com/o/r/releases/tag/v1.29.0",
+                "download": "https://github.com/o/r/releases/download/v1.29.0/l.exe"}]}"#,
+        )
+        .unwrap();
+        let catalog = catalog_from_manifest("v1.29.0".into(), manifest);
+        let build = &catalog.launcher[0];
+        assert_eq!(build.download_url(), "https://github.com/o/r/releases/download/v1.29.0/l.exe");
+        assert_eq!(build.page, "https://github.com/o/r/releases/tag/v1.29.0");
+
+        let older: LauncherDownload = serde_json::from_str(
+            r#"{"platform": "windows-x86_64", "file": "l.exe", "url": "https://github.com/o/r/releases/download/v1.28.0/l.exe"}"#,
+        )
+        .unwrap();
+        assert_eq!(older.download_url(), "https://github.com/o/r/releases/download/v1.28.0/l.exe");
+    }
+
+    #[test]
+    fn a_launcher_build_links_to_its_release_page() {
+        assert_eq!(
+            release_page("https://github.com/iEasyScript/launcher/releases/download/v1.28.0/project-x-launcher-windows-x86_64-1.28.0.exe"),
+            "https://github.com/iEasyScript/launcher/releases/tag/v1.28.0"
+        );
+        assert_eq!(release_page("https://example.com/launcher.exe"), "https://example.com/launcher.exe");
+    }
     use std::sync::atomic::{AtomicU16, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
