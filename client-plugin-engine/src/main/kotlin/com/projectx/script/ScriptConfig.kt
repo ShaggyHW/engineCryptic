@@ -13,6 +13,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
+import java.util.function.Supplier
 
 interface ConfigItem<T> {
     val name: String
@@ -145,6 +146,58 @@ class InfoDisplayConfigItem @JvmOverloads constructor(
 }
 
 /**
+ * Any number of choices from a list, drawn as chips to tick; [value] is the ticked ones. The list can change while the
+ * script runs: [withScan] adds a button that refills it, from the NPCs nearby for example, and a ticked choice stays
+ * listed when a later scan no longer finds it, so a saved selection is never hidden.
+ *
+ * ```kotlin
+ * val targets = MultiSelectConfigItem("Targets", "What to attack").withScan("Scan nearby") { npcNamesNearby() }
+ * ```
+ */
+class MultiSelectConfigItem @JvmOverloads constructor(
+    override val name: String,
+    override val description: String,
+    options: List<String> = emptyList(),
+    initialValue: Set<String> = emptySet(),
+) : ConfigItem<Set<String>> {
+    override var value: Set<String> = initialValue
+
+    /** The choices offered, before any ticked choice the list lacks; see [shownOptions]. */
+    @Volatile
+    var options: List<String> = options
+
+    /** The button that refills [options], or null for a fixed list. */
+    var scan: ConfigAction<List<String>>? = null
+        private set
+
+    /** What the list shows: [options], then every ticked choice [options] lacks. */
+    val shownOptions: List<String> get() = (options + value.filter { it !in options }).distinct()
+
+    /** Whether [option] is ticked, ignoring case. */
+    fun isSelected(option: String): Boolean = value.any { it.equals(option, ignoreCase = true) }
+
+    /** Adds a button labelled [label] that replaces [options] with what [scan] returns. */
+    fun withScan(label: String, scan: Supplier<List<String>>): MultiSelectConfigItem {
+        this.scan = ConfigAction(label) { scan.get() }
+        return this
+    }
+
+    /** Runs the scan, if there is one, and keeps its answer as [options], sorted and without repeats. */
+    fun rescan() {
+        val found = scan?.run?.invoke() ?: return
+        options = found.map(String::trim).filter(String::isNotEmpty).distinct().sortedBy(String::lowercase)
+    }
+
+    internal companion object {
+        /** Stored as one comma-separated text, which is also how the launcher's plan editor shows and takes it. */
+        fun encode(value: Set<String>): String = value.joinToString(", ")
+
+        fun decode(saved: String): Set<String> =
+            saved.split(',', '\n').map(String::trim).filter(String::isNotEmpty).toCollection(LinkedHashSet())
+    }
+}
+
+/**
  * Valueless marker: the items declared after it (up to the next section) render under a
  * collapsible header. Nothing is persisted; the open state lives in ImGui like any header.
  */
@@ -170,7 +223,7 @@ object ScriptConfigStore {
 
     fun save(script: Any) {
         val values = LinkedHashMap<String, JsonPrimitive>()
-        storedItems(script).forEach { field -> encode(field.item.value)?.let { values[field.key] = it } }
+        storedItems(script).forEach { field -> encodeItem(field.item)?.let { values[field.key] = it } }
         configCache[script.javaClass.name] = values
         write(script.javaClass.name, values)
     }
@@ -218,12 +271,12 @@ object ScriptConfigStore {
                     is ConfigSection -> "section"
                     is BooleanConfigItem -> "bool"
                     is IntConfigItem -> "int"
-                    is StringConfigItem -> "text"
+                    is StringConfigItem, is MultiSelectConfigItem -> "text"
                     is EnumConfigItem<*>, is OptionsConfigItem<*> -> "choice"
                     else -> "other"
                 },
             )
-            if (item !is ConfigSection) encode(item.value)?.let { entries["value"] = it }
+            if (item !is ConfigSection) encodeItem(item)?.let { entries["value"] = it }
             if (item is IntConfigItem) {
                 entries["min"] = JsonPrimitive(item.min)
                 entries["max"] = JsonPrimitive(item.max)
@@ -241,6 +294,9 @@ object ScriptConfigStore {
     private fun storedItems(script: Any): List<ConfigField> =
         configItems(script).filter { it.item !is InfoDisplayConfigItem && it.item !is ConfigSection }
 
+    private fun encodeItem(item: ConfigItem<*>): JsonPrimitive? =
+        if (item is MultiSelectConfigItem) JsonPrimitive(MultiSelectConfigItem.encode(item.value)) else encode(item.value)
+
     private fun encode(value: Any?): JsonPrimitive? = when (value) {
         null -> null
         is Boolean -> JsonPrimitive(value)
@@ -257,6 +313,7 @@ object ScriptConfigStore {
         is BooleanConfigItem -> saved.booleanOrNull
         is IntConfigItem -> saved.intOrNull?.coerceIn(min, max)
         is StringConfigItem -> saved.contentOrNull
+        is MultiSelectConfigItem -> saved.contentOrNull?.let(MultiSelectConfigItem::decode)
         is EnumConfigItem<*> -> enumValues.firstOrNull { it.name == saved.contentOrNull }
         is OptionsConfigItem<*> -> options.firstOrNull { choiceName(it) == saved.contentOrNull }
         else -> null

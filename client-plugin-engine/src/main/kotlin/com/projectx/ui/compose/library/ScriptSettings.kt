@@ -1,6 +1,13 @@
 package com.projectx.ui.compose.library
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +33,8 @@ import com.projectx.script.ConfigurableScript
 import com.projectx.script.EnumConfigItem
 import com.projectx.script.InfoDisplayConfigItem
 import com.projectx.script.IntConfigItem
+import com.projectx.script.MultiSelectConfigItem
+import com.projectx.mcp.MainLogicTickQueue
 import com.projectx.script.configItems
 import com.projectx.script.OptionsConfigItem
 import com.projectx.script.ScriptConfigStore
@@ -38,9 +47,11 @@ import com.projectx.ui.compose.OverlayText
 import com.projectx.ui.compose.components.ActionButton
 import com.projectx.ui.compose.components.Divider
 import com.projectx.ui.compose.components.Dropdown
+import com.projectx.ui.compose.components.ToggleChip
 import com.projectx.ui.compose.components.Glyph
 import com.projectx.ui.compose.components.GlyphIcon
 import com.projectx.ui.compose.components.Hint
+import com.projectx.ui.compose.components.SearchField
 import com.projectx.ui.compose.components.NumberInput
 import com.projectx.ui.compose.components.SettingRow
 import com.projectx.ui.compose.components.TextInput
@@ -131,6 +142,7 @@ fun ScriptSettingsView(meta: ScriptMetadata) {
                     InfoValue(item)
                     ItemAction(script, item)
                 }
+                is MultiSelectConfigItem -> MultiSelectSetting(script, item)
                 else -> SettingRow(item.name, item.description) {
                     ItemControl(script, name, item)
                     ItemAction(script, item)
@@ -180,16 +192,89 @@ private fun ItemControl(script: ConfigurableScript, fieldName: String, item: Con
     }
 }
 
+private const val SEARCH_FROM_OPTIONS = 10
+
+/**
+ * A tick list laid out under its label rather than squeezed beside it: the chips wrap across the row, and a long list
+ * gets a search box and a capped height that scrolls on its own.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MultiSelectSetting(script: ConfigurableScript, item: MultiSelectConfigItem) {
+    // Compose skips this for the same item on every redraw: the revision shows a tick, the clock a scan that finished
+    // on the game thread.
+    ScriptSettings.revision
+    OverlayClock.nowSeconds
+    fun set(value: Set<String>) {
+        item.value = value
+        ScriptSettings.changed(script)
+    }
+    val shown = item.shownOptions
+    var query by remember(script, item.name) { mutableStateOf("") }
+    val search = remember(script, item.name) { OverlayText(read = { query }, write = { query = it }, maxLength = 40) }
+    val visible = if (query.isBlank()) shown else shown.filter { it.contains(query.trim(), ignoreCase = true) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SettingRow(item.name, item.description) {
+            if (shown.isNotEmpty()) {
+                BasicText("${item.value.size} of ${shown.size} selected", style = LocalType.current.data.copy(color = Palette.muted))
+            }
+            if (item.value.isNotEmpty()) ActionButton("Clear", { set(emptySet()) }, height = 32.dp)
+            ItemAction(script, item)
+        }
+        when {
+            shown.isEmpty() -> Hint(if (item.scan != null) "Nothing listed yet: press ${item.scan?.label}." else "Nothing to choose from.")
+            else -> {
+                if (shown.size > SEARCH_FROM_OPTIONS) SearchField(search, "Search ${item.name.lowercase()}", 260.dp)
+                if (visible.isEmpty()) Hint("Nothing matches \"${query.trim()}\".")
+                Box(Modifier.fillMaxWidth().heightIn(max = 168.dp).verticalScroll(rememberScrollState())) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        visible.forEach { option ->
+                            ToggleChip(option, item.isSelected(option)) { ticked ->
+                                set(if (ticked) item.value + option else item.value.filterNot { it.equals(option, ignoreCase = true) }.toSet())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Suppress("UNCHECKED_CAST")
 @Composable
 private fun ItemAction(script: ConfigurableScript, item: ConfigItem<*>) {
+    if (item is MultiSelectConfigItem) {
+        val scan = item.scan ?: return
+        ActionButton(scan.label, {
+            onGameThread(item.name) {
+                item.rescan()
+                ScriptSettings.changed(script)
+            }
+        }, height = 32.dp)
+        return
+    }
     val action = (item as? ActionableConfig<Any?>)?.action ?: return
     ActionButton(action.label, {
-        action.run()?.let { produced ->
-            (item as ConfigItem<Any?>).value = produced
-            ScriptSettings.changed(script)
+        onGameThread(item.name) {
+            action.run()?.let { produced ->
+                (item as ConfigItem<Any?>).value = produced
+                ScriptSettings.changed(script)
+            }
         }
     }, height = 32.dp)
+}
+
+/**
+ * Runs a settings button's work on the game thread. Buttons read the game (a scan of nearby NPCs, the player's tile),
+ * and the client changes those tables mid-frame without locks, so a read from the overlay thread can see them half
+ * built and silently come back empty.
+ */
+private fun onGameThread(setting: String, work: () -> Unit) {
+    val queued = MainLogicTickQueue.enqueue {
+        runCatching(work).onFailure { println("[Settings] $setting: ${it.message ?: it}") }
+    }
+    if (!queued) println("[Settings] $setting: the game is busy; press it again")
 }
 
 @Composable
