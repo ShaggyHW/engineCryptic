@@ -365,6 +365,65 @@ pub async fn entitlements(client: &reqwest::Client) -> Result<Vec<Entitlement>> 
     Ok(body.entitlements)
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct StoreAccount {
+    pub name: Option<String>,
+    pub balance_cents: Option<i64>,
+    pub membership: Option<String>,
+    pub developer: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct MeBody {
+    name: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(rename = "balanceCents")]
+    balance_cents: Option<i64>,
+    #[serde(rename = "tokenBalance")]
+    token_balance: Option<i64>,
+    membership: Option<MeMembership>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MeMembership {
+    name: Option<String>,
+}
+
+impl From<MeBody> for StoreAccount {
+    fn from(me: MeBody) -> Self {
+        let developer = matches!(me.role.as_deref(), Some("DEVELOPER") | Some("ADMIN"));
+        StoreAccount {
+            name: me.name.filter(|n| !n.is_empty()),
+            balance_cents: me.balance_cents.or(me.token_balance.map(|t| t * 100)),
+            membership: me.membership.and_then(|m| m.name).filter(|n| !n.is_empty()),
+            developer,
+        }
+    }
+}
+
+pub async fn account(client: &reqwest::Client) -> Result<Option<StoreAccount>> {
+    let Some(stored) = read_token() else {
+        return Ok(None);
+    };
+    let url = format!("{}/api/v1/me", store_base());
+    let response = client
+        .get(&url)
+        .bearer_auth(stored.token)
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await
+        .with_context(|| format!("GET {} failed", url))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("The store no longer accepts this launcher's sign-in. Sign in again.");
+    }
+    if !response.status().is_success() {
+        bail!("The store would not say who you are ({})", response.status());
+    }
+    let body: MeBody = response.json().await.context("Could not read your store account")?;
+    Ok(Some(body.into()))
+}
+
 pub async fn install(client: &reqwest::Client, plugin: &StorePlugin) -> Result<PathBuf> {
     if loads_in_game(plugin) {
         bail!("{} is not saved on this PC: it loads in game", plugin.internal_name);
@@ -1373,6 +1432,67 @@ mod tests {
         let server = FakeStore::start(vec![]);
         let (_g, home) = scratch("signed-out", server.port);
         assert!(sync_owned_with(&client(), true).await.unwrap().is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    fn signed_in(label: &str, port: u16) -> (MutexGuard<'static, ()>, PathBuf) {
+        let scratch = scratch(label, port);
+        write_token(&StoredToken { token: "tok_abc".into(), name: Some("Cryptic".into()), store: None }).unwrap();
+        scratch
+    }
+
+    #[tokio::test]
+    async fn the_account_carries_the_balance_membership_and_developer_rank() {
+        let body = r#"{"name":".Cryptic.","role":"DEVELOPER","tokenBalance":144,"balanceCents":14448,
+            "membership":{"tier":"DRAGON","name":"Dragon"}}"#;
+        let server = FakeStore::start(vec![json("200 OK", body)]);
+        let (_g, home) = signed_in("account", server.port);
+
+        let account = account(&client()).await.unwrap().unwrap();
+
+        assert_eq!(
+            account,
+            StoreAccount {
+                name: Some(".Cryptic.".into()),
+                balance_cents: Some(14448),
+                membership: Some("Dragon".into()),
+                developer: true,
+            }
+        );
+        assert_eq!(server.requests(), vec!["GET /api/v1/me HTTP/1.1".to_string()]);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn a_player_without_membership_gets_no_rank_and_whole_tokens_still_count() {
+        let body = r#"{"name":"Player","role":"USER","tokenBalance":3,"membership":null}"#;
+        let server = FakeStore::start(vec![json("200 OK", body)]);
+        let (_g, home) = signed_in("account-plain", server.port);
+
+        let account = account(&client()).await.unwrap().unwrap();
+
+        assert_eq!(account.balance_cents, Some(300));
+        assert_eq!(account.membership, None);
+        assert!(!account.developer);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn an_admin_counts_as_a_developer() {
+        let server = FakeStore::start(vec![json("200 OK", r#"{"role":"ADMIN","balanceCents":0}"#)]);
+        let (_g, home) = signed_in("account-admin", server.port);
+
+        assert!(account(&client()).await.unwrap().unwrap().developer);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn a_signed_out_launcher_asks_nobody_who_it_is() {
+        let server = FakeStore::start(Vec::new());
+        let (_g, home) = scratch("account-signed-out", server.port);
+
+        assert_eq!(account(&client()).await.unwrap(), None);
+        assert!(server.requests().is_empty());
         let _ = fs::remove_dir_all(home);
     }
 }

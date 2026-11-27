@@ -576,6 +576,20 @@ sealed class Wait {
         @JvmOverloads
         fun solvePuzzleBox(onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.solvePuzzleBox() }
 
+        /**
+         * [solvePuzzleBox], asking [stopWhen] before every slide: once it holds, the box is left open where it stood and
+         * [onResult] gets false. Kotlin: `solvePuzzleBox(stopWhen)`.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun solvePuzzleBox(stopWhen: BooleanSupplier, onResult: Consumer<Boolean>? = null): Wait =
+            call(onResult) { this.solvePuzzleBox { stopWhen.asBoolean } }
+
+        /** Close the open puzzle box; [onResult] gets whether it shut. Kotlin: `closePuzzleBox`. */
+        @JvmStatic
+        @JvmOverloads
+        fun closePuzzleBox(onResult: Consumer<Boolean>? = null): Wait = call(onResult) { this.closePuzzleBox() }
+
         /** Take one [itemName] out of the Charos' clue carrier; [onResult] gets whether it arrived. Kotlin: `takeFromClueCarrier`. */
         @JvmStatic
         @JvmOverloads

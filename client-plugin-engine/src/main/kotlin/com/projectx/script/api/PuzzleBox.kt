@@ -26,6 +26,10 @@ private val puzzleBoard by lazy {
 /** Whether a sliding-tile puzzle box (a treasure-trail puzzle) is open. */
 val puzzleBoxOpen: Boolean get() = interfaces.isOpen(puzzleWindow)
 
+/** [solvePuzzleBox] with nothing to stop it. Kept as its own function: scripts built against it link to this one. */
+@JvmSynthetic
+suspend fun Script.solvePuzzleBox(): Boolean = solvePuzzleBox { false }
+
 /** The open puzzle box's board reads solved. False when no box is open or the board can't be read. */
 val puzzleBoxSolved: Boolean get() = puzzleBoxOpen && puzzleBoard.readBoard()?.isSolved(SOLVED) == true
 
@@ -33,6 +37,7 @@ val puzzleBoxSolved: Boolean get() = puzzleBoxOpen && puzzleBoard.readBoard()?.i
 fun clickPuzzleBoxClose(): Boolean = puzzleBoxOpen && IFSlot(puzzleClose ushr 16, puzzleClose and 0xFFFF).click(1)
 
 /** Closes the open puzzle box: its close button, then Escape if that didn't shut it. True once no box is open. */
+@JvmSynthetic
 suspend fun Script.closePuzzleBox(): Boolean {
     if (!puzzleBoxOpen) return true
     clickPuzzleBoxClose()
@@ -50,9 +55,8 @@ suspend fun Script.closePuzzleBox(): Boolean {
  * whatever stopped it (an attacker, a time limit) and solve on later without cancelling a keystroke halfway.
  * Java: `Wait.solvePuzzleBox`.
  */
-
 @JvmSynthetic
-suspend fun Script.solvePuzzleBox(stopWhen: () -> Boolean = { false }): Boolean {
+suspend fun Script.solvePuzzleBox(stopWhen: () -> Boolean): Boolean {
     repeat(MAX_REPLANS) {
         if (!puzzleBoxOpen || stopWhen()) return false
         val board = puzzleBoard.readBoard() ?: return false

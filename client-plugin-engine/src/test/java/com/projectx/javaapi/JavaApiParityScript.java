@@ -34,6 +34,7 @@ import com.projectx.script.api.GroupTeleports;
 import com.projectx.script.api.Lodestone;
 import com.projectx.script.api.MakeX;
 import com.projectx.script.api.Prayer;
+import com.projectx.script.api.PuzzleBoxKt;
 import com.projectx.script.api.TeleportSpell;
 import com.projectx.script.api.TileArea;
 import com.projectx.script.event.impl.XPDrop;
@@ -169,7 +170,9 @@ public class JavaApiParityScript extends JavaScript implements ConfigurableScrip
                 () -> Wait.dive(3205, 3205, 0, Ability.BLADED_DIVE),
                 () -> Wait.diveThenSurge(3205, 3205, 0, Ability.BLADED_DIVE, hops -> {}),
                 () -> Wait.surgeThenDive(3205, 3205, 0, Ability.BLADED_DIVE),
-                () -> Wait.refreshMasterFarmerHat(count -> {})
+                () -> Wait.refreshMasterFarmerHat(count -> {}),
+                () -> PuzzleBoxKt.getPuzzleBoxSolved() ? Wait.closePuzzleBox() : Wait.solvePuzzleBox(() -> me.isMoving(), ok -> {}),
+                () -> PuzzleBoxKt.clickPuzzleBoxClose() ? Wait.ms(300) : null
             );
         }
 

@@ -1,5 +1,6 @@
 package com.projectx.store
 
+import com.projectx.store.RareDropRules.AnnouncedDrop
 import com.projectx.store.RareDropRules.PetMessage
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -67,6 +68,51 @@ class RareDropsTest {
         drops.observe(emptyList(), 0L)
         drops.fighting(npc = 7, x = 3210, y = 3210, size = 1, plane = 0, now = 0L)
         assertEquals(emptyList(), drops.observe(listOf(GroundDrops.Stack(2, 1, 3210, 3210, 0)), 31_000L))
+    }
+
+    @Test
+    fun `the luck of the dwarves line names the item and how many`() {
+        val line = "<col=ff8000>Your Luck of the Dwarves ring shines brightly. You receive: 1 x Memory dowser.</col>"
+        assertEquals(AnnouncedDrop("Memory dowser", 1, news = false), RareDropRules.announcedDrop(line, "Test Player"))
+        assertEquals(AnnouncedDrop("Onyx", 1_200, news = false), RareDropRules.announcedDrop("You receive: 1,200 x Onyx.", null))
+    }
+
+    @Test
+    fun `a news broadcast counts only when it names this player`() {
+        val news = "<img=12><col=ff0000>News: Test Player has received a Memory Dowser drop!</col>"
+        assertEquals(AnnouncedDrop("Memory Dowser", 1, news = true), RareDropRules.announcedDrop(news, "Test Player"))
+        assertEquals(AnnouncedDrop("Memory Dowser", 1, news = true), RareDropRules.announcedDrop(news, "test player"))
+        assertEquals(
+            AnnouncedDrop("elder rune bar", 1, news = true),
+            RareDropRules.announcedDrop("News: Big\u00A0Name has received an elder rune bar drop!", "Big Name"),
+        )
+        assertNull(RareDropRules.announcedDrop(news, "Someone Else"))
+        assertNull(RareDropRules.announcedDrop(news, null))
+    }
+
+    @Test
+    fun `other game messages are not drops`() {
+        for (line in listOf("You have killed 2,057 The Gate of Elidinis.", "Oh dear, you are dead!", "You receive 5 coins.")) {
+            assertNull(RareDropRules.announcedDrop(line, "Test Player"), line)
+        }
+    }
+
+    @Test
+    fun `an announced drop is not reported again from the chest`() {
+        val announced = AnnouncedDrops(holdMillis = 60_000L)
+        announced.announce("Memory dowser", 1, now = 0L)
+        assertEquals(0, announced.unannounced("memory dowser", 1, now = 30_000L), "the chest shows the same dowser")
+        assertEquals(1, announced.unannounced("Memory dowser", 1, now = 31_000L), "a second dowser is a new drop")
+        assertEquals(2, announced.unannounced("Onyx", 2, now = 31_000L))
+    }
+
+    @Test
+    fun `an announcement only covers what it named, and not forever`() {
+        val announced = AnnouncedDrops(holdMillis = 60_000L)
+        announced.announce("Onyx", 1, now = 0L)
+        assertEquals(2, announced.unannounced("Onyx", 3, now = 1_000L))
+        announced.announce("Memory dowser", 1, now = 0L)
+        assertEquals(1, announced.unannounced("Memory dowser", 1, now = 61_000L))
     }
 
     @Test

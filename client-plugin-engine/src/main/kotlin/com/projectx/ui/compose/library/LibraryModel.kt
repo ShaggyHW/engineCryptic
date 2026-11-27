@@ -63,8 +63,6 @@ object LibraryModel : ScriptShelf {
     override val search = OverlayText(maxLength = 40)
     override val local = false
 
-    private val categories = mutableMapOf<String, ScriptCategory>()
-
     fun refresh() {
         val favorites = UIState.favoriteScripts
         val running = ScriptExecutor.activeScripts.mapTo(HashSet()) { it.javaClass }
@@ -103,9 +101,8 @@ object LibraryModel : ScriptShelf {
         }
     }
 
-    private fun categoryOf(meta: ScriptMetadata): ScriptCategory = categories.getOrPut(meta.scriptClass.name) {
+    private fun categoryOf(meta: ScriptMetadata): ScriptCategory =
         meta.scriptClass.getAnnotation(ScriptDescription::class.java)?.category ?: ScriptCategory.OTHER
-    }
 }
 
 /** The developer's own scripts, from `~/.projectx/scripts/dev`, kept apart from everything the store installs. */
