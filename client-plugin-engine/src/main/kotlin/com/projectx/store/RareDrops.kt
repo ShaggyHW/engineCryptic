@@ -38,6 +38,7 @@ internal object RareDrops {
     private val containers = ContainerDrops()
     private var ground = GroundDrops()
     private val reported = HashMap<String, Long>()
+    private val announced = AnnouncedDrops()
     private var lastPoll = 0L
     private var lastPrices = 0L
     private var active = false
@@ -115,9 +116,13 @@ internal object RareDrops {
     }
 
     private fun onEvent(event: Event) {
-        if (event !is Chat || !event.cleanSenderName.isNullOrBlank()) return
-        val pet = RareDropRules.petMessage(event.message) ?: return
-        if (!active) return
+        if (event !is Chat || !event.cleanSenderName.isNullOrBlank() || !active) return
+        val pet = RareDropRules.petMessage(event.message)
+        if (pet == null) {
+            val playerName = runCatching { localPlayer.name }.getOrNull()
+            RareDropRules.announcedDrop(event.message, playerName)?.let(::announcedLoot)
+            return
+        }
         if (pet == RareDropRules.PetMessage.DUPLICATE) {
             report("PET", 0, "Pet (already owned)", 1)
             return
@@ -148,8 +153,18 @@ internal object RareDrops {
         val id = baseId(rawId)
         if (id <= 0 || id == COINS) return
         val name = nameOf(id) ?: return
-        if (!RareDropRules.worthReporting(name, stackValue(id, amount))) return
-        report("VALUABLE", id, name, amount)
+        val fresh = announced.unannounced(name, amount, System.currentTimeMillis())
+        if (fresh <= 0 || !RareDropRules.worthReporting(name, stackValue(id, fresh))) return
+        report("VALUABLE", id, name, fresh)
+    }
+
+    /** The player's own News broadcast is only ever sent for a rare drop, so it counts whatever the price. */
+    private fun announcedLoot(drop: RareDropRules.AnnouncedDrop) {
+        val id = GrandExchangePrices.item(drop.itemName)?.id ?: 0
+        val name = (if (id > 0) nameOf(id) else null) ?: drop.itemName
+        val value = if (id > 0) stackValue(id, drop.quantity) else null
+        if (id == COINS || !(drop.news || RareDropRules.worthReporting(name, value))) return
+        if (report("VALUABLE", id, name, drop.quantity)) announced.announce(name, drop.quantity, System.currentTimeMillis())
     }
 
     private fun baseId(id: Int): Int {
@@ -168,12 +183,13 @@ internal object RareDrops {
         return each * amount
     }
 
-    private fun report(kind: String, itemId: Int, itemName: String, quantity: Int) {
+    /** False when nothing was sent: the same item was reported moments ago, or there is no store script or token. */
+    private fun report(kind: String, itemId: Int, itemName: String, quantity: Int): Boolean {
         val now = System.currentTimeMillis()
         reported.values.removeIf { now - it > SAME_DROP_MILLIS }
-        if (reported.putIfAbsent(itemName.lowercase(), now) != null) return
-        val script = RunReports.storeScript() ?: return
-        val token = Entitlements.token() ?: return
+        if (reported.putIfAbsent(itemName.lowercase(), now) != null) return false
+        val script = RunReports.storeScript() ?: return false
+        val token = Entitlements.token() ?: return false
         val body = JsonObject().apply {
             addProperty("scriptInternalName", script)
             addProperty("kind", kind)
@@ -183,6 +199,7 @@ internal object RareDrops {
         }
         println("[RareDrops] $itemName x$quantity ($kind) with $script")
         worker.execute { runCatching { post(body.toString(), token) } }
+        return true
     }
 
     private fun post(body: String, token: String) {
