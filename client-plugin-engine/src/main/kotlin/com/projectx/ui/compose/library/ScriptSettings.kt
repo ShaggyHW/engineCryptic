@@ -76,12 +76,13 @@ object ScriptSettings {
 
     fun instanceFor(meta: ScriptMetadata): ConfigurableScript? {
         (ScriptExecutor.getScriptInstance(meta.scriptClass) as? ConfigurableScript)?.let { return it }
-        return drafts.getOrPut(meta.scriptClass.name) {
-            val created = runCatching { meta.scriptClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance() }.getOrNull() as? ConfigurableScript
-                ?: return null
-            ScriptConfigStore.applyTo(created)
-            created
-        }
+        // A rebuilt jar reloads the script under the same name, so a draft of the previous build must not be reused.
+        drafts[meta.scriptClass.name]?.takeIf { it.javaClass === meta.scriptClass }?.let { return it }
+        val created = runCatching { meta.scriptClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance() }.getOrNull() as? ConfigurableScript
+            ?: return null
+        ScriptConfigStore.applyTo(created)
+        drafts[meta.scriptClass.name] = created
+        return created
     }
 
     fun items(script: ConfigurableScript): List<Pair<String, ConfigItem<*>>> {
@@ -116,7 +117,7 @@ object ScriptSettings {
 
 @Composable
 fun ScriptSettingsView(meta: ScriptMetadata) {
-    val script = remember(meta.scriptClass.name) { ScriptSettings.instanceFor(meta) }
+    val script = remember(meta.scriptClass) { ScriptSettings.instanceFor(meta) }
     if (script == null) {
         Hint("This script's settings could not be loaded.")
         return
