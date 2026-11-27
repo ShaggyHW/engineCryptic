@@ -91,6 +91,10 @@
 
   const userName = $("#user-name");
   const userSub = $("#user-sub");
+  const userTier = $("#user-tier");
+  const userDeveloper = $("#user-developer");
+  const userBalanceRow = $("#user-balance-row");
+  const userBalance = $("#user-balance");
   const btnUserSignIn = $("#btn-user-sign-in");
   const btnUserSignOut = $("#btn-user-sign-out");
 
@@ -1136,11 +1140,24 @@
     send({ type: "store_scripts" });
   }
 
+  function formatTokens(cents) {
+    return (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2)) + " X";
+  }
+
   function renderUserCard() {
     const status = state.store;
     const signedIn = !!(status && status.signed_in);
     const pairing = status && status.pairing;
+    const account = signedIn ? status.account : null;
     userName.textContent = signedIn ? status.name || "Signed in" : "Not signed in";
+    userName.title = userName.textContent;
+    userTier.hidden = !(account && account.membership);
+    userTier.textContent = account && account.membership ? account.membership : "";
+    userDeveloper.hidden = !(account && account.developer);
+    const cents = account && typeof account.balance_cents === "number" ? account.balance_cents : null;
+    userBalanceRow.hidden = cents === null;
+    userBalance.textContent = cents === null ? "" : formatTokens(cents);
+    userSub.hidden = !!account;
     userSub.textContent = signedIn
       ? "Store linked. Scripts you buy install by themselves."
       : pairing
@@ -1415,4 +1432,8 @@
   // The backend answers "ready" with "init", so the payload always lands after the callback is installed.
   renderAccounts();
   send({ type: "ready" });
+  // Tokens bought or a membership started on the website show up without a restart.
+  setInterval(() => {
+    if (state.store && state.store.signed_in && !document.hidden) send({ type: "store_status" });
+  }, 60000);
 })();

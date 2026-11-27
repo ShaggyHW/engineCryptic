@@ -206,6 +206,8 @@ pub enum IpcEvent {
         /// A pairing waiting to be approved, if one is in flight.
         pairing: Option<StorePairing>,
         error: Option<String>,
+        /// Balance and ranks, once the store has answered for the signed-in account.
+        account: Option<store::StoreAccount>,
     },
 }
 
@@ -758,6 +760,7 @@ pub struct IpcState {
     scheduler_running: Arc<AtomicBool>,
     /// Set while a pairing awaits approval, so a second press cannot invalidate the code on screen.
     store_pairing: Arc<AtomicBool>,
+    store_account: Mutex<Option<store::StoreAccount>>,
     /// Set while a launcher update downloads, so a second press cannot start another over it.
     launcher_updating: AtomicBool,
 }
@@ -809,6 +812,7 @@ impl IpcState {
             plugin_busy: Mutex::new(Vec::new()),
             scheduler_running: Arc::new(AtomicBool::new(false)),
             store_pairing: Arc::new(AtomicBool::new(false)),
+            store_account: Mutex::new(None),
             launcher_updating: AtomicBool::new(false),
         }
     }
@@ -852,6 +856,7 @@ impl IpcState {
                 self.spawn_startup_account_refresh();
                 self.spawn_startup_update_check();
                 self.emit_store_status(None, None);
+                self.refresh_store_account();
             }
             IpcMessage::Login => {
                 self.cmd_tx.send(AppCommand::OpenLoginWindow)?;
@@ -941,12 +946,14 @@ impl IpcState {
             }
             IpcMessage::StoreStatus => {
                 self.emit_store_status(None, None);
+                self.refresh_store_account();
             }
             IpcMessage::StoreSignIn => {
                 self.handle_store_sign_in();
             }
             IpcMessage::StoreSignOut => {
                 let error = store::sign_out().err().map(|e| format!("{}", e));
+                *self.store_account.lock().unwrap() = None;
                 self.emit_store_status(None, error);
                 self.handle_store_scripts();
             }
@@ -1709,12 +1716,43 @@ impl IpcState {
 
     fn emit_store_status(&self, pairing: Option<StorePairing>, error: Option<String>) {
         let stored = store::read_token();
+        let account = stored
+            .as_ref()
+            .and_then(|_| self.store_account.lock().unwrap().clone());
+        let name = account
+            .as_ref()
+            .and_then(|a| a.name.clone())
+            .or_else(|| stored.as_ref().and_then(|t| t.name.clone()));
         self.send_event(&IpcEvent::StoreStatus {
             signed_in: stored.is_some(),
-            name: stored.and_then(|t| t.name),
+            name,
             store: store::store_base(),
             pairing,
             error,
+            account,
+        });
+    }
+
+    fn refresh_store_account(self: &Arc<Self>) {
+        if store::read_token().is_none() {
+            return;
+        }
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            match store::account(&crate::http_client()).await {
+                Ok(account) => {
+                    let changed = {
+                        let mut held = state.store_account.lock().unwrap();
+                        let changed = *held != account;
+                        *held = account;
+                        changed
+                    };
+                    if changed {
+                        state.emit_store_status(None, None);
+                    }
+                }
+                Err(e) => log::warn!("Could not read the store account: {}", e),
+            }
         });
     }
 
@@ -1742,6 +1780,7 @@ impl IpcState {
             match result {
                 Ok(_) => {
                     state.emit_store_status(None, None);
+                    state.refresh_store_account();
                     state.handle_store_scripts();
                 }
                 Err(e) => state.emit_store_status(None, Some(format!("{}", e))),

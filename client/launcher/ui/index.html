@@ -83,9 +83,16 @@
       </div>
       <div class="nav-foot">
         <div class="user-card">
-          <div class="user-row">
+          <div class="user-row user-identity">
             <span id="user-name" class="user-name">Not signed in</span>
-            <span class="user-tier">Store</span>
+            <span class="user-ranks">
+              <span id="user-tier" class="user-tier" hidden></span>
+              <span id="user-developer" class="user-tier user-developer" hidden>Developer</span>
+            </span>
+          </div>
+          <div id="user-balance-row" class="user-row user-balance-row" hidden>
+            <span>Balance</span>
+            <span id="user-balance" class="user-balance"></span>
           </div>
           <div id="user-sub" class="user-sub">Sign in so the scripts you buy install here.</div>
           <button id="btn-user-sign-in" class="btn btn-small btn-strong user-action" type="button">
