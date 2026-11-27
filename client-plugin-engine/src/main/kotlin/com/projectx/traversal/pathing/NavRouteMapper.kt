@@ -1,14 +1,13 @@
 package com.projectx.traversal.pathing
 
 import com.projectx.script.api.TeleportSpell
-import com.projectx.webwalker.MeasuredLinks
+import com.projectx.traversal.pathing.mappers.LodestoneMapper
 import com.projectx.webwalker.WebArea
 import com.projectx.webwalker.WebGrid
 import com.projectx.webwalker.WebInterfaceStep
 import com.projectx.webwalker.WebItemStep
 import com.projectx.webwalker.WebLink
 import com.projectx.webwalker.WebLinkKind
-import com.projectx.webwalker.WebLinks
 import com.projectx.webwalker.WebNestedStep
 import com.projectx.webwalker.WebObjectStep
 import com.projectx.webwalker.WebPath
@@ -139,7 +138,6 @@ internal object NavRouteMapper {
 
     /** The step as a link, or null when it is left out: a spell or lodestone this engine does not know. */
     private fun chained(step: Step.HasChain, approach: Tile, landing: Tile): WebLink? {
-        if (step is Step.Loc) MeasuredLinks.promptLink(step.id, step.action, landing)?.let { return it }
         val area = landingArea(step)
         val link = when (step) {
             is Step.Door -> link(WebLinkKind.DOOR, approach, NavArea.of(landing), landing, step.openAction ?: "Open", step.realIdClosed ?: step.realIdOpen ?: -1, null)
@@ -158,7 +156,7 @@ internal object NavRouteMapper {
                     .then(WebInterfaceStep(step.interfaceId, step.component, step.slot, step.clickId), *chain(step.chain).toTypedArray())
             }
             is Step.Lodestone -> link(WebLinkKind.LODESTONE, approach, null, landing, "Teleport", -1, null)
-                .toLodestone(WebLinks.lodestoneNamed(step.value) ?: return skipped("lodestone ${step.value}"))
+                .toLodestone(LodestoneMapper.resolve(step.value) ?: return skipped("lodestone ${step.value}"))
             is Step.Spell -> link(WebLinkKind.SPELL, approach, area, landing, step.action ?: CAST, -1, null)
                 .casting(spellOf(step) ?: return skipped("spell ${step.spell} (${step.name})"))
         }
@@ -209,7 +207,7 @@ internal object NavRouteMapper {
             from = WebArea(from.x - RING_REACH, from.x + RING_REACH, from.y - RING_REACH, from.y + RING_REACH, from.plane),
             to = WebArea(step.to.x - RING_REACH, step.to.x + RING_REACH, step.to.y - RING_REACH, step.to.y + RING_REACH, step.to.plane),
             cost = WebGrid.STEP_COST,
-            action = MeasuredLinks.ringAction(step.objectId) ?: step.action.ifBlank { DEFAULT_RING_ACTION },
+            action = step.action.ifBlank { DEFAULT_RING_ACTION },
             objectId = step.objectId,
             searchRadius = RING_SEARCH,
             requirements = emptyList(),

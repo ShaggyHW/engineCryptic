@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build a snapshot from the merged map with each built builder, then start its service on it and route.
+"""Build a snapshot from the shipped map with each built builder, then start its service on it and route.
 
     navpath-smoke.py <navpath archive dir> <navpath-map.db>
 
 The archive dir holds what the release ships: navpath-builder, navpath-service and their -baseline copies. Each
 pair has to build a snapshot, answer /health and plan Lumbridge to Castle Wars, which is everything a source update,
-a map merge or a toolchain change can break before the launcher runs it.
+a map update or a toolchain change can break before the launcher runs it.
 """
 
 import json

@@ -2,7 +2,6 @@ package com.projectx.webwalker
 
 import com.projectx.script.api.Lodestone
 import com.projectx.script.api.TeleportSpell
-import com.projectx.traversal.pathing.RingPermissions
 import world.gregs.voidps.type.Tile
 
 /** What a route has to do to cross a [WebLink], which is what tells the walker how to perform it. */
@@ -70,9 +69,7 @@ data class WebArea(
 /**
  * A condition on using a link: a varbit or varp value, a skill level, or coins in the pouch.
  *
- * [key] is `varbit_<id>`, `varp_<id>`, `<skill>Level`, `coins`, or an opaque flag the converter carried over;
- * anything this engine cannot evaluate is treated as met, so an unrecognised gate costs a re-plan rather than
- * making a destination unreachable. See [RingPermissions].
+ * [key] is `varbit_<id>`, `varp_<id>`, `<skill>Level`, `coins`, or an opaque flag.
  */
 data class WebRequirement(
     val about: String?,
@@ -146,9 +143,7 @@ data class WebTarget(val id: Int, val name: String? = null) {
 /**
  * A step a route can take that walking cannot: up a staircase, down a ladder, through a shortcut or a door.
  *
- * Walk edges come from collision, so the pathfinder discovers them itself. A link cannot be derived that way -
- * nothing in the cache says where a staircase comes out - so links come from [WebLinks], which loads the curated
- * set converted from navpathService.
+ * Each one is a step of a navpath route, as `NavRouteMapper` maps it; navpath is the only source of them.
  *
  * [from] is where the player must stand and [to] is where they end up; the two may be on different planes, which
  * is the point. [cost] is in the pathfinder's own units, so it compares directly with walked tiles.

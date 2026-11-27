@@ -95,7 +95,6 @@ INTERNAL_TYPES = {
     "com.projectx.webwalker.IntIntMap",
     "com.projectx.webwalker.JujuSpiritbag",
     "com.projectx.webwalker.MasterFarmerHat",
-    "com.projectx.webwalker.MeasuredLinks",
     "com.projectx.webwalker.WebCollision",
     "com.projectx.webwalker.WebItemStep",
     "com.projectx.webwalker.WebNestedStep",

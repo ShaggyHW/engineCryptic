@@ -18,11 +18,9 @@ import com.projectx.traversal.pathing.NavOptions
 import com.projectx.traversal.pathing.NavPathClient
 import com.projectx.traversal.pathing.NavPathUnavailableException
 import com.projectx.traversal.pathing.NavRequest
-import com.projectx.traversal.pathing.NavRoute
 import com.projectx.traversal.pathing.NavRouteMapper
 import com.projectx.traversal.pathing.PathingTraversal
 import com.projectx.traversal.pathing.RequirementsBuilder
-import com.projectx.traversal.pathing.RingPermissions
 import com.projectx.traversal.pathing.ResultsParseException
 import com.projectx.traversal.pathing.Step
 import com.projectx.traversal.pathing.mappers.LodestoneMapper
@@ -47,7 +45,6 @@ object WebWalker {
     private const val SEARCH_TIMEOUT_MS = 60_000L
     private const val SEARCH_POLL_MS = 50
     private const val DRIVE_POLL_MS = 50
-    private const val MAX_RING_REPLANS = 4
 
     // A ring that drops the player this far from where it was dialled, nowhere near its landing, went elsewhere.
     private const val LANDED_ELSEWHERE_TILES = 20
@@ -110,7 +107,7 @@ object WebWalker {
         val goal = WalkGoal.Near(Tile.of(destX, destY, plane), arriveDistance.coerceAtLeast(0))
         val request = request(from, goal, teleports = false, withoutSpells = emptySet())
         val goals = request?.let { goal.goalSet(from) }
-        return CompletableFuture.supplyAsync({ navpath(from, goal, request, goals, teleports = false).first }, planner)
+        return CompletableFuture.supplyAsync({ navpath(from, goal, request, goals, teleports = false) }, planner)
     }
 
     /**
@@ -131,10 +128,9 @@ object WebWalker {
         if (goal is WalkGoal.Tiles && goal.isEmpty) return WebWalkResult(WebWalkStatus.NO_PATH, "The area holds no tiles")
         // Requirements read varbits, levels, the money pouch and what is carried, which may only be touched here on
         // the game thread; the planner runs on its own thread.
-        val permissions = RingPermissions.snapshot()
-        val request = request(from, goal, teleports = false, withoutSpells = emptySet())?.copy(exclude = MeasuredLinks.setAsideNow())
+        val request = request(from, goal, teleports = false, withoutSpells = emptySet())?.copy(exclude = PathingTraversal.setAsideNow())
         val goals = request?.let { goal.goalSet(from) }
-        val future = CompletableFuture.supplyAsync({ planAllowed(from, goal, request, goals, teleports = false, permissions) }, planner)
+        val future = CompletableFuture.supplyAsync({ navpath(from, goal, request, goals, teleports = false) }, planner)
         script.delayUntil(SEARCH_TIMEOUT_MS, SEARCH_POLL_MS) { future.isDone || script.stopped }
         if (!future.isDone) {
             future.cancel(false)
@@ -283,7 +279,7 @@ object WebWalker {
             val macro = node.navMacro ?: return
             // A ring the account hasn't unlocked sends you to Zanaris instead; dialling it again only loops.
             println("[WebWalk] $node left us at $here, not its destination; leaving it out for now")
-            MeasuredLinks.setAside(macro)
+            PathingTraversal.setAside(macro)
             exclude += macro
             ringTakeoff = null
             if (!driver.processor.requestRepath()) driver.processor.requestFail("fairy ring to ${ring.code} landed elsewhere")
@@ -301,25 +297,6 @@ object WebWalker {
         private fun tile(): Tile = TraversalSupport.serverTileOrNull() ?: localPlayer.tile
     }
 
-    /** Plans, leaving out and planning again around any fairy ring on the route this account can't use. */
-    private fun planAllowed(
-        from: Tile,
-        goal: WalkGoal,
-        request: NavRequest?,
-        goals: NavGoalSet?,
-        teleports: Boolean,
-        permissions: RingPermissions,
-    ): WebWalkResult {
-        var asked = request
-        repeat(MAX_RING_REPLANS) {
-            val (planned, route) = navpath(from, goal, asked, goals, teleports)
-            val ring = route?.let { permissions.forbiddenRing(it.steps) } ?: return planned
-            val macro = ring.macro ?: return WebWalkResult(WebWalkStatus.NO_PATH, "The route needs the fairy ring to ${ring.code}, which this account can't use")
-            asked = asked?.let { it.copy(exclude = it.exclude + macro) }
-        }
-        return WebWalkResult(WebWalkStatus.NO_PATH, "Every route found needs a fairy ring this account can't use")
-    }
-
     /** What this account can use on the way, read on the game thread; null inside an instance or when it can't be read. */
     private fun request(from: Tile, goal: WalkGoal, teleports: Boolean, withoutSpells: Set<TeleportSpell>): NavRequest? {
         if (from.x >= INSTANCE_MIN_X || goal.maxX >= INSTANCE_MIN_X) return null
@@ -327,17 +304,16 @@ object WebWalker {
         return runCatching { RequirementsBuilder.request(from, goal.centre, routing, withoutSpells) }.getOrNull()
     }
 
-    /** The result, with the route it was planned from when one was. */
-    private fun navpath(from: Tile, goal: WalkGoal, request: NavRequest?, goals: NavGoalSet?, teleports: Boolean): Pair<WebWalkResult, NavRoute?> {
+    private fun navpath(from: Tile, goal: WalkGoal, request: NavRequest?, goals: NavGoalSet?, teleports: Boolean): WebWalkResult {
         if (from.x >= INSTANCE_MIN_X || goal.maxX >= INSTANCE_MIN_X) {
-            return WebWalkResult(WebWalkStatus.NOT_IN_WORLD, "Web walking does not work inside instances") to null
+            return WebWalkResult(WebWalkStatus.NOT_IN_WORLD, "Web walking does not work inside instances")
         }
-        request ?: return WebWalkResult(WebWalkStatus.NO_PATH, "Couldn't read what this account can use on the way") to null
+        request ?: return WebWalkResult(WebWalkStatus.NO_PATH, "Couldn't read what this account can use on the way")
         val outcome = runCatching { NavPathClient.local.plan(request, goals, teleports) }
             .getOrElse { NavPathClient.Outcome.Failed("route planning failed: ${it.javaClass.simpleName}") }
         return when (outcome) {
-            is NavPathClient.Outcome.Planned -> WebWalkResult(WebWalkStatus.PATH_FOUND, "Route found", outcome.path) to outcome.route
-            is NavPathClient.Outcome.Failed -> WebWalkResult(WebWalkStatus.NO_PATH, "No route: ${outcome.reason}") to null
+            is NavPathClient.Outcome.Planned -> WebWalkResult(WebWalkStatus.PATH_FOUND, "Route found", outcome.path)
+            is NavPathClient.Outcome.Failed -> WebWalkResult(WebWalkStatus.NO_PATH, "No route: ${outcome.reason}")
         }
     }
 }

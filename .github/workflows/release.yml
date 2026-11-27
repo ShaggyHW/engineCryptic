@@ -346,7 +346,7 @@ jobs:
           path: dist/
           retention-days: 3
 
-  # Upstream's map at the commit navpath/UPSTREAM pins, with links.json merged in. Platform-independent, so built once.
+  # Upstream's map at the commit navpath/UPSTREAM pins, shipped unchanged. Platform-independent, so built once.
   navpath-map:
     needs: version
     runs-on: ubuntu-latest
@@ -355,22 +355,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: false
-          sparse-checkout: |
-            .github
-            navpath
-            client-plugin-engine/src/main/resources/webwalker
-      - name: Test the merge
-        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
-      # Upstream knows a few hundred doors; the game's other doors and the rooms behind them go in first, then our links.
-      - name: Add doors, then merge links.json
+          sparse-checkout: navpath
+      - name: Stage upstream's map
         run: |
           set -eu
           v='${{ needs.version.outputs.version }}'
-          mkdir -p dist work
-          python3 .github/scripts/navpath_doors.py --db navpath/worldReachableTiles.db \
-            --doors navpath/doors/navpath-doors.tsv --tiles navpath/doors/navpath-tiles.tsv --out work/doors.db
-          python3 .github/scripts/navpath_map.py work/doors.db \
-            client-plugin-engine/src/main/resources/webwalker/links.json "dist/navpath-map-$v.db"
+          mkdir -p dist
+          cp navpath/worldReachableTiles.db "dist/navpath-map-$v.db"
           cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
           ls -la
       - uses: actions/upload-artifact@v4

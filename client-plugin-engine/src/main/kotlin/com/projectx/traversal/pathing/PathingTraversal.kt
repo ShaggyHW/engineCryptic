@@ -26,7 +26,6 @@ import com.projectx.traversal.nodes.TraversalSupport
 import com.projectx.traversal.pathing.mappers.MoveMapper
 import com.projectx.traversal.pathing.mappers.StepMapperRegistry
 import com.projectx.webwalker.WalkGoal
-import com.projectx.webwalker.MeasuredLinks
 import kotlinx.coroutines.future.await
 import org.projectx.core.game.combat.Ability
 import org.projectx.core.game.combat.CombatIds
@@ -35,6 +34,7 @@ import org.projectx.core.game.skill.Skill
 import world.gregs.voidps.gameval.Gameval
 import world.gregs.voidps.type.Tile
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.math.roundToLong
@@ -58,9 +58,9 @@ object PathingTraversal {
     internal class Routed(val nodes: TraversalNodeList, val route: NavRoute, val options: NavOptions)
 
     /** How long a fairy ring that landed somewhere else stays out of every route. */
-    const val MISROUTE_MEMORY_MS = MeasuredLinks.MISROUTE_MEMORY_MS
+    const val MISROUTE_MEMORY_MS = 30 * 60_000L
 
-    private const val MAX_RING_REPLANS = 4
+    private val setAsideUntil = ConcurrentHashMap<NavMacro, Long>()
 
     /** Surge / Dive cooldown while a Powerburst of acceleration runs. */
     private const val BURST_COOLDOWN_MS = 1_200L
@@ -84,13 +84,21 @@ object PathingTraversal {
     private var mobile = false
 
     /** Leaves [macro] out of every route for [forMs]. */
-    fun setAside(macro: NavMacro, forMs: Long = MISROUTE_MEMORY_MS) = MeasuredLinks.setAside(macro, forMs)
+    fun setAside(macro: NavMacro, forMs: Long = MISROUTE_MEMORY_MS) {
+        setAsideUntil[macro] = System.currentTimeMillis() + forMs
+    }
+
+    internal fun setAsideNow(): Set<NavMacro> {
+        val now = System.currentTimeMillis()
+        setAsideUntil.values.removeIf { it <= now }
+        return setAsideUntil.keys.toSet()
+    }
 
     suspend fun pathInfo(start: Tile, goal: Tile, options: NavOptions = NavOptions(start, goal)): PathInfo {
         if (options.start == null) options.start = start
         if (options.goal == null) options.goal = goal
         options.requirements = RequirementsBuilder.requirements(options.useItems)
-        val route = requestRoute(options, goalsOf(options), MeasuredLinks.setAsideNow())
+        val route = requestRoute(options, goalsOf(options), setAsideNow())
         return PathInfo(start, goal, route.cost)
     }
 
@@ -162,7 +170,7 @@ object PathingTraversal {
             it.start = from
             it.goal = to
         }
-        val route = requestRoute(options, null, MeasuredLinks.setAsideNow())
+        val route = requestRoute(options, null, setAsideNow())
         return Leg(from, to, route.found, route.cost, route.steps)
     }
 
@@ -325,19 +333,9 @@ object PathingTraversal {
         append: (TraversalBuilder<T>, NavOptions) -> Unit,
     ): Routed {
         sample(script, options)
-        val permissions = RingPermissions.snapshot()
-        val excluded = HashSet(exclude).apply { addAll(MeasuredLinks.setAsideNow()) }
+        val excluded = HashSet(exclude).apply { addAll(setAsideNow()) }
         log("[PathingTraversal] Executing navpath request. Start: ${options.start}, Goal: ${options.goal}")
-        var route = requestRoute(options, goals, excluded)
-        var replans = 0
-        while (true) {
-            val ring = permissions.forbiddenRing(route.steps) ?: break
-            val macro = ring.macro ?: throw NoRouteException("the route needs the fairy ring to ${ring.code}, which this account can't use")
-            if (++replans > MAX_RING_REPLANS) throw NoRouteException("every route found needs a fairy ring this account can't use")
-            log("[PathingTraversal] The route takes the fairy ring to ${ring.code}, which this account can't use - routing without it")
-            excluded += macro
-            route = requestRoute(options, goals, excluded)
-        }
+        val route = requestRoute(options, goals, excluded)
         if (!route.found) throw NoRouteException("the planner found no route")
         val steps = if (options.clientPlacedAbilities) MoveMapper.abilityStepsAsMoves(route.steps) else route.steps
         log("[PathingTraversal] Path found: ${route.found}, cost: ${route.cost}, durationMs: ${route.durationMs}, lengthTiles: ${route.lengthTiles}")

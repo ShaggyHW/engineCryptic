@@ -16,9 +16,6 @@ import com.projectx.script.api.pressKey
 import com.projectx.script.api.varcs
 import com.projectx.traversal.TraversalNode
 import com.projectx.util.FeatureIds
-import com.projectx.webwalker.WebLink
-import com.projectx.webwalker.WebLinkKind
-import com.projectx.webwalker.WebLinks
 import world.gregs.voidps.gameval.Gameval
 import world.gregs.voidps.type.Tile
 import kotlin.math.abs
@@ -51,7 +48,7 @@ class FairyRingNode private constructor(
     private var teleportPressedMs = 0L
     private var attackRerouteRefused = false
 
-    /** Dials [code] at the nearest ring the measured link set knows, or from the portable ring when [portable]. */
+    /** Dials [code] at the nearest fairy ring, or from the portable ring when [portable]. */
     @JvmOverloads
     constructor(code: String, portable: Boolean = false, customReached: (() -> Boolean)? = null) :
         this(-1, code, "", DEFAULT_SEARCH_RADIUS, customReached, portable)
@@ -64,10 +61,6 @@ class FairyRingNode private constructor(
         objectSearchRadius: Int = DEFAULT_SEARCH_RADIUS,
         customReached: (() -> Boolean)? = null,
     ) : this(fairyRingObjectId, code, action, objectSearchRadius, customReached, false)
-
-    private val measuredLanding: WebLink? by lazy {
-        WebLinks.all.firstOrNull { it.kind == WebLinkKind.FAIRY_RING && it.portable && it.fairyCode == this.code }
-    }
 
     /** A ring, not the portable one, takes a Dramen or Lunar staff wielded until A Fairy Tale III is done. */
     override fun needsDramenStaff(): Boolean = super.needsDramenStaff() || !portable && DramenStaff.fairyRingsNeedIt()
@@ -149,23 +142,12 @@ class FairyRingNode private constructor(
 
     private class Ring(val obj: SceneObject, val action: String)
 
-    /** The ring object to click: by the node's id, or the nearest ring the measured link set has for this code. */
+    /** The ring object to click: by the node's id, or the nearest fairy ring when it has none. */
     private fun ringObject(): Ring? {
         if (fairyRingObjectId >= 0) {
             return findClosestObject(objectSearchRadius) { it.id == fairyRingObjectId }?.let { Ring(it, action) }
         }
-        val link = nearestMeasuredRing() ?: return null
-        return findClosestObject(link.searchRadius) { it.id == link.objectId || it.visibleTypeId == link.objectId }
-            ?.let { Ring(it, action.ifBlank { link.action }) }
-    }
-
-    private fun nearestMeasuredRing(): WebLink? {
-        val me = TraversalSupport.serverTileOrNull() ?: return null
-        fun reach(link: WebLink) = max(abs(link.from.centreX - me.x), abs(link.from.centreY - me.y))
-        return WebLinks.all.asSequence()
-            .filter { it.kind == WebLinkKind.FAIRY_RING && !it.portable && it.fairyCode == code && it.from.plane == me.plane }
-            .minByOrNull(::reach)
-            ?.takeIf { reach(it) <= it.searchRadius }
+        return findClosestObject(RING_NAME, objectSearchRadius)?.let { Ring(it, action.ifBlank { DEFAULT_ACTION }) }
     }
 
     private suspend fun openFromItem(script: Script): Boolean {
@@ -238,10 +220,7 @@ class FairyRingNode private constructor(
         customReached?.let { return it() }
         val here = TraversalSupport.serverTileOrNull() ?: return false
         if (TraversalSupport.isAnimating()) return false
-        selectedTile?.let { return here == it }
-        val to = measuredLanding?.to ?: return false
-        return here.plane == to.plane && here.x in to.minX - LANDING_SLACK..to.maxX + LANDING_SLACK &&
-            here.y in to.minY - LANDING_SLACK..to.maxY + LANDING_SLACK
+        return selectedTile == here
     }
 
     private suspend fun awaitArrivalAnimation() {
@@ -330,6 +309,8 @@ class FairyRingNode private constructor(
 
     companion object {
         private const val DEFAULT_SEARCH_RADIUS = 30
+        private const val RING_NAME = "Fairy ring"
+        private const val DEFAULT_ACTION = "Configure"
         private const val PORTABLE_OPTION = "Teleport"
         private const val ACTIVATE_OPTION = "Activate"
         private const val ACTIVATE_REFUSED = "already have an active version"
@@ -338,7 +319,6 @@ class FairyRingNode private constructor(
         private const val ACTIVATE_WAIT_MS = 3_000L
         private const val LANDING_TIMEOUT_MS = 15_000L
         private const val CLOSE_WAIT_MS = 1_200L
-        private const val LANDING_SLACK = 4
 
         // The arrival animation starts on the landing tick or the next one.
         private const val ARRIVAL_START_MS = 1_200L

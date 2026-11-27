@@ -14,7 +14,7 @@ class RequirementsBuilderTest {
             "hasSpiritTreeReRooter", "hasQuestCape", "hasLeelasFavour", "hasLeelasFavourEquiped", "hasPortableObelisk",
             "hasDA4Equiped", "hasJujuTeleportSpiritbag", "hasBigBookOPiracy", "hasNaturesSentinelTeleport",
             "hasRimmingtonTablet", "hasAnachroniaTablet", "hasTaverleyTabletModify", "hasMenaphosTabletModify",
-            "hasDramenStaff", "hasMasterFarmerHabitat", "hasScepterOfTheGods", "hasPontifexRing", "hasGhostspeakWorn",
+            "hasDramenStaff", "hasMasterFarmerHabitat", "hasScepterOfTheGods", "hasPontifexRing",
             "hasWickedHoodCharges", "hasWickedHoodAirCharges", "hasWickedHoodAstralCharges", "hasWickedHoodBloodCharges",
         )) {
             assertTrue(RequirementsBuilder.blockOf(key) != null, key)

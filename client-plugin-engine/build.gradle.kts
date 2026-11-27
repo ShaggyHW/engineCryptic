@@ -1,4 +1,10 @@
+import org.sqlite.SQLiteDataSource
 import java.time.Instant
+
+buildscript {
+    dependencies { classpath(libs.sqlite.jdbc) }
+}
+
 plugins {
     application
     // kotlin.jvm + java-library are applied to every module by the root `subprojects {}` block,
@@ -240,7 +246,29 @@ val engineBuildStamp by tasks.registering {
     }
 }
 
+// The var keys upstream's map gates its rows on, read from that map, so RequirementsBuilder values every one of them.
+val navpathRequirementKeys by tasks.registering {
+    val map = rootProject.layout.projectDirectory.file("navpath/worldReachableTiles.db")
+    val keys = layout.buildDirectory.file("generated/navpath/navpath/requirement-var-keys.txt")
+    inputs.file(map)
+    outputs.file(keys)
+    doLast {
+        val source = SQLiteDataSource().apply { url = "jdbc:sqlite:file:${map.asFile.absolutePath}?immutable=1" }
+        val found = source.connection.use { db ->
+            db.createStatement().executeQuery(
+                "SELECT DISTINCT key FROM teleports_requirements WHERE key LIKE 'varbit\\_%' ESCAPE '\\' OR key LIKE 'varp\\_%' ESCAPE '\\' ORDER BY key",
+            ).use { rows -> generateSequence { if (rows.next()) rows.getString(1).trim() else null }.toList() }
+        }
+        check(found.isNotEmpty()) { "no var requirement keys in ${map.asFile}" }
+        keys.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(found.joinToString("\n", postfix = "\n"))
+        }
+    }
+}
+
 tasks.processResources {
-    dependsOn(engineBuildStamp)
+    dependsOn(engineBuildStamp, navpathRequirementKeys)
     from(engineBuildStamp.map { it.outputs.files.singleFile })
+    from(layout.buildDirectory.dir("generated/navpath"))
 }

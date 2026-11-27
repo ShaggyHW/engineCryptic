@@ -22,8 +22,6 @@ import com.projectx.traversal.nodes.PouchItems
 import com.projectx.traversal.nodes.SkillcapePerks
 import com.projectx.traversal.nodes.SpiritTreeRerooterNode
 import com.projectx.webwalker.AbyssPassage
-import com.projectx.webwalker.WebLink
-import com.projectx.webwalker.WebLinks
 import org.projectx.core.game.combat.Ability
 import org.projectx.core.game.skill.Skill
 import world.gregs.voidps.cache.Cache
@@ -133,19 +131,14 @@ object RequirementsBuilder {
         "craftingLevel" to Skill.CRAFTING,
     )
 
-    // Skill keys only links.json's rows use.
-    private val LINK_SKILLS = mapOf(
-        "archaeologyLevel" to Skill.ARCHAEOLOGY,
-        "thievingLevel" to Skill.THIEVING,
-        "constructionLevel" to Skill.CONSTRUCTION,
-        "farmingLevel" to Skill.FARMING,
-        "slayerLevel" to Skill.SLAYER,
-        "summoningLevel" to Skill.SUMMONING,
-        "woodcuttingLevel" to Skill.WOODCUTTING,
-        "firemakingLevel" to Skill.FIREMAKING,
-        "rangedLevel" to Skill.RANGED,
-        "strengthLevel" to Skill.STRENGTH,
-    )
+    /** Generated at build time from upstream's map. */
+    private const val VAR_KEYS_RESOURCE = "/navpath/requirement-var-keys.txt"
+
+    private val upstreamVarKeys: List<String> by lazy {
+        RequirementsBuilder::class.java.getResourceAsStream(VAR_KEYS_RESOURCE)?.bufferedReader()?.use { it.readLines() }
+            ?.map(String::trim)?.filter(String::isNotEmpty)
+            ?: emptyList<String>().also { println("[RequirementsBuilder] $VAR_KEYS_RESOURCE is missing; var-gated rows will be treated as unmet") }
+    }
 
     private val POA_KEY = Regex("(?i)(Red|Purple|Green|Yellow)POA_\\w+")
 
@@ -219,15 +212,6 @@ object RequirementsBuilder {
         collect(out, base(), Carried.now())
         out.keys.removeAll(WALK_ONLY_DROPPED)
         return out.toList()
-    }
-
-    /** Every key this builder can value, whatever the gates, for checking links.json's own requirements. */
-    internal fun everyKey(): Map<String, Int> {
-        val carried = Carried.now()
-        val out = LinkedHashMap<String, Int>()
-        for (block in listOf(base(), spells(emptySet()), items(), lodestones(), ifSlots(), menuItems())) collect(out, block, carried)
-        out += passages(carried)
-        return out
     }
 
     /** The block [key] is collected in, or null when this builder never sends it. Keys match ignoring case, as navpath's do. */
@@ -366,12 +350,9 @@ object RequirementsBuilder {
         varbit("dino_base_camp_tutorial")
         varbit("wildy_events_rewards_enchantment_luck")
         varbit("ics_little_var")
-        // Ours, for rows links.json adds.
         add(Req("hasPontifexRing") { flag(it.anywhere("arch_pontifex_signet_ring", "quest_azzanadra_ring", "quest_senntisten_ring")) })
-        add(Req("hasGhostspeakWorn") { flag(it.wearing("amulet_of_ghostspeak", "amulet_of_ghostspeak_enchanted")) })
-        for ((key, skill) in LINK_SKILLS) add(Req(key) { getRealLevel(skill) })
         val taken = mapTo(HashSet()) { it.key.lowercase() } + gatedKeys()
-        for (key in linkVarKeys()) if (key.lowercase() !in taken && !POA_KEY.matches(key)) add(Req(key) { rawVar(key) })
+        for (key in upstreamVarKeys) if (key.lowercase() !in taken && !POA_KEY.matches(key)) add(Req(key) { rawVar(key) })
     }
 
     private fun spells(withoutSpells: Set<TeleportSpell>): List<Req> {
@@ -537,11 +518,8 @@ object RequirementsBuilder {
 
     private fun passages(carried: Carried): Map<String, Int> = runCatching { AbyssPassage.keys(carried.backpack, carried.worn) }.getOrDefault(emptyMap())
 
-    /** The keys of the gated blocks, so a links.json key never slips past a gate. */
+    /** The keys of the gated blocks, so a raw var key never slips past a gate. */
     private fun gatedKeys(): Set<String> = (items() + menuItems() + lodestones() + ifSlots()).mapTo(HashSet()) { it.key.lowercase() }
-
-    private fun linkVarKeys(): Set<String> = WebLinks.all.asSequence().flatMap(WebLink::requirements).map { it.key.trim() }
-        .filter { it.startsWith("varbit_") || it.startsWith("varp_") }.toSet()
 
     private fun rawVar(key: String): Int = when {
         key.startsWith("varbit_") -> key.removePrefix("varbit_").toIntOrNull()?.let(varps::getVarBit) ?: 0

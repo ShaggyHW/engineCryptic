@@ -12,11 +12,11 @@ traversal/nodes/      every node, RouteWalker and its pieces (RoutePicks, HopRul
                       AccelerationPlanner, MovePrediction, ArrivalWatch, HopFlight), TraversalSupport, Interactions,
                       LocalTargets, MenuGuard, PouchItems, SkillcapePerks, DramenStaff, TourStops, ClientAbilities
 traversal/pathing/    PathingTraversal, NavPathClient, NavConfig, NavOptions, ResultsParser, Step, RequirementsBuilder,
-                      RingPermissions, Reachability, MappingContext, mappers/ (one per step type)
+                      Reachability, MappingContext, mappers/ (one per step type)
 traversal/hops/       hop learning: HopModel, HopEdges, Evidence, HopStore, HopKnowledge, HopObservation, HopExplainer,
                       HopRecorder, HopExplorer, HopBlockers, ScheduleStore, HopLearning
 traversal/local/      LocalNav (the trusted view of the live map), GridSearch, ServerWalk
-webwalker/            the WebWalker façade, WalkGoal, WebWalkResult, WebPath, and links.json (WebLinks, MeasuredLinks)
+webwalker/            the WebWalker façade, WalkGoal, WebWalkResult, WebPath
 game/collision/       the live collision map the walk decisions read
 ```
 
@@ -178,9 +178,7 @@ planner: with navpath down a walk fails with "start the Project X launcher" and 
    account. Edges to avoid go as `exclude_macros`, and a Dive still cooling down as `dive.available_in_ms`.
 3. **Parse** (`ResultsParser` → `Step`s). An unknown, `teleport` or `global_teleport` step is logged and dropped; the
    rest of the route is walked.
-4. **Ring check.** A route through a fairy ring this account cannot use (`RingPermissions`, from our measured rings) is
-   asked for again without it.
-5. **Map** each step through its mapper into nodes, each node tagged with the edge (`NavMacro`) it came from. Planned
+4. **Map** each step through its mapper into nodes, each node tagged with the edge (`NavMacro`) it came from. Planned
    Surges and Dives become the walk they cover (`MoveMapper.abilityStepsAsMoves`) unless
    `clientPlacedAbilities = false`. No tail walk is added when the route already ends on the goal.
 
@@ -194,20 +192,18 @@ and stitch them; `TourStops` keeps walks and hops from running past a tour's sto
 
 **Requirements.** Base and spell keys always go; item keys with `useItems`. Lodestones, interface clicks, menu teleports
 and the Passage of the Abyss go only while nothing has attacked the player recently (attack memory: hitsplats and NPCs
-targeting the player nearby), since a hit cancels them. Every var and item is read by gameval name. Beyond navpath's
-own keys we send `hasPontifexRing`, `hasGhostspeakWorn` and the var keys the links.json rows are gated on.
+targeting the player nearby), since a hit cancels them. Every var and item is read by gameval name. Every `varbit_`/`varp_`
+key upstream's map gates a row on is sent too; the build reads that list from `navpath/worldReachableTiles.db`.
 
 **`WebWalker`** is a façade over this. `walk` routes, drives the traversal in a `TraversalDriver`, and routes again from
 where the player stands after `FAILED`, `TIMED_OUT` or `STALLED`, leaving the failed edge out. It watches fairy rings:
 one that sets the player down nowhere near its landing is set aside from every route for 30 minutes
-(`MeasuredLinks.setAside`): a ring the account has not unlocked lands in Zanaris, and dialling it again only loops. It
+(`PathingTraversal.setAside`): a ring the account has not unlocked lands in Zanaris, and dialling it again only loops. It
 puts back what a Dramen staff replaced. `findPath` / `findPathAsync` plan without walking and return the route as a
 `WebPath`. Its switches (`useItemTeleports`, `useMovementAbilities`, `useAccelerationPotion`) are views onto
 `WebWalker.options`.
 
-**links.json** (`WebLinks`) is merged into navpath's map at release. At runtime it supplies what the map lacks
-(`MeasuredLinks`): the answer to a prompt an object puts up (Kharid-et's "Choose destination."), the action a ring
-object takes, ring landings and ring permissions.
+Routes come only from navpath and its upstream map: the engine adds no links, doors or tiles of its own.
 
 ## The live collision map
 

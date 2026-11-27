@@ -15,12 +15,8 @@ Our changes on top of upstream:
   block (`{"kind", "id"}`), and take `exclude_macros` (a list of those) to route around them. Excluding
   requests skip the route and sub-path caches and build their own profile artifacts.
 
-`worldReachableTiles.db` is upstream's map at the commit in `UPSTREAM`, unchanged. CI merges our measured links
-from `links.json` into a copy of it (`.github/scripts/navpath_map.py`) and ships that as the launcher's map. To
-take a newer upstream map, replace the file and the commit together.
+`worldReachableTiles.db` is upstream's map at the commit in `UPSTREAM`. CI ships it unchanged as the launcher's
+map; nothing is added to it. To take a newer upstream map, replace the file and the commit together.
 
-Two more things the launcher's copy needs, which the hosted planner used to get from the server:
-- `doors/`: the game's doors and gates that upstream lacks, and the rooms behind them, written from the game cache
-  by the engine's `:tools:navDoors`. CI adds them with `.github/scripts/navpath_doors.py` before merging our links.
-- `dangerAreas.txt`: upstream's danger areas. The service builds it in and uses it when no file sits beside the
-  graph, which is how the launcher runs it.
+`dangerAreas.txt` is upstream's danger areas. The service builds it in and uses it when no file sits beside the
+graph, which is how the launcher runs it.
